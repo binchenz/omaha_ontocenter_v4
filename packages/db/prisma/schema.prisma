@@ -1,0 +1,306 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users              User[]
+  roles              Role[]
+  objectTypes        ObjectType[]
+  objectRelationships ObjectRelationship[]
+  connectors         Connector[]
+  objectMappings     ObjectMapping[]
+  objectInstances    ObjectInstance[]
+  syncJobs           SyncJob[]
+  conversations      Conversation[]
+  skillDefinitions   SkillDefinition[]
+  auditLogs          AuditLog[]
+  actionDefinitions  ActionDefinition[]
+  actionPreviews     ActionPreview[]
+  actionRuns         ActionRun[]
+
+  @@map("tenants")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String
+  permissions Json     @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  users  User[]
+
+  @@unique([tenantId, name])
+  @@map("roles")
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  email        String
+  name         String
+  passwordHash String   @map("password_hash")
+  roleId       String   @map("role_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  role          Role           @relation(fields: [roleId], references: [id])
+  conversations Conversation[]
+  auditLogs     AuditLog[]
+  actionPreviews ActionPreview[]
+  actionRuns    ActionRun[]
+
+  @@unique([tenantId, email])
+  @@map("users")
+}
+
+model ObjectType {
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  name              String
+  label             String
+  properties        Json     @default("[]")
+  derivedProperties Json     @default("[]") @map("derived_properties")
+  version           Int      @default(1)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  tenant          Tenant              @relation(fields: [tenantId], references: [id])
+  sourceRelations ObjectRelationship[] @relation("SourceType")
+  targetRelations ObjectRelationship[] @relation("TargetType")
+  mappings        ObjectMapping[]
+
+  @@unique([tenantId, name])
+  @@map("object_types")
+}
+
+model ObjectRelationship {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  sourceTypeId String   @map("source_type_id") @db.Uuid
+  targetTypeId String   @map("target_type_id") @db.Uuid
+  name         String
+  cardinality  String
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  sourceType ObjectType @relation("SourceType", fields: [sourceTypeId], references: [id])
+  targetType ObjectType @relation("TargetType", fields: [targetTypeId], references: [id])
+
+  @@unique([tenantId, sourceTypeId, name])
+  @@map("object_relationships")
+}
+
+model Connector {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  name      String
+  type      String
+  config    Json     @default("{}")
+  status    String   @default("inactive")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id])
+  mappings ObjectMapping[]
+  syncJobs SyncJob[]
+
+  @@unique([tenantId, name])
+  @@map("connectors")
+}
+
+model ObjectMapping {
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantId             String   @map("tenant_id") @db.Uuid
+  objectTypeId         String   @map("object_type_id") @db.Uuid
+  connectorId          String   @map("connector_id") @db.Uuid
+  tableName            String   @map("table_name")
+  propertyMappings     Json     @default("{}") @map("property_mappings")
+  relationshipMappings Json     @default("{}") @map("relationship_mappings")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  objectType ObjectType @relation(fields: [objectTypeId], references: [id])
+  connector  Connector  @relation(fields: [connectorId], references: [id])
+
+  @@unique([tenantId, objectTypeId, connectorId])
+  @@map("object_mappings")
+}
+
+model ObjectInstance {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  objectType   String   @map("object_type")
+  externalId   String   @map("external_id")
+  label        String?
+  properties   Json     @default("{}")
+  relationships Json    @default("{}")
+  sourceRef    Json?    @map("source_ref")
+  searchText   String?  @map("search_text")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, objectType, externalId])
+  @@index([tenantId, objectType])
+  @@map("object_instances")
+}
+
+model SyncJob {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  connectorId      String    @map("connector_id") @db.Uuid
+  status           String    @default("pending")
+  startedAt        DateTime? @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+  recordsProcessed Int       @default(0) @map("records_processed")
+  recordsFailed    Int       @default(0) @map("records_failed")
+  errorLog         Json?     @map("error_log")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  connector Connector @relation(fields: [connectorId], references: [id])
+
+  @@map("sync_jobs")
+}
+
+model Conversation {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  title     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant             @relation(fields: [tenantId], references: [id])
+  user   User               @relation(fields: [userId], references: [id])
+  turns  ConversationTurn[]
+
+  @@map("conversations")
+}
+
+model ConversationTurn {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  role           String
+  content        String?
+  toolCalls      Json?    @map("tool_calls")
+  toolResults    Json?    @map("tool_results")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@map("conversation_turns")
+}
+
+model SkillDefinition {
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String?  @map("tenant_id") @db.Uuid
+  name              String
+  description       String?
+  triggerConditions Json?    @map("trigger_conditions")
+  content           String
+  isAlwaysOn        Boolean  @default(false) @map("is_always_on")
+  priority          Int      @default(0)
+  enabled           Boolean  @default(true)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+
+  @@map("skill_definitions")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  actorId     String   @map("actor_id") @db.Uuid
+  actorType   String   @map("actor_type")
+  operation   String
+  objectType  String?  @map("object_type")
+  queryPlan   Json?    @map("query_plan")
+  resultCount Int?     @map("result_count")
+  source      String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  actor  User   @relation(fields: [actorId], references: [id])
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+model ActionDefinition {
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantId             String   @map("tenant_id") @db.Uuid
+  name                 String
+  label                String
+  objectType           String   @map("object_type")
+  inputSchema          Json     @default("{}") @map("input_schema")
+  preconditions        Json     @default("[]")
+  permission           String
+  requiresConfirmation Boolean  @default(true) @map("requires_confirmation")
+  riskLevel            String   @default("low") @map("risk_level")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id])
+  previews ActionPreview[]
+
+  @@unique([tenantId, name])
+  @@map("action_definitions")
+}
+
+model ActionPreview {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  actionDefId   String    @map("action_def_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  targetIds     String[]  @map("target_ids") @db.Uuid
+  inputParams   Json      @default("{}") @map("input_params")
+  previewResult Json      @default("{}") @map("preview_result")
+  status        String    @default("pending")
+  expiresAt     DateTime  @map("expires_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id])
+  actionDef ActionDefinition @relation(fields: [actionDefId], references: [id])
+  user      User             @relation(fields: [userId], references: [id])
+  runs      ActionRun[]
+
+  @@map("action_previews")
+}
+
+model ActionRun {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  previewId   String    @map("preview_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  status      String    @default("pending")
+  result      Json?
+  error       Json?
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  tenant  Tenant        @relation(fields: [tenantId], references: [id])
+  preview ActionPreview @relation(fields: [previewId], references: [id])
+  user    User          @relation(fields: [userId], references: [id])
+
+  @@map("action_runs")
+}
