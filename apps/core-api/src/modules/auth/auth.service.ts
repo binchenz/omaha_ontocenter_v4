@@ -13,16 +13,20 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto): Promise<LoginResponse> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { slug: dto.tenantSlug },
-    });
-    if (!tenant) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    const user = await this.prisma.user.findUnique({
-      where: { tenantId_email: { tenantId: tenant.id, email: dto.email } },
-      include: { role: true },
+    const user = await this.prisma.user.findFirst({
+      where: {
+        email: dto.email,
+        tenant: { slug: dto.tenantSlug },
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        tenantId: true,
+        roleId: true,
+        passwordHash: true,
+        role: { select: { name: true } },
+      },
     });
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');

@@ -4,13 +4,12 @@ import { PrismaService } from '@omaha/db';
 
 describe('TenantService', () => {
   let service: TenantService;
-  let prisma: { tenant: { findUnique: jest.Mock; findMany: jest.Mock; update: jest.Mock } };
+  let prisma: { tenant: { findUnique: jest.Mock; update: jest.Mock } };
 
   beforeEach(async () => {
     prisma = {
       tenant: {
         findUnique: jest.fn(),
-        findMany: jest.fn(),
         update: jest.fn(),
       },
     };

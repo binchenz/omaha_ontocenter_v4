@@ -1,9 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import * as request from 'supertest';
+import request from 'supertest';
 import { AppModule } from '../src/app.module';
-
-const http = (app: INestApplication) => request.default(app.getHttpServer() as any);
 
 describe('Auth (e2e)', () => {
   let app: INestApplication;
@@ -23,14 +21,14 @@ describe('Auth (e2e)', () => {
   });
 
   it('POST /auth/login — should return 401 for invalid credentials', () => {
-    return http(app)
+    return request(app.getHttpServer())
       .post('/auth/login')
       .send({ email: 'bad@bad.com', password: 'wrongpass', tenantSlug: 'demo' })
       .expect(401);
   });
 
   it('POST /auth/login — should return token for valid credentials', async () => {
-    const res = await http(app)
+    const res = await request(app.getHttpServer())
       .post('/auth/login')
       .send({ email: 'admin@demo.com', password: 'admin123', tenantSlug: 'demo' })
       .expect(201);
@@ -40,11 +38,11 @@ describe('Auth (e2e)', () => {
   });
 
   it('GET /auth/me — should return current user with valid token', async () => {
-    const loginRes = await http(app)
+    const loginRes = await request(app.getHttpServer())
       .post('/auth/login')
       .send({ email: 'admin@demo.com', password: 'admin123', tenantSlug: 'demo' });
 
-    const res = await http(app)
+    const res = await request(app.getHttpServer())
       .get('/auth/me')
       .set('Authorization', `Bearer ${loginRes.body.accessToken}`)
       .expect(200);
@@ -54,7 +52,7 @@ describe('Auth (e2e)', () => {
   });
 
   it('GET /auth/me — should return 401 without token', () => {
-    return http(app)
+    return request(app.getHttpServer())
       .get('/auth/me')
       .expect(401);
   });

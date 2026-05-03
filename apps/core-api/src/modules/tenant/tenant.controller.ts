@@ -1,4 +1,5 @@
 import { Controller, Get, Put, Body, UseGuards } from '@nestjs/common';
+import { Prisma } from '@omaha/db';
 import { TenantService } from './tenant.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -16,7 +17,7 @@ export class TenantController {
   @Put('settings')
   async updateSettings(
     @CurrentUser('tenantId') tenantId: string,
-    @Body() settings: Record<string, unknown>,
+    @Body() settings: Prisma.InputJsonValue,
   ) {
     return this.tenantService.updateSettings(tenantId, settings);
   }

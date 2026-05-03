@@ -7,13 +7,12 @@ import * as bcrypt from 'bcrypt';
 
 describe('AuthService', () => {
   let service: AuthService;
-  let prisma: { tenant: { findUnique: jest.Mock }; user: { findUnique: jest.Mock } };
+  let prisma: { user: { findFirst: jest.Mock } };
   let jwtService: { sign: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
-      tenant: { findUnique: jest.fn() },
-      user: { findUnique: jest.fn() },
+      user: { findFirst: jest.fn() },
     };
     jwtService = { sign: jest.fn() };
 
@@ -29,27 +28,18 @@ describe('AuthService', () => {
   });
 
   describe('login', () => {
-    it('should throw UnauthorizedException when tenant not found', async () => {
-      prisma.tenant.findUnique.mockResolvedValue(null);
+    it('should throw UnauthorizedException when user not found', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
       await expect(
         service.login({ email: 'a@b.com', password: 'pass123', tenantSlug: 'bad' }),
       ).rejects.toThrow(UnauthorizedException);
     });
 
-    it('should throw UnauthorizedException when user not found', async () => {
-      prisma.tenant.findUnique.mockResolvedValue({ id: 't1' });
-      prisma.user.findUnique.mockResolvedValue(null);
-      await expect(
-        service.login({ email: 'a@b.com', password: 'pass123', tenantSlug: 'demo' }),
-      ).rejects.toThrow(UnauthorizedException);
-    });
-
     it('should throw UnauthorizedException when password is wrong', async () => {
-      prisma.tenant.findUnique.mockResolvedValue({ id: 't1' });
-      prisma.user.findUnique.mockResolvedValue({
+      prisma.user.findFirst.mockResolvedValue({
         id: 'u1', email: 'a@b.com', name: 'Test', tenantId: 't1', roleId: 'r1',
         passwordHash: await bcrypt.hash('correct', 10),
-        role: { name: 'admin', permissions: [] },
+        role: { name: 'admin' },
       });
       await expect(
         service.login({ email: 'a@b.com', password: 'wrong', tenantSlug: 'demo' }),
@@ -58,11 +48,10 @@ describe('AuthService', () => {
 
     it('should return token and user on valid credentials', async () => {
       const hash = await bcrypt.hash('pass123', 10);
-      prisma.tenant.findUnique.mockResolvedValue({ id: 't1' });
-      prisma.user.findUnique.mockResolvedValue({
+      prisma.user.findFirst.mockResolvedValue({
         id: 'u1', email: 'a@b.com', name: 'Test', tenantId: 't1', roleId: 'r1',
         passwordHash: hash,
-        role: { name: 'admin', permissions: ['*'] },
+        role: { name: 'admin' },
       });
       jwtService.sign.mockReturnValue('jwt-token');
 

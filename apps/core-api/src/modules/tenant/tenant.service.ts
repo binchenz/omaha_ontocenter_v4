@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService, Tenant } from '@omaha/db';
+import { Prisma, PrismaService, Tenant } from '@omaha/db';
 
 @Injectable()
 export class TenantService {
@@ -9,10 +9,10 @@ export class TenantService {
     return this.prisma.tenant.findUnique({ where: { id } });
   }
 
-  async updateSettings(id: string, settings: Record<string, unknown>): Promise<Tenant> {
+  async updateSettings(id: string, settings: Prisma.InputJsonValue): Promise<Tenant> {
     return this.prisma.tenant.update({
       where: { id },
-      data: { settings: settings as object },
+      data: { settings },
     });
   }
 }
