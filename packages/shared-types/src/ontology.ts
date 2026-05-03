@@ -45,6 +45,6 @@ export interface RelationshipResponse {
   sourceTypeId: string;
   targetTypeId: string;
   name: string;
-  cardinality: string;
+  cardinality: Cardinality;
   createdAt: string;
 }

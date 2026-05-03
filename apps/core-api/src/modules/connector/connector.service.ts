@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Prisma, PrismaService } from '@omaha/db';
 import { CreateConnectorRequest, UpdateConnectorRequest } from '@omaha/shared-types';
+import { assertTenantOwnership } from '../../common/helpers/assert-tenant-ownership';
 
 @Injectable()
 export class ConnectorService {
@@ -15,7 +16,7 @@ export class ConnectorService {
 
   async getConnector(tenantId: string, id: string) {
     const conn = await this.prisma.connector.findUnique({ where: { id } });
-    if (!conn || conn.tenantId !== tenantId) throw new NotFoundException('Connector not found');
+    assertTenantOwnership(conn, tenantId, 'Connector');
     return conn;
   }
 

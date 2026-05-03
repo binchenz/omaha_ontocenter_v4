@@ -3,7 +3,6 @@ import { MappingService } from './mapping.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CreateMappingDto } from './dto/create-mapping.dto';
-import { CreateMappingRequest } from '@omaha/shared-types';
 
 @Controller('mappings')
 @UseGuards(JwtAuthGuard)
@@ -22,7 +21,7 @@ export class MappingController {
 
   @Post()
   create(@CurrentUser('tenantId') tenantId: string, @Body() dto: CreateMappingDto): Promise<unknown> {
-    return this.mappingService.createMapping(tenantId, dto as unknown as CreateMappingRequest);
+    return this.mappingService.createMapping(tenantId, dto);
   }
 
   @Delete(':id')

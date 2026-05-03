@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsIn } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsBoolean } from 'class-validator';
 
 export class PropertyDefinitionDto {
   @IsString()
@@ -12,5 +12,6 @@ export class PropertyDefinitionDto {
   type!: 'string' | 'number' | 'boolean' | 'date' | 'json';
 
   @IsOptional()
+  @IsBoolean()
   required?: boolean;
 }

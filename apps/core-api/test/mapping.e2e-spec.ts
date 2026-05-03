@@ -1,25 +1,14 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { AppModule } from '../src/app.module';
+import { createTestApp, loginAsAdmin } from './test-helpers';
 
 describe('Mapping (e2e)', () => {
   let app: INestApplication;
   let token: string;
 
   beforeAll(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-    await app.init();
-
-    const loginRes = await request(app.getHttpServer())
-      .post('/auth/login')
-      .send({ email: 'admin@demo.com', password: 'admin123', tenantSlug: 'demo' });
-    token = loginRes.body.accessToken;
+    app = await createTestApp();
+    token = await loginAsAdmin(app);
   });
 
   afterAll(async () => {

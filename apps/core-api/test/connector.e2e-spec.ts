@@ -1,25 +1,14 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { AppModule } from '../src/app.module';
+import { createTestApp, loginAsAdmin } from './test-helpers';
 
 describe('Connector (e2e)', () => {
   let app: INestApplication;
   let token: string;
 
   beforeAll(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-    await app.init();
-
-    const loginRes = await request(app.getHttpServer())
-      .post('/auth/login')
-      .send({ email: 'admin@demo.com', password: 'admin123', tenantSlug: 'demo' });
-    token = loginRes.body.accessToken;
+    app = await createTestApp();
+    token = await loginAsAdmin(app);
   });
 
   afterAll(async () => {
@@ -50,7 +39,6 @@ describe('Connector (e2e)', () => {
     expect(res.body.name).toBe('test-mysql');
     expect(res.body.status).toBe('inactive');
 
-    // Cleanup
     await request(app.getHttpServer())
       .delete(`/connectors/${res.body.id}`)
       .set('Authorization', `Bearer ${token}`)

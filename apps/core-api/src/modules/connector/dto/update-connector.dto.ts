@@ -1,4 +1,5 @@
 import { IsString, IsObject, IsOptional, MinLength, IsIn } from 'class-validator';
+import { ConnectorStatus } from '@omaha/shared-types';
 
 export class UpdateConnectorDto {
   @IsOptional()
@@ -12,5 +13,5 @@ export class UpdateConnectorDto {
 
   @IsOptional()
   @IsIn(['active', 'inactive', 'error'])
-  status?: string;
+  status?: ConnectorStatus;
 }

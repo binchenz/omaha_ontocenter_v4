@@ -1,6 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Prisma, PrismaService } from '@omaha/db';
-import { CreateMappingRequest } from '@omaha/shared-types';
+import { assertTenantOwnership } from '../../common/helpers/assert-tenant-ownership';
+
+interface CreateMappingInput {
+  objectTypeId: string;
+  connectorId: string;
+  tableName: string;
+  propertyMappings: Record<string, unknown>;
+  relationshipMappings?: Record<string, unknown>;
+}
 
 @Injectable()
 export class MappingService {
@@ -18,11 +26,11 @@ export class MappingService {
       where: { id },
       include: { objectType: true, connector: true },
     });
-    if (!mapping || mapping.tenantId !== tenantId) throw new NotFoundException('Mapping not found');
+    assertTenantOwnership(mapping, tenantId, 'Mapping');
     return mapping;
   }
 
-  async createMapping(tenantId: string, dto: CreateMappingRequest) {
+  async createMapping(tenantId: string, dto: CreateMappingInput) {
     return this.prisma.objectMapping.create({
       data: {
         tenantId,
