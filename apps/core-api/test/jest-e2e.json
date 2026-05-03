@@ -6,6 +6,7 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
+  "setupFiles": ["<rootDir>/jest-e2e-setup.ts"],
   "moduleNameMapper": {
     "^@omaha/db$": "<rootDir>/../../../packages/db/src",
     "^@omaha/shared-types$": "<rootDir>/../../../packages/shared-types/src"

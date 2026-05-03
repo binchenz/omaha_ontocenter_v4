@@ -1,0 +1,9 @@
+{
+  "name": "@omaha/agent-worker",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "@omaha/db": "workspace:*",
+    "@omaha/shared-types": "workspace:*"
+  }
+}
