@@ -1,20 +1,6 @@
-import { IsString, IsArray, IsOptional, MinLength, ValidateNested, IsIn } from 'class-validator';
+import { IsString, IsArray, IsOptional, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-
-class PropertyDefinitionDto {
-  @IsString()
-  name!: string;
-
-  @IsString()
-  label!: string;
-
-  @IsString()
-  @IsIn(['string', 'number', 'boolean', 'date', 'json'])
-  type!: 'string' | 'number' | 'boolean' | 'date' | 'json';
-
-  @IsOptional()
-  required?: boolean;
-}
+import { PropertyDefinitionDto } from './property-definition.dto';
 
 export class UpdateObjectTypeDto {
   @IsOptional()

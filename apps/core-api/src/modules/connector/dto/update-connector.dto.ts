@@ -1,4 +1,4 @@
-import { IsString, IsObject, IsOptional, MinLength } from 'class-validator';
+import { IsString, IsObject, IsOptional, MinLength, IsIn } from 'class-validator';
 
 export class UpdateConnectorDto {
   @IsOptional()
@@ -11,6 +11,6 @@ export class UpdateConnectorDto {
   config?: Record<string, unknown>;
 
   @IsOptional()
-  @IsString()
+  @IsIn(['active', 'inactive', 'error'])
   status?: string;
 }

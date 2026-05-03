@@ -71,6 +71,8 @@ export class OntologyService {
   }
 
   async deleteRelationship(tenantId: string, id: string) {
+    const rel = await this.prisma.objectRelationship.findUnique({ where: { id } });
+    if (!rel || rel.tenantId !== tenantId) throw new NotFoundException('Relationship not found');
     return this.prisma.objectRelationship.delete({ where: { id } });
   }
 }

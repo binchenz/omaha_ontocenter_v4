@@ -15,6 +15,7 @@ describe('OntologyService', () => {
     };
     objectRelationship: {
       findMany: jest.Mock;
+      findUnique: jest.Mock;
       create: jest.Mock;
       delete: jest.Mock;
     };
@@ -31,6 +32,7 @@ describe('OntologyService', () => {
       },
       objectRelationship: {
         findMany: jest.fn(),
+        findUnique: jest.fn(),
         create: jest.fn(),
         delete: jest.fn(),
       },
@@ -124,9 +126,16 @@ describe('OntologyService', () => {
 
   describe('deleteRelationship', () => {
     it('should delete relationship', async () => {
-      prisma.objectRelationship.delete.mockResolvedValue({});
+      const existing = { id: 'r1', tenantId: 't1' };
+      prisma.objectRelationship.findUnique.mockResolvedValue(existing);
+      prisma.objectRelationship.delete.mockResolvedValue(existing);
       await service.deleteRelationship('t1', 'r1');
       expect(prisma.objectRelationship.delete).toHaveBeenCalledWith({ where: { id: 'r1' } });
+    });
+
+    it('should throw NotFoundException for cross-tenant relationship', async () => {
+      prisma.objectRelationship.findUnique.mockResolvedValue({ id: 'r1', tenantId: 'other-tenant' });
+      await expect(service.deleteRelationship('t1', 'r1')).rejects.toThrow(NotFoundException);
     });
   });
 });
