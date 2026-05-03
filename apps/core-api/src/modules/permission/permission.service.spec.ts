@@ -44,22 +44,46 @@ describe('PermissionService', () => {
     });
   });
 
+  describe('getAllowedFields', () => {
+    it('should return null for wildcard permission', () => {
+      expect(service.getAllowedFields(['*'], 'object', 'read')).toBeNull();
+    });
+
+    it('should return null when no field restrictions', () => {
+      expect(service.getAllowedFields(['object.read'], 'object', 'read')).toBeNull();
+    });
+
+    it('should return field set when restrictions exist', () => {
+      const result = service.getAllowedFields(['object.read:name,phone'], 'object', 'read');
+      expect(result).toEqual(new Set(['name', 'phone']));
+    });
+
+    it('should merge fields from multiple permissions', () => {
+      const result = service.getAllowedFields(['object.read:name', 'object.read:phone'], 'object', 'read');
+      expect(result).toEqual(new Set(['name', 'phone']));
+    });
+
+    it('should ignore fields from non-matching resource', () => {
+      const result = service.getAllowedFields(['user.write:name', 'object.read:phone'], 'object', 'read');
+      expect(result).toEqual(new Set(['phone']));
+    });
+
+    it('should ignore fields from non-matching action', () => {
+      const result = service.getAllowedFields(['object.write:name', 'object.read:phone'], 'object', 'read');
+      expect(result).toEqual(new Set(['phone']));
+    });
+  });
+
   describe('filterFields', () => {
-    it('should return all properties when user has wildcard', () => {
+    it('should return all properties when allowedFields is null', () => {
       const props = { name: 'Test', phone: '123', secret: 'hidden' };
-      const result = service.filterFields(props, ['*']);
+      const result = service.filterFields(props, null);
       expect(result).toEqual(props);
     });
 
-    it('should return all properties when no field restrictions', () => {
-      const props = { name: 'Test', phone: '123' };
-      const result = service.filterFields(props, ['object.read']);
-      expect(result).toEqual(props);
-    });
-
-    it('should filter fields when restrictions exist', () => {
+    it('should filter fields when allowedFields is provided', () => {
       const props = { name: 'Test', phone: '123', secret: 'hidden' };
-      const result = service.filterFields(props, ['object.read:name,phone']);
+      const result = service.filterFields(props, new Set(['name', 'phone']));
       expect(result).toEqual({ name: 'Test', phone: '123' });
     });
   });

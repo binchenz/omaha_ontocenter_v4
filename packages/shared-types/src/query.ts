@@ -1,3 +1,5 @@
+import { PaginatedRequest } from './common';
+
 export type FilterOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'in';
 
 export interface QueryFilter {
@@ -11,14 +13,11 @@ export interface QuerySort {
   direction: 'asc' | 'desc';
 }
 
-export interface QueryObjectsRequest {
+export interface QueryObjectsRequest extends PaginatedRequest {
   objectType: string;
   filters?: QueryFilter[];
   search?: string;
   sort?: QuerySort;
-  page?: number;
-  pageSize?: number;
-  select?: string[];
 }
 
 export interface QueryObjectsResponse {

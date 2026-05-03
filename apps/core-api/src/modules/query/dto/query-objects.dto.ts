@@ -51,9 +51,4 @@ export class QueryObjectsDto {
   @Min(1)
   @Max(100)
   pageSize?: number;
-
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  select?: string[];
 }

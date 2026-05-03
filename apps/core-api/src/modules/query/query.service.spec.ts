@@ -15,6 +15,7 @@ describe('QueryService', () => {
   let permissionService: {
     canAccess: jest.Mock;
     assertCanAccess: jest.Mock;
+    getAllowedFields: jest.Mock;
     filterFields: jest.Mock;
   };
 
@@ -28,7 +29,15 @@ describe('QueryService', () => {
     permissionService = {
       canAccess: jest.fn().mockReturnValue(true),
       assertCanAccess: jest.fn(),
-      filterFields: jest.fn().mockImplementation((props) => props),
+      getAllowedFields: jest.fn().mockReturnValue(null),
+      filterFields: jest.fn().mockImplementation((props: Record<string, unknown>, allowedFields: Set<string> | null) => {
+        if (!allowedFields) return props;
+        const filtered: Record<string, unknown> = {};
+        for (const field of allowedFields) {
+          if (field in props) filtered[field] = props[field];
+        }
+        return filtered;
+      }),
     };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -137,14 +146,14 @@ describe('QueryService', () => {
       ];
       prisma.objectInstance.findMany.mockResolvedValue(instances);
       prisma.objectInstance.count.mockResolvedValue(1);
-      permissionService.filterFields.mockReturnValue({ name: 'Test' });
+      permissionService.getAllowedFields.mockReturnValue(new Set(['name']));
 
       const result = await service.queryObjects('t1', ['object.read:name'], {
         objectType: 'customer',
       });
 
       expect(result.data[0].properties).toEqual({ name: 'Test' });
-      expect(permissionService.filterFields).toHaveBeenCalled();
+      expect(permissionService.getAllowedFields).toHaveBeenCalledWith(['object.read:name'], 'object', 'read');
     });
 
     it('should support sorting by property', async () => {

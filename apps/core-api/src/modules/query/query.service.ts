@@ -34,14 +34,16 @@ export class QueryService {
       this.prisma.objectInstance.count({ where }),
     ]);
 
+    const allowedFields = this.permissionService.getAllowedFields(permissions, 'object', 'read');
+
     const data = instances.map((inst) => ({
       id: inst.id,
       objectType: inst.objectType,
       externalId: inst.externalId,
       label: inst.label,
       properties: this.permissionService.filterFields(
-        inst.properties as Record<string, unknown>,
-        permissions,
+        (inst.properties ?? {}) as Record<string, unknown>,
+        allowedFields,
       ),
       relationships: inst.relationships as Record<string, unknown>,
       createdAt: inst.createdAt.toISOString(),
@@ -98,7 +100,8 @@ export class QueryService {
       case 'in':
         return { path: [field], array_contains: value };
       default:
-        return { path: [field], equals: value };
+        const _exhaustive: never = operator;
+        throw new Error(`Unsupported operator: ${_exhaustive}`);
     }
   }
 

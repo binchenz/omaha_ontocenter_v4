@@ -18,29 +18,37 @@ export class PermissionService {
     }
   }
 
+  getAllowedFields(
+    permissions: string[],
+    resource: string,
+    action: string,
+  ): Set<string> | null {
+    const fields = new Set<string>();
+    for (const p of permissions) {
+      if (p === '*') return null;
+      const base = p.split(':')[0];
+      const [res, act] = base.split('.');
+      if (res !== resource) continue;
+      if (act !== '*' && act !== action) continue;
+      const colonIdx = p.indexOf(':');
+      if (colonIdx !== -1) {
+        for (const field of p.substring(colonIdx + 1).split(',')) {
+          fields.add(field.trim());
+        }
+      }
+    }
+    return fields.size > 0 ? fields : null;
+  }
+
   filterFields(
     properties: Record<string, unknown>,
-    permissions: string[],
+    allowedFields: Set<string> | null,
   ): Record<string, unknown> {
-    if (permissions.includes('*')) return properties;
-
-    const allowedFields = this.extractAllowedFields(permissions);
     if (!allowedFields) return properties;
-
     const filtered: Record<string, unknown> = {};
     for (const field of allowedFields) {
       if (field in properties) filtered[field] = properties[field];
     }
     return filtered;
-  }
-
-  private extractAllowedFields(permissions: string[]): string[] | null {
-    for (const p of permissions) {
-      const colonIdx = p.indexOf(':');
-      if (colonIdx !== -1) {
-        return p.substring(colonIdx + 1).split(',');
-      }
-    }
-    return null;
   }
 }
