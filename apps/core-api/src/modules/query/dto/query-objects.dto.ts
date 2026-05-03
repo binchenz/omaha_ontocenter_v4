@@ -1,0 +1,58 @@
+import { IsString, IsOptional, IsArray, IsInt, Min, Max, ValidateNested, IsIn, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { FilterOperator } from '@omaha/shared-types';
+
+class QueryFilterDto {
+  @IsString()
+  field!: string;
+
+  @IsIn(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in'])
+  operator!: FilterOperator;
+
+  value!: unknown;
+}
+
+class QuerySortDto {
+  @IsString()
+  field!: string;
+
+  @IsIn(['asc', 'desc'])
+  direction!: 'asc' | 'desc';
+}
+
+export class QueryObjectsDto {
+  @IsString()
+  @MinLength(1)
+  objectType!: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => QueryFilterDto)
+  filters?: QueryFilterDto[];
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => QuerySortDto)
+  sort?: QuerySortDto;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  pageSize?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  select?: string[];
+}
