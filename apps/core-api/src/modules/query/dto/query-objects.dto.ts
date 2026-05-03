@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsArray, IsInt, Min, Max, ValidateNested, IsIn, MinLength } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsInt, Min, Max, ValidateNested, IsIn, MinLength, Allow } from 'class-validator';
 import { Type } from 'class-transformer';
 import { FilterOperator } from '@omaha/shared-types';
 
@@ -9,6 +9,7 @@ class QueryFilterDto {
   @IsIn(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in'])
   operator!: FilterOperator;
 
+  @Allow()
   value!: unknown;
 }
 

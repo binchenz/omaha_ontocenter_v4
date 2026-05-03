@@ -20,3 +20,10 @@ export async function loginAsAdmin(app: INestApplication): Promise<string> {
     .send({ email: 'admin@demo.com', password: 'admin123', tenantSlug: 'demo' });
   return res.body.accessToken;
 }
+
+export async function loginAsOperator(app: INestApplication): Promise<string> {
+  const res = await request(app.getHttpServer())
+    .post('/auth/login')
+    .send({ email: 'ops@demo.com', password: 'admin123', tenantSlug: 'demo' });
+  return res.body.accessToken;
+}
