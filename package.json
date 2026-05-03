@@ -1,0 +1,18 @@
+{
+  "name": "omaha-ontocenter",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "db:generate": "pnpm --filter @omaha/db prisma generate",
+    "db:migrate": "pnpm --filter @omaha/db prisma migrate dev",
+    "db:push": "pnpm --filter @omaha/db prisma db push",
+    "db:seed": "pnpm --filter @omaha/db seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.4.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
