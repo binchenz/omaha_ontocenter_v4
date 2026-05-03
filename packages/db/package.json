@@ -2,9 +2,10 @@
   "name": "@omaha/db",
   "version": "0.0.1",
   "private": true,
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
+    "build": "tsc",
     "generate": "prisma generate",
     "migrate": "prisma migrate dev",
     "push": "prisma db push",
@@ -17,6 +18,7 @@
   },
   "devDependencies": {
     "prisma": "^6.3.0",
-    "tsx": "^4.19.0"
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
   }
 }
