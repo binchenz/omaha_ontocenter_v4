@@ -41,4 +41,33 @@ describe('DSL compiler', () => {
       /missing parameter.*cutoffTime/i,
     );
   });
+
+  it('compiles count <rel> as a correlated COUNT(*) subquery', () => {
+    const ast = parse('count payments >= 1');
+    const out = compile(ast, {
+      numericFields: new Set(),
+      relations: { payments: { foreignKey: 'orderId' } },
+    });
+    expect(out.sql).toContain('COUNT(*)');
+    expect(out.sql).toContain("relationships->>'orderId'");
+    expect(out.params).toEqual([1]);
+  });
+
+  it('compiles sum <rel>.<field> as a coalesced SUM subquery', () => {
+    const ast = parse('sum payments.amount >= totalAmount');
+    const out = compile(ast, {
+      numericFields: new Set(['totalAmount', 'amount']),
+      relations: { payments: { foreignKey: 'orderId' } },
+    });
+    expect(out.sql).toContain('COALESCE((SELECT SUM');
+    expect(out.sql).toContain("(child.properties->>'amount')::numeric");
+    expect(out.sql).toContain("(properties->>'totalAmount')::numeric");
+  });
+
+  it('compiles arithmetic + comparison correctly', () => {
+    const ast = parse('totalAmount + 10 > 100');
+    const out = compile(ast, { numericFields: new Set(['totalAmount']) });
+    expect(out.sql).toBe("(((properties->>'totalAmount')::numeric + $1) > $2)");
+    expect(out.params).toEqual([10, 100]);
+  });
 });

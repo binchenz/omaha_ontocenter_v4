@@ -92,4 +92,44 @@ describe('DSL parser', () => {
       right: { kind: 'param', name: 'cutoffTime' },
     });
   });
+
+  it('parses count <rel>', () => {
+    const ast = parse('count payments >= 1');
+    expect(ast).toEqual({
+      kind: 'compare',
+      op: '>=',
+      left: { kind: 'count', relation: 'payments' },
+      right: { kind: 'number', value: 1 },
+    });
+  });
+
+  it('parses sum <rel>.<field>', () => {
+    const ast = parse('sum payments.amount >= totalAmount');
+    expect(ast).toEqual({
+      kind: 'compare',
+      op: '>=',
+      left: { kind: 'aggregate', op: 'sum', relation: 'payments', field: 'amount' },
+      right: { kind: 'ident', name: 'totalAmount' },
+    });
+  });
+
+  it('parses arithmetic with correct precedence: a + b * c', () => {
+    const ast = parse('totalAmount + bonus * 2 > 100');
+    expect(ast).toEqual({
+      kind: 'compare',
+      op: '>',
+      left: {
+        kind: 'binop',
+        op: '+',
+        left: { kind: 'ident', name: 'totalAmount' },
+        right: {
+          kind: 'binop',
+          op: '*',
+          left: { kind: 'ident', name: 'bonus' },
+          right: { kind: 'number', value: 2 },
+        },
+      },
+      right: { kind: 'number', value: 100 },
+    });
+  });
 });

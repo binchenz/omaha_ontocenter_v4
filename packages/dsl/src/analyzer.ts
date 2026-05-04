@@ -62,6 +62,22 @@ function check(ast: Ast, ctx: CheckCtx, deps: string[], params: string[], errors
     case 'not':
       check(ast.expr, ctx, deps, params, errors);
       return;
+    case 'binop':
+      check(ast.left, ctx, deps, params, errors);
+      check(ast.right, ctx, deps, params, errors);
+      return;
+    case 'count':
+      if (ctx.knownRelations && !ctx.knownRelations.has(ast.relation)) {
+        errors.push(`Unknown relation: ${ast.relation}`);
+      }
+      if (!deps.includes(ast.relation)) deps.push(ast.relation);
+      return;
+    case 'aggregate':
+      if (ctx.knownRelations && !ctx.knownRelations.has(ast.relation)) {
+        errors.push(`Unknown relation: ${ast.relation}`);
+      }
+      if (!deps.includes(ast.relation)) deps.push(ast.relation);
+      return;
     case 'exists':
       if (ctx.knownRelations && !ctx.knownRelations.has(ast.relation)) {
         errors.push(`Unknown relation: ${ast.relation}`);

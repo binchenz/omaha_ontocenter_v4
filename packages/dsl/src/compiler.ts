@@ -1,7 +1,6 @@
-import { Ast, CompareOp } from './parser';
+import { Ast, CompareOp, ArithOp, AggregateOp } from './parser';
 
 export interface RelationInfo {
-  /** Field name in the child's relationships JSONB that holds the parent id. */
   foreignKey: string;
 }
 
@@ -29,7 +28,7 @@ type Scope = string;
 function emit(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scope): string {
   switch (ast.kind) {
     case 'compare':
-      return emitCompare(ast.op, ast.left, ast.right, ctx, params, scope);
+      return `(${emitValue(ast.left, ctx, params, scope)} ${sqlOp(ast.op)} ${emitValue(ast.right, ctx, params, scope)})`;
     case 'and':
       return `(${emit(ast.left, ctx, params, scope)} AND ${emit(ast.right, ctx, params, scope)})`;
     case 'or':
@@ -37,20 +36,15 @@ function emit(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scope): s
     case 'not':
       return `(NOT ${emit(ast.expr, ctx, params, scope)})`;
     case 'exists': {
-      const relInfo = ctx.relations?.[ast.relation];
-      if (!relInfo) {
-        throw new Error(`Unknown relation: ${ast.relation}`);
-      }
-      const childScope = 'child.properties';
-      const predicate = emit(ast.predicate, ctx, params, childScope);
+      const rel = ctx.relations?.[ast.relation];
+      if (!rel) throw new Error(`Unknown relation: ${ast.relation}`);
+      const predicate = emit(ast.predicate, ctx, params, 'child.properties');
       return (
-        `EXISTS (` +
-        `SELECT 1 FROM object_instances child ` +
+        `EXISTS (SELECT 1 FROM object_instances child ` +
         `WHERE child.tenant_id = object_instances.tenant_id ` +
         `AND child.deleted_at IS NULL ` +
-        `AND (child.relationships->>'${relInfo.foreignKey}') = object_instances.id::text ` +
-        `AND ${predicate}` +
-        `)`
+        `AND (child.relationships->>'${rel.foreignKey}') = object_instances.id::text ` +
+        `AND ${predicate})`
       );
     }
     default:
@@ -58,54 +52,52 @@ function emit(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scope): s
   }
 }
 
-function emitCompare(
-  op: CompareOp,
-  left: Ast,
-  right: Ast,
-  ctx: CompileContext,
-  params: unknown[],
-  scope: Scope,
-): string {
-  const l = emitOperand(left, ctx, params, scope);
-  const r = emitOperand(right, ctx, params, scope);
-  return `(${l.sql} ${sqlOp(op)} ${r.sql})`;
-}
-
-function emitOperand(
-  ast: Ast,
-  ctx: CompileContext,
-  params: unknown[],
-  scope: Scope,
-): { sql: string } {
-  if (ast.kind === 'ident') {
-    if (ctx.numericFields.has(ast.name)) {
-      return { sql: `(${scope}->>'${ast.name}')::numeric` };
+function emitValue(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scope): string {
+  switch (ast.kind) {
+    case 'ident':
+      if (ctx.numericFields.has(ast.name)) return `(${scope}->>'${ast.name}')::numeric`;
+      if (ctx.booleanFields?.has(ast.name)) return `((${scope}->>'${ast.name}')::boolean)`;
+      return `(${scope}->>'${ast.name}')`;
+    case 'param': {
+      if (!ctx.params || !(ast.name in ctx.params)) throw new Error(`Missing parameter: ${ast.name}`);
+      params.push(ctx.params[ast.name]);
+      return `$${params.length}`;
     }
-    if (ctx.booleanFields?.has(ast.name)) {
-      return { sql: `((${scope}->>'${ast.name}')::boolean)` };
+    case 'number':
+      params.push(ast.value);
+      return `$${params.length}`;
+    case 'string':
+      params.push(ast.value);
+      return `$${params.length}`;
+    case 'bool':
+      params.push(ast.value);
+      return `$${params.length}`;
+    case 'binop':
+      return `(${emitValue(ast.left, ctx, params, scope)} ${ast.op} ${emitValue(ast.right, ctx, params, scope)})`;
+    case 'count': {
+      const rel = ctx.relations?.[ast.relation];
+      if (!rel) throw new Error(`Unknown relation: ${ast.relation}`);
+      return (
+        `(SELECT COUNT(*)::numeric FROM object_instances child ` +
+        `WHERE child.tenant_id = object_instances.tenant_id ` +
+        `AND child.deleted_at IS NULL ` +
+        `AND (child.relationships->>'${rel.foreignKey}') = object_instances.id::text)`
+      );
     }
-    return { sql: `(${scope}->>'${ast.name}')` };
-  }
-  if (ast.kind === 'param') {
-    if (!ctx.params || !(ast.name in ctx.params)) {
-      throw new Error(`Missing parameter: ${ast.name}`);
+    case 'aggregate': {
+      const rel = ctx.relations?.[ast.relation];
+      if (!rel) throw new Error(`Unknown relation: ${ast.relation}`);
+      const op = ast.op.toUpperCase();
+      return (
+        `COALESCE((SELECT ${op}((child.properties->>'${ast.field}')::numeric) FROM object_instances child ` +
+        `WHERE child.tenant_id = object_instances.tenant_id ` +
+        `AND child.deleted_at IS NULL ` +
+        `AND (child.relationships->>'${rel.foreignKey}') = object_instances.id::text), 0)`
+      );
     }
-    params.push(ctx.params[ast.name]);
-    return { sql: `$${params.length}` };
+    default:
+      throw new Error(`Unsupported value kind: ${ast.kind}`);
   }
-  if (ast.kind === 'number') {
-    params.push(ast.value);
-    return { sql: `$${params.length}` };
-  }
-  if (ast.kind === 'string') {
-    params.push(ast.value);
-    return { sql: `$${params.length}` };
-  }
-  if (ast.kind === 'bool') {
-    params.push(ast.value);
-    return { sql: `$${params.length}` };
-  }
-  throw new Error(`Unsupported operand kind: ${ast.kind}`);
 }
 
 function sqlOp(op: CompareOp): string {

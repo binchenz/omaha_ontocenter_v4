@@ -1,4 +1,6 @@
 export type CompareOp = '=' | '!=' | '<' | '<=' | '>' | '>=';
+export type ArithOp = '+' | '-' | '*' | '/';
+export type AggregateOp = 'sum' | 'avg' | 'min' | 'max';
 
 export type Ast =
   | { kind: 'ident'; name: string }
@@ -6,47 +8,39 @@ export type Ast =
   | { kind: 'number'; value: number }
   | { kind: 'string'; value: string }
   | { kind: 'bool'; value: boolean }
+  | { kind: 'binop'; op: ArithOp; left: Ast; right: Ast }
   | { kind: 'compare'; op: CompareOp; left: Ast; right: Ast }
   | { kind: 'and'; left: Ast; right: Ast }
   | { kind: 'or'; left: Ast; right: Ast }
   | { kind: 'not'; expr: Ast }
-  | { kind: 'exists'; relation: string; predicate: Ast };
+  | { kind: 'exists'; relation: string; predicate: Ast }
+  | { kind: 'count'; relation: string }
+  | { kind: 'aggregate'; op: AggregateOp; relation: string; field: string };
 
 type Tok =
   | { kind: 'ident'; value: string }
   | { kind: 'number'; value: number }
   | { kind: 'string'; value: string }
   | { kind: 'op'; value: string }
+  | { kind: 'arith'; value: ArithOp }
   | { kind: 'colon' }
+  | { kind: 'dot' }
   | { kind: 'lparen' }
   | { kind: 'rparen' };
 
-const OPS = ['<=', '>=', '!=', '=', '<', '>'];
+const COMPARE_OPS = ['<=', '>=', '!=', '=', '<', '>'];
+const ARITH_OPS = new Set(['+', '-', '*', '/']);
 
 function tokenize(src: string): Tok[] {
   const out: Tok[] = [];
   let i = 0;
   while (i < src.length) {
     const c = src[i];
-    if (/\s/.test(c)) {
-      i++;
-      continue;
-    }
-    if (c === '(') {
-      out.push({ kind: 'lparen' });
-      i++;
-      continue;
-    }
-    if (c === ')') {
-      out.push({ kind: 'rparen' });
-      i++;
-      continue;
-    }
-    if (c === ':') {
-      out.push({ kind: 'colon' });
-      i++;
-      continue;
-    }
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === '(') { out.push({ kind: 'lparen' }); i++; continue; }
+    if (c === ')') { out.push({ kind: 'rparen' }); i++; continue; }
+    if (c === ':') { out.push({ kind: 'colon' }); i++; continue; }
+    if (c === '.') { out.push({ kind: 'dot' }); i++; continue; }
     if (c === "'") {
       let j = i + 1;
       while (j < src.length && src[j] !== "'") j++;
@@ -71,15 +65,17 @@ function tokenize(src: string): Tok[] {
       continue;
     }
     let matched = '';
-    for (const op of OPS) {
-      if (src.slice(i, i + op.length) === op) {
-        matched = op;
-        break;
-      }
+    for (const op of COMPARE_OPS) {
+      if (src.slice(i, i + op.length) === op) { matched = op; break; }
     }
     if (matched) {
       out.push({ kind: 'op', value: matched });
       i += matched.length;
+      continue;
+    }
+    if (ARITH_OPS.has(c)) {
+      out.push({ kind: 'arith', value: c as ArithOp });
+      i++;
       continue;
     }
     throw new Error(`Unexpected character '${c}' at position ${i}`);
@@ -95,23 +91,19 @@ export function parse(src: string): Ast {
   return expr;
 }
 
-const KEYWORDS = new Set(['and', 'or', 'not', 'exists', 'where', 'true', 'false']);
+const KEYWORDS = new Set([
+  'and', 'or', 'not', 'exists', 'where', 'true', 'false',
+  'count', 'sum', 'avg', 'min', 'max',
+]);
 
 class Parser {
   private pos = 0;
   constructor(private readonly toks: Tok[]) {}
 
-  eof(): boolean {
-    return this.pos >= this.toks.length;
-  }
+  eof(): boolean { return this.pos >= this.toks.length; }
+  peek(): Tok | undefined { return this.toks[this.pos]; }
 
-  peek(): Tok | undefined {
-    return this.toks[this.pos];
-  }
-
-  parseExpr(): Ast {
-    return this.parseOr();
-  }
+  parseExpr(): Ast { return this.parseOr(); }
 
   private parseOr(): Ast {
     let left = this.parseAnd();
@@ -157,23 +149,50 @@ class Parser {
 
   private matchKeyword(kw: string): boolean {
     const t = this.peek();
-    if (t && t.kind === 'ident' && t.value === kw) {
-      this.pos++;
-      return true;
-    }
+    if (t && t.kind === 'ident' && t.value === kw) { this.pos++; return true; }
     return false;
   }
 
   private parseCompare(): Ast {
-    const left = this.parsePrimary();
+    const left = this.parseAdditive();
     const t = this.peek();
     if (t && t.kind === 'op') {
       const op = t.value as CompareOp;
       this.pos++;
-      const right = this.parsePrimary();
+      const right = this.parseAdditive();
       return { kind: 'compare', op, left, right };
     }
     return left;
+  }
+
+  private parseAdditive(): Ast {
+    let left = this.parseMultiplicative();
+    while (true) {
+      const t = this.peek();
+      if (t && t.kind === 'arith' && (t.value === '+' || t.value === '-')) {
+        this.pos++;
+        const right = this.parseMultiplicative();
+        left = { kind: 'binop', op: t.value, left, right };
+      } else break;
+    }
+    return left;
+  }
+
+  private parseMultiplicative(): Ast {
+    let left = this.parseUnary();
+    while (true) {
+      const t = this.peek();
+      if (t && t.kind === 'arith' && (t.value === '*' || t.value === '/')) {
+        this.pos++;
+        const right = this.parseUnary();
+        left = { kind: 'binop', op: t.value, left, right };
+      } else break;
+    }
+    return left;
+  }
+
+  private parseUnary(): Ast {
+    return this.parsePrimary();
   }
 
   private parsePrimary(): Ast {
@@ -194,15 +213,38 @@ class Parser {
       this.pos++;
       return { kind: 'param', name: next.value };
     }
-    if (t.kind === 'number') {
-      this.pos++;
-      return { kind: 'number', value: t.value };
-    }
-    if (t.kind === 'string') {
-      this.pos++;
-      return { kind: 'string', value: t.value };
-    }
+    if (t.kind === 'number') { this.pos++; return { kind: 'number', value: t.value }; }
+    if (t.kind === 'string') { this.pos++; return { kind: 'string', value: t.value }; }
     if (t.kind === 'ident') {
+      if (t.value === 'count') {
+        this.pos++;
+        const relTok = this.peek();
+        if (!relTok || relTok.kind !== 'ident' || KEYWORDS.has(relTok.value)) {
+          throw new Error("Expected relation identifier after 'count'");
+        }
+        this.pos++;
+        return { kind: 'count', relation: relTok.value };
+      }
+      if (t.value === 'sum' || t.value === 'avg' || t.value === 'min' || t.value === 'max') {
+        const op = t.value as AggregateOp;
+        this.pos++;
+        const relTok = this.peek();
+        if (!relTok || relTok.kind !== 'ident' || KEYWORDS.has(relTok.value)) {
+          throw new Error(`Expected relation identifier after '${op}'`);
+        }
+        this.pos++;
+        const dot = this.peek();
+        if (!dot || dot.kind !== 'dot') {
+          throw new Error(`Expected '.' after '${op} ${relTok.value}'`);
+        }
+        this.pos++;
+        const fieldTok = this.peek();
+        if (!fieldTok || fieldTok.kind !== 'ident') {
+          throw new Error(`Expected field name after '${op} ${relTok.value}.'`);
+        }
+        this.pos++;
+        return { kind: 'aggregate', op, relation: relTok.value, field: fieldTok.value };
+      }
       this.pos++;
       if (t.value === 'true') return { kind: 'bool', value: true };
       if (t.value === 'false') return { kind: 'bool', value: false };
