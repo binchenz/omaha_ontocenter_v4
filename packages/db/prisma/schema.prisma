@@ -153,11 +153,13 @@ model ObjectInstance {
   searchText   String?  @map("search_text")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@unique([tenantId, objectType, externalId])
   @@index([tenantId, objectType])
+  @@index([tenantId, objectType, deletedAt])
   @@map("object_instances")
 }
 
