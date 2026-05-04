@@ -131,4 +131,14 @@ export class OntologyService {
     });
     return new Set(rels.map((r) => r.name));
   }
+
+  async validateDerivedExpression(tenantId: string, objectTypeId: string, expression: string) {
+    const ot = await this.getObjectType(tenantId, objectTypeId);
+    const properties = ((ot!.properties ?? []) as unknown as PropertyDefinition[]);
+    const derived = ((ot!.derivedProperties ?? []) as unknown as DerivedPropertyDefinition[]);
+    const knownProperties = new Set(properties.map((p) => p.name));
+    const knownDerivedProperties = new Set(derived.map((d) => d.name));
+    const knownRelations = await this.relationsForSource(tenantId, objectTypeId);
+    return analyze(expression, { knownProperties, knownDerivedProperties, knownRelations });
+  }
 }

@@ -49,6 +49,16 @@ export class OntologyController {
     return this.indexManager.reconcile(tenantId, id);
   }
 
+  @Post('types/:id/derived-properties/validate')
+  @HttpCode(200)
+  validateDerived(
+    @CurrentUser('tenantId') tenantId: string,
+    @Param('id') id: string,
+    @Body() body: { expression: string },
+  ): Promise<unknown> {
+    return this.ontologyService.validateDerivedExpression(tenantId, id, body.expression);
+  }
+
   @Get('relationships')
   listRelationships(@CurrentUser('tenantId') tenantId: string): Promise<unknown> {
     return this.ontologyService.listRelationships(tenantId);

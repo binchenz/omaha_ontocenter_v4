@@ -58,7 +58,7 @@ describe('Query include/select (e2e)', () => {
         .send({
           name: 'incl_probe_order',
           label: 'Incl Order',
-          properties: [{ name: 'totalAmount', label: 'Total', type: 'number' }],
+          properties: [{ name: 'totalAmount', label: 'Total', type: 'number', filterable: true }],
         })
         .expect(201)
     ).body.id;

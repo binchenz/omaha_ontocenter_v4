@@ -69,11 +69,11 @@ async function main() {
       name: 'customer',
       label: '客户',
       properties: [
-        { name: 'name', label: '客户名称', type: 'string', required: true },
-        { name: 'contact', label: '联系人', type: 'string' },
+        { name: 'name', label: '客户名称', type: 'string', required: true, filterable: true },
+        { name: 'contact', label: '联系人', type: 'string', filterable: true },
         { name: 'phone', label: '电话', type: 'string' },
-        { name: 'region', label: '区域', type: 'string' },
-        { name: 'level', label: '客户等级', type: 'string' },
+        { name: 'region', label: '区域', type: 'string', filterable: true, sortable: true },
+        { name: 'level', label: '客户等级', type: 'string', filterable: true },
       ],
     },
   });
@@ -103,10 +103,10 @@ async function main() {
       name: 'order',
       label: '订单',
       properties: [
-        { name: 'orderNo', label: '订单编号', type: 'string', required: true },
-        { name: 'orderDate', label: '下单日期', type: 'date', required: true },
-        { name: 'totalAmount', label: '总金额', type: 'number' },
-        { name: 'status', label: '状态', type: 'string' },
+        { name: 'orderNo', label: '订单编号', type: 'string', required: true, filterable: true },
+        { name: 'orderDate', label: '下单日期', type: 'date', required: true, filterable: true, sortable: true },
+        { name: 'totalAmount', label: '总金额', type: 'number', filterable: true, sortable: true },
+        { name: 'status', label: '状态', type: 'string', filterable: true },
       ],
       derivedProperties: [
         { name: 'itemCount', label: '商品数量', type: 'number' },

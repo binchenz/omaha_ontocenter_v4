@@ -128,6 +128,7 @@ export class QueryService {
         pageSize,
         totalPages: Math.ceil(total / pageSize) || 0,
         objectType: req.objectType,
+        ...(planned.sortFallbackReason && { sortFallbackReason: planned.sortFallbackReason }),
       },
     };
   }

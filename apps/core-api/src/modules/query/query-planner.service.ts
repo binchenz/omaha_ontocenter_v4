@@ -13,6 +13,7 @@ export interface PlannedQuery {
   params: unknown[];
   countSql: string;
   effectivePermissionFilter: string | null;
+  sortFallbackReason?: string;
 }
 
 export interface PermissionTemplateVars {
@@ -64,6 +65,8 @@ export class QueryPlannerService {
     const booleanFields = new Set(
       properties.filter((p) => p.type === 'boolean').map((p) => p.name),
     );
+    const filterableFields = new Set(properties.filter((p) => p.filterable).map((p) => p.name));
+    const sortableFields = new Set(properties.filter((p) => p.sortable).map((p) => p.name));
     const derivedByName = new Map(derived.map((d) => [d.name, d]));
 
     const relationsMap: Record<string, { foreignKey: string }> = {};
@@ -108,6 +111,14 @@ export class QueryPlannerService {
         params.push(f.value);
         wherePieces.push(`(${remappedSql}) ${opSql} $${params.length}`);
       } else if (f.field) {
+        if (ot && properties.length > 0 && !filterableFields.has(f.field)) {
+          throw new BadRequestException({
+            code: 'PROPERTY_NOT_FILTERABLE',
+            property: f.field,
+            objectType: args.objectType,
+            hint: `Ask the admin to flag '${f.field}' as filterable on '${args.objectType}'.`,
+          });
+        }
         const opSql = FILTER_TO_SQL[f.operator];
         const lhs = numericFields.has(f.field)
           ? `(properties->>'${f.field}')::numeric`
@@ -137,7 +148,20 @@ export class QueryPlannerService {
     }
 
     const where = wherePieces.join(' AND ');
-    const sortClause = buildSort(args.sort);
+    let sortFallbackReason: string | undefined;
+    let sortClause: string;
+    if (args.sort && ALLOWED_SORT_COLUMNS.has(args.sort.field)) {
+      sortClause = buildSort(args.sort);
+    } else if (args.sort) {
+      sortFallbackReason = sortableFields.has(args.sort.field)
+        ? undefined
+        : `Property '${args.sort.field}' is not flagged sortable; sorted by createdAt instead.`;
+      sortClause = sortableFields.has(args.sort.field)
+        ? buildSort(args.sort)
+        : 'created_at DESC';
+    } else {
+      sortClause = 'created_at DESC';
+    }
     const sql = `
       SELECT id, tenant_id AS "tenantId", object_type AS "objectType",
              external_id AS "externalId", label, properties, relationships,
@@ -153,6 +177,7 @@ export class QueryPlannerService {
       params,
       countSql,
       effectivePermissionFilter: substituted.length > 0 ? substituted.join(' AND ') : null,
+      sortFallbackReason,
     };
   }
 }

@@ -32,6 +32,7 @@ export interface QueryObjectsResponse {
     pageSize: number;
     totalPages: number;
     objectType: string;
+    sortFallbackReason?: string;
   };
 }
 
