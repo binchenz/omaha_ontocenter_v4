@@ -12,6 +12,7 @@ const config: Config = {
   testEnvironment: 'node',
   moduleNameMapper: {
     '^@omaha/db$': '<rootDir>/../../../packages/db/src',
+    '^@omaha/dsl$': '<rootDir>/../../../packages/dsl/src',
     '^@omaha/shared-types$': '<rootDir>/../../../packages/shared-types/src',
   },
 };

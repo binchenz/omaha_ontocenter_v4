@@ -3,7 +3,8 @@ import { PaginatedRequest } from './common';
 export type FilterOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'in';
 
 export interface QueryFilter {
-  field: string;
+  field?: string;
+  derivedProperty?: string;
   operator: FilterOperator;
   value: unknown;
 }

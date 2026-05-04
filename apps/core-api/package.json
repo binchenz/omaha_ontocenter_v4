@@ -18,6 +18,7 @@
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.4.0",
     "@omaha/db": "workspace:*",
+    "@omaha/dsl": "workspace:*",
     "@omaha/shared-types": "workspace:*",
     "bcrypt": "^5.1.1",
     "class-transformer": "^0.5.1",

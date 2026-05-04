@@ -3,8 +3,13 @@ import { Type } from 'class-transformer';
 import { FilterOperator } from '@omaha/shared-types';
 
 class QueryFilterDto {
+  @IsOptional()
   @IsString()
-  field!: string;
+  field?: string;
+
+  @IsOptional()
+  @IsString()
+  derivedProperty?: string;
 
   @IsIn(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in'])
   operator!: FilterOperator;

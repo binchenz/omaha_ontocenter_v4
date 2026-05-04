@@ -1,6 +1,7 @@
 import { IsString, IsArray, IsOptional, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PropertyDefinitionDto } from './property-definition.dto';
+import { DerivedPropertyDefinitionDto } from './derived-property-definition.dto';
 
 export class UpdateObjectTypeDto {
   @IsOptional()
@@ -17,6 +18,6 @@ export class UpdateObjectTypeDto {
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => PropertyDefinitionDto)
-  derivedProperties?: PropertyDefinitionDto[];
+  @Type(() => DerivedPropertyDefinitionDto)
+  derivedProperties?: DerivedPropertyDefinitionDto[];
 }

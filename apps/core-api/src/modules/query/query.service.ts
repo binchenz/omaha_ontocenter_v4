@@ -1,13 +1,27 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@omaha/db';
 import { PermissionService } from '../permission/permission.service';
-import { QueryObjectsRequest, QueryObjectsResponse, FilterOperator } from '@omaha/shared-types';
+import { QueryObjectsRequest, QueryObjectsResponse } from '@omaha/shared-types';
+import { QueryPlannerService } from './query-planner.service';
+
+interface RawInstanceRow {
+  id: string;
+  tenantId: string;
+  objectType: string;
+  externalId: string;
+  label: string | null;
+  properties: unknown;
+  relationships: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 @Injectable()
 export class QueryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly permissionService: PermissionService,
+    private readonly planner: QueryPlannerService,
   ) {}
 
   async queryObjects(
@@ -21,22 +35,25 @@ export class QueryService {
     const pageSize = Math.min(req.pageSize ?? 20, 100);
     const skip = (page - 1) * pageSize;
 
-    const where = this.buildWhere(tenantId, req);
-    const orderBy = this.buildOrderBy(req);
+    const planned = await this.planner.plan({
+      tenantId,
+      objectType: req.objectType,
+      filters: req.filters,
+      search: req.search,
+      sort: req.sort,
+      skip,
+      take: pageSize,
+    });
 
-    const [instances, total] = await Promise.all([
-      this.prisma.objectInstance.findMany({
-        where,
-        orderBy,
-        skip,
-        take: pageSize,
-      }),
-      this.prisma.objectInstance.count({ where }),
+    const [rows, countRows] = await Promise.all([
+      this.prisma.$queryRawUnsafe<RawInstanceRow[]>(planned.sql, ...planned.params),
+      this.prisma.$queryRawUnsafe<{ count: number }[]>(planned.countSql, ...planned.params),
     ]);
+    const total = Number(countRows[0]?.count ?? 0);
 
     const allowedFields = this.permissionService.getAllowedFields(permissions, 'object', 'read');
 
-    const data = instances.map((inst) => ({
+    const data = rows.map((inst) => ({
       id: inst.id,
       objectType: inst.objectType,
       externalId: inst.externalId,
@@ -45,7 +62,7 @@ export class QueryService {
         (inst.properties ?? {}) as Record<string, unknown>,
         allowedFields,
       ),
-      relationships: inst.relationships as Record<string, unknown>,
+      relationships: (inst.relationships ?? {}) as Record<string, unknown>,
       createdAt: inst.createdAt.toISOString(),
       updatedAt: inst.updatedAt.toISOString(),
     }));
@@ -56,61 +73,9 @@ export class QueryService {
         total,
         page,
         pageSize,
-        totalPages: Math.ceil(total / pageSize),
+        totalPages: Math.ceil(total / pageSize) || 0,
         objectType: req.objectType,
       },
     };
-  }
-
-  private buildWhere(tenantId: string, req: QueryObjectsRequest) {
-    const where: Record<string, unknown> = {
-      tenantId,
-      objectType: req.objectType,
-    };
-
-    if (req.search) {
-      where.searchText = { contains: req.search, mode: 'insensitive' };
-    }
-
-    if (req.filters && req.filters.length > 0) {
-      where.AND = req.filters.map((f) => ({
-        properties: this.buildJsonFilter(f.field, f.operator, f.value),
-      }));
-    }
-
-    return where;
-  }
-
-  private buildJsonFilter(field: string, operator: FilterOperator, value: unknown) {
-    switch (operator) {
-      case 'eq':
-        return { path: [field], equals: value };
-      case 'neq':
-        return { path: [field], not: value };
-      case 'gt':
-        return { path: [field], gt: value };
-      case 'gte':
-        return { path: [field], gte: value };
-      case 'lt':
-        return { path: [field], lt: value };
-      case 'lte':
-        return { path: [field], lte: value };
-      case 'contains':
-        return { path: [field], string_contains: value };
-      case 'in':
-        return { path: [field], array_contains: value };
-      default:
-        const _exhaustive: never = operator;
-        throw new Error(`Unsupported operator: ${_exhaustive}`);
-    }
-  }
-
-  private buildOrderBy(req: QueryObjectsRequest) {
-    if (!req.sort) return { createdAt: 'desc' as const };
-    const { field, direction } = req.sort;
-    if (['createdAt', 'updatedAt', 'externalId', 'label'].includes(field)) {
-      return { [field]: direction };
-    }
-    return { createdAt: direction };
   }
 }

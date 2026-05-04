@@ -1,6 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma, PrismaService } from '@omaha/db';
-import { CreateObjectTypeRequest, UpdateObjectTypeRequest, CreateRelationshipRequest } from '@omaha/shared-types';
+import {
+  CreateObjectTypeRequest,
+  UpdateObjectTypeRequest,
+  CreateRelationshipRequest,
+  PropertyDefinition,
+  DerivedPropertyDefinition,
+} from '@omaha/shared-types';
+import { analyze } from '@omaha/dsl';
 import { assertTenantOwnership } from '../../common/helpers/assert-tenant-ownership';
 import { IndexManagerService } from './index-manager.service';
 
@@ -25,6 +32,7 @@ export class OntologyService {
   }
 
   async createObjectType(tenantId: string, dto: CreateObjectTypeRequest) {
+    this.validateDerivedProperties(dto.properties, dto.derivedProperties ?? []);
     const created = await this.prisma.objectType.create({
       data: {
         tenantId,
@@ -39,7 +47,13 @@ export class OntologyService {
   }
 
   async updateObjectType(tenantId: string, id: string, dto: UpdateObjectTypeRequest) {
-    await this.getObjectType(tenantId, id);
+    const existing = await this.getObjectType(tenantId, id);
+    const nextProps = dto.properties ?? ((existing!.properties ?? []) as unknown as PropertyDefinition[]);
+    const nextDerived = dto.derivedProperties
+      ?? ((existing!.derivedProperties ?? []) as unknown as DerivedPropertyDefinition[]);
+    if (dto.properties !== undefined || dto.derivedProperties !== undefined) {
+      this.validateDerivedProperties(nextProps, nextDerived);
+    }
     const updated = await this.prisma.objectType.update({
       where: { id },
       data: {
@@ -86,5 +100,22 @@ export class OntologyService {
     const rel = await this.prisma.objectRelationship.findUnique({ where: { id } });
     assertTenantOwnership(rel, tenantId, 'Relationship');
     return rel;
+  }
+
+  private validateDerivedProperties(
+    properties: PropertyDefinition[],
+    derived: DerivedPropertyDefinition[],
+  ): void {
+    if (!derived.length) return;
+    const knownProperties = new Set(properties.map((p) => p.name));
+    const knownDerivedProperties = new Set(derived.map((d) => d.name));
+    for (const d of derived) {
+      const result = analyze(d.expression, { knownProperties, knownDerivedProperties });
+      if (!result.valid) {
+        throw new BadRequestException(
+          `Derived property '${d.name}' has invalid expression: ${result.errors.join('; ')}`,
+        );
+      }
+    }
   }
 }

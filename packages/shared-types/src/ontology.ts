@@ -9,17 +9,21 @@ export interface PropertyDefinition {
   scale?: number;
 }
 
+export interface DerivedPropertyDefinition extends PropertyDefinition {
+  expression: string;
+}
+
 export interface CreateObjectTypeRequest {
   name: string;
   label: string;
   properties: PropertyDefinition[];
-  derivedProperties?: PropertyDefinition[];
+  derivedProperties?: DerivedPropertyDefinition[];
 }
 
 export interface UpdateObjectTypeRequest {
   label?: string;
   properties?: PropertyDefinition[];
-  derivedProperties?: PropertyDefinition[];
+  derivedProperties?: DerivedPropertyDefinition[];
 }
 
 export interface ObjectTypeResponse {
@@ -28,7 +32,7 @@ export interface ObjectTypeResponse {
   name: string;
   label: string;
   properties: PropertyDefinition[];
-  derivedProperties: PropertyDefinition[];
+  derivedProperties: DerivedPropertyDefinition[];
   version: number;
   createdAt: string;
   updatedAt: string;
