@@ -7,7 +7,7 @@ import {
   QueryObjectsRequest,
   QueryObjectsResponse,
 } from '@omaha/shared-types';
-import { QueryPlannerService, PermissionTemplateVars } from './query-planner.service';
+import { QueryPlannerService } from './query-planner.service';
 import { filterMaskedFields } from '../../common/filter-masked-fields';
 
 interface RawInstanceRow {
@@ -45,22 +45,6 @@ export class QueryService {
     const pageSize = Math.min(req.pageSize ?? 20, 100);
     const skip = (page - 1) * pageSize;
 
-    const permissionConditions: string[] = [];
-    for (const rule of user.permissionRules ?? []) {
-      const base = rule.permission.split(':')[0];
-      const [res, act] = base.split('.');
-      if (res === 'object' && (act === '*' || act === 'read') && rule.condition) {
-        permissionConditions.push(rule.condition);
-      }
-    }
-
-    const templateVars: PermissionTemplateVars = {
-      userId: user.id,
-      userRoleId: user.roleId,
-      userTenantId: user.tenantId,
-      now: new Date().toISOString(),
-    };
-
     const planned = await this.planner.plan({
       tenantId: user.tenantId,
       objectType: req.objectType,
@@ -69,8 +53,7 @@ export class QueryService {
       sort: req.sort,
       skip,
       take: pageSize,
-      permissionConditions,
-      templateVars,
+      permissionPredicates: resolution.predicates,
     });
 
     const [rows, countRows] = await Promise.all([
