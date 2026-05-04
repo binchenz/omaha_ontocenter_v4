@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '@omaha/db';
+import { emitScope, parentScope } from '@omaha/dsl';
 import { PermissionResolver } from '../permission/permission-resolver.service';
 import {
   CurrentUser as CurrentUserType,
@@ -8,6 +9,7 @@ import {
   QueryObjectsResponse,
 } from '@omaha/shared-types';
 import { QueryPlannerService } from './query-planner.service';
+import { OntologyViewLoader } from '../ontology/ontology-view-loader.service';
 import { filterMaskedFields } from '../../common/filter-masked-fields';
 
 interface RawInstanceRow {
@@ -28,6 +30,7 @@ export class QueryService {
     private readonly prisma: PrismaService,
     private readonly permissionResolver: PermissionResolver,
     private readonly planner: QueryPlannerService,
+    private readonly viewLoader: OntologyViewLoader,
   ) {}
 
   async queryObjects(
@@ -127,19 +130,17 @@ export class QueryService {
     include: string[],
   ): Promise<Array<{ name: string; targetType: string; foreignKey: string }>> {
     if (!include.length) return [];
-    const ot = await this.prisma.objectType.findFirst({ where: { tenantId, name: objectType } });
-    if (!ot) return [];
-    const rels = await this.prisma.objectRelationship.findMany({
-      where: { tenantId, sourceTypeId: ot.id },
-      include: { targetType: { select: { name: true } } },
-    });
+    const loaded = await this.viewLoader.loadWithTargetType(tenantId, objectType);
+    if (!loaded) return [];
+    const { view, relationTargets } = loaded;
     const out: Array<{ name: string; targetType: string; foreignKey: string }> = [];
     for (const name of include) {
-      const rel = rels.find((r) => r.name === name);
-      if (!rel) {
+      const rel = view.relations[name];
+      const target = relationTargets[name];
+      if (!rel || !target) {
         throw new BadRequestException(`Unknown relationship in include: ${name}`);
       }
-      out.push({ name, targetType: rel.targetType.name, foreignKey: `${ot.name}Id` });
+      out.push({ name, targetType: target, foreignKey: rel.foreignKey });
     }
     return out;
   }
@@ -154,18 +155,18 @@ export class QueryService {
     for (const id of parentIds) out[id] = {};
 
     for (const inc of includes) {
-      const children = await this.prisma.$queryRawUnsafe<RawInstanceRow[]>(
-        `SELECT id, tenant_id AS "tenantId", object_type AS "objectType",
-                external_id AS "externalId", label, properties, relationships,
-                created_at AS "createdAt", updated_at AS "updatedAt"
-         FROM object_instances
-         WHERE tenant_id = $1::uuid AND object_type = $2 AND deleted_at IS NULL
-           AND (relationships->>$3) = ANY($4::text[])`,
-        tenantId,
-        inc.targetType,
-        inc.foreignKey,
-        parentIds,
-      );
+      const scope = parentScope({ tenantId, objectType: inc.targetType });
+      const { sql: scopeSql, params: scopeParams } = emitScope(scope);
+      const fkParamIdx = scopeParams.length + 1;
+      const idsParamIdx = scopeParams.length + 2;
+      const params: unknown[] = [...scopeParams, inc.foreignKey, parentIds];
+      const sql =
+        `SELECT id, tenant_id AS "tenantId", object_type AS "objectType", ` +
+        `external_id AS "externalId", label, properties, relationships, ` +
+        `created_at AS "createdAt", updated_at AS "updatedAt" ` +
+        scopeSql +
+        ` AND (relationships->>$${fkParamIdx}) = ANY($${idsParamIdx}::text[])`;
+      const children = await this.prisma.$queryRawUnsafe<RawInstanceRow[]>(sql, ...params);
       for (const c of children) {
         const parentId = (c.relationships as Record<string, unknown> | null)?.[inc.foreignKey] as string | undefined;
         if (!parentId) continue;
