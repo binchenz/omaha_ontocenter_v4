@@ -20,6 +20,8 @@ export interface QueryObjectsRequest extends PaginatedRequest {
   filters?: QueryFilter[];
   search?: string;
   sort?: QuerySort;
+  include?: string[];
+  select?: string[];
 }
 
 export interface QueryObjectsResponse {
