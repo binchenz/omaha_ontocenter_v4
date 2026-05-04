@@ -15,6 +15,6 @@ export class QueryController {
     @CurrentUser() user: CurrentUserType,
     @Body() dto: QueryObjectsDto,
   ): Promise<unknown> {
-    return this.queryService.queryObjects(user.tenantId, user.permissions, dto);
+    return this.queryService.queryObjects(user, dto);
   }
 }

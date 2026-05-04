@@ -230,16 +230,18 @@ model SkillDefinition {
 }
 
 model AuditLog {
-  id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String   @map("tenant_id") @db.Uuid
-  actorId     String   @map("actor_id") @db.Uuid
-  actorType   String   @map("actor_type")
-  operation   String
-  objectType  String?  @map("object_type")
-  queryPlan   Json?    @map("query_plan")
-  resultCount Int?     @map("result_count")
-  source      String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  id                       String   @id @default(uuid()) @db.Uuid
+  tenantId                 String   @map("tenant_id") @db.Uuid
+  actorId                  String   @map("actor_id") @db.Uuid
+  actorType                String   @map("actor_type")
+  operation                String
+  objectType               String?  @map("object_type")
+  queryPlan                Json?    @map("query_plan")
+  resultCount              Int?     @map("result_count")
+  source                   String?
+  effectivePermissionFilter String? @map("effective_permission_filter")
+  compiledSqlHash          String?  @map("compiled_sql_hash")
+  createdAt                DateTime @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
   actor  User   @relation(fields: [actorId], references: [id])

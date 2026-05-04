@@ -12,7 +12,17 @@ export interface PlannedQuery {
   sql: string;
   params: unknown[];
   countSql: string;
+  effectivePermissionFilter: string | null;
 }
+
+export interface PermissionTemplateVars {
+  userId: string;
+  userRoleId: string;
+  userTenantId: string;
+  now: string;
+}
+
+const TEMPLATE_WHITELIST = new Set(['userId', 'userRoleId', 'userTenantId', 'now']);
 
 const ALLOWED_SORT_COLUMNS = new Set(['createdAt', 'updatedAt', 'externalId', 'label']);
 
@@ -39,6 +49,8 @@ export class QueryPlannerService {
     sort?: { field: string; direction: 'asc' | 'desc' };
     skip: number;
     take: number;
+    permissionConditions?: string[];
+    templateVars?: PermissionTemplateVars;
   }): Promise<PlannedQuery> {
     const ot = await this.prisma.objectType.findFirst({
       where: { tenantId: args.tenantId, name: args.objectType },
@@ -54,7 +66,7 @@ export class QueryPlannerService {
     );
     const derivedByName = new Map(derived.map((d) => [d.name, d]));
 
-    let relationsMap: Record<string, { foreignKey: string }> = {};
+    const relationsMap: Record<string, { foreignKey: string }> = {};
     if (ot) {
       const rels = await this.prisma.objectRelationship.findMany({
         where: { tenantId: args.tenantId, sourceTypeId: ot.id },
@@ -107,6 +119,23 @@ export class QueryPlannerService {
       }
     }
 
+    const substituted: string[] = [];
+    for (const cond of args.permissionConditions ?? []) {
+      if (!cond.trim()) continue;
+      const sub = substituteTemplates(cond, args.templateVars);
+      substituted.push(sub);
+      const ast = parse(sub);
+      const fragment = compile(ast, {
+        numericFields,
+        booleanFields,
+        relations: relationsMap,
+      });
+      const offsetParams = params.length;
+      const remappedSql = fragment.sql.replace(/\$(\d+)/g, (_m, idx) => `$${Number(idx) + offsetParams}`);
+      for (const p of fragment.params) params.push(p);
+      wherePieces.push(remappedSql);
+    }
+
     const where = wherePieces.join(' AND ');
     const sortClause = buildSort(args.sort);
     const sql = `
@@ -119,8 +148,26 @@ export class QueryPlannerService {
       OFFSET ${args.skip} LIMIT ${args.take}
     `;
     const countSql = `SELECT COUNT(*)::int AS count FROM object_instances WHERE ${where}`;
-    return { sql, params, countSql };
+    return {
+      sql,
+      params,
+      countSql,
+      effectivePermissionFilter: substituted.length > 0 ? substituted.join(' AND ') : null,
+    };
   }
+}
+
+function substituteTemplates(src: string, vars?: PermissionTemplateVars): string {
+  return src.replace(/:(\w+)/g, (_m, name) => {
+    if (!TEMPLATE_WHITELIST.has(name)) {
+      return `:${name}`;
+    }
+    if (!vars) throw new BadRequestException(`Missing template value for :${name}`);
+    const key = name as keyof PermissionTemplateVars;
+    const value = vars[key];
+    if (value === undefined) throw new BadRequestException(`Missing template value for :${name}`);
+    return `'${String(value).replace(/'/g, "''")}'`;
+  });
 }
 
 function buildSort(sort?: { field: string; direction: 'asc' | 'desc' }): string {

@@ -22,6 +22,11 @@ export interface JwtPayload {
   roleId: string;
 }
 
+export interface RolePermission {
+  permission: string;
+  condition?: string;
+}
+
 export interface CurrentUser {
   id: string;
   email: string;
@@ -30,4 +35,5 @@ export interface CurrentUser {
   roleId: string;
   roleName: string;
   permissions: string[];
+  permissionRules: RolePermission[];
 }

@@ -2,7 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '@omaha/db';
-import { JwtPayload, CurrentUser } from '@omaha/shared-types';
+import { JwtPayload, CurrentUser, RolePermission } from '@omaha/shared-types';
 import { JWT_SECRET, JWT_STRATEGY } from './auth.constants';
 
 @Injectable()
@@ -30,6 +30,8 @@ export class JwtStrategy extends PassportStrategy(Strategy, JWT_STRATEGY) {
       throw new UnauthorizedException();
     }
 
+    const rules = toRolePermissions(user.role.permissions);
+
     return {
       id: user.id,
       email: user.email,
@@ -37,14 +39,22 @@ export class JwtStrategy extends PassportStrategy(Strategy, JWT_STRATEGY) {
       tenantId: user.tenantId,
       roleId: user.roleId,
       roleName: user.role.name,
-      permissions: toPermissions(user.role.permissions),
+      permissions: rules.map((r) => r.permission),
+      permissionRules: rules,
     };
   }
 }
 
-function toPermissions(value: unknown): string[] {
-  if (Array.isArray(value) && value.every((v) => typeof v === 'string')) {
-    return value as string[];
+function toRolePermissions(value: unknown): RolePermission[] {
+  if (!Array.isArray(value)) return [];
+  const out: RolePermission[] = [];
+  for (const v of value) {
+    if (typeof v === 'string') out.push({ permission: v });
+    else if (v && typeof v === 'object' && typeof (v as any).permission === 'string') {
+      const rule: RolePermission = { permission: (v as any).permission };
+      if (typeof (v as any).condition === 'string') rule.condition = (v as any).condition;
+      out.push(rule);
+    }
   }
-  return [];
+  return out;
 }

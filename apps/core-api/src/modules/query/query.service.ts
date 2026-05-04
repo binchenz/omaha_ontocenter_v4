@@ -1,8 +1,13 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { PrismaService } from '@omaha/db';
 import { PermissionService } from '../permission/permission.service';
-import { QueryObjectsRequest, QueryObjectsResponse } from '@omaha/shared-types';
-import { QueryPlannerService } from './query-planner.service';
+import {
+  CurrentUser as CurrentUserType,
+  QueryObjectsRequest,
+  QueryObjectsResponse,
+} from '@omaha/shared-types';
+import { QueryPlannerService, PermissionTemplateVars } from './query-planner.service';
 
 interface RawInstanceRow {
   id: string;
@@ -25,24 +30,41 @@ export class QueryService {
   ) {}
 
   async queryObjects(
-    tenantId: string,
-    permissions: string[],
+    user: CurrentUserType,
     req: QueryObjectsRequest,
   ): Promise<QueryObjectsResponse> {
-    this.permissionService.assertCanAccess(permissions, 'object', 'read');
+    this.permissionService.assertCanAccess(user.permissions, 'object', 'read');
 
     const page = req.page ?? 1;
     const pageSize = Math.min(req.pageSize ?? 20, 100);
     const skip = (page - 1) * pageSize;
 
+    const permissionConditions: string[] = [];
+    for (const rule of user.permissionRules ?? []) {
+      const base = rule.permission.split(':')[0];
+      const [res, act] = base.split('.');
+      if (res === 'object' && (act === '*' || act === 'read') && rule.condition) {
+        permissionConditions.push(rule.condition);
+      }
+    }
+
+    const templateVars: PermissionTemplateVars = {
+      userId: user.id,
+      userRoleId: user.roleId,
+      userTenantId: user.tenantId,
+      now: new Date().toISOString(),
+    };
+
     const planned = await this.planner.plan({
-      tenantId,
+      tenantId: user.tenantId,
       objectType: req.objectType,
       filters: req.filters,
       search: req.search,
       sort: req.sort,
       skip,
       take: pageSize,
+      permissionConditions,
+      templateVars,
     });
 
     const [rows, countRows] = await Promise.all([
@@ -51,9 +73,9 @@ export class QueryService {
     ]);
     const total = Number(countRows[0]?.count ?? 0);
 
-    const allowedFields = this.permissionService.getAllowedFields(permissions, 'object', 'read');
-    const includes = await this.resolveIncludes(tenantId, req.objectType, req.include ?? []);
-    const includedByParent = await this.fetchIncludes(tenantId, rows.map((r) => r.id), includes);
+    const allowedFields = this.permissionService.getAllowedFields(user.permissions, 'object', 'read');
+    const includes = await this.resolveIncludes(user.tenantId, req.objectType, req.include ?? []);
+    const includedByParent = await this.fetchIncludes(user.tenantId, rows.map((r) => r.id), includes);
 
     const data = rows.map((inst) => {
       const properties = this.permissionService.filterFields(
@@ -79,6 +101,23 @@ export class QueryService {
         createdAt: inst.createdAt.toISOString(),
         updatedAt: inst.updatedAt.toISOString(),
       };
+    });
+
+    const compiledSqlHash = createHash('sha256').update(planned.sql).digest('hex').slice(0, 32);
+
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: user.tenantId,
+        actorId: user.id,
+        actorType: 'user',
+        operation: 'object.query',
+        objectType: req.objectType,
+        queryPlan: req as unknown as object,
+        resultCount: total,
+        source: 'api',
+        effectivePermissionFilter: planned.effectivePermissionFilter ?? undefined,
+        compiledSqlHash,
+      },
     });
 
     return {
