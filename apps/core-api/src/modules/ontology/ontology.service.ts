@@ -113,7 +113,7 @@ export class OntologyService {
     const knownDerivedProperties = new Set(derived.map((d) => d.name));
     const knownRelations = objectTypeId
       ? await this.relationsForSource(tenantId, objectTypeId)
-      : undefined;
+      : new Set<string>();
 
     const depsByName = new Map<string, string[]>();
     for (const d of derived) {
