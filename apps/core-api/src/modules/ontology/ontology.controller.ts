@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, HttpCode } from '@nestjs/common';
 import { OntologyService } from './ontology.service';
+import { IndexManagerService } from './index-manager.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CreateObjectTypeDto } from './dto/create-object-type.dto';
@@ -9,7 +10,10 @@ import { CreateRelationshipDto } from './dto/create-relationship.dto';
 @Controller('ontology')
 @UseGuards(JwtAuthGuard)
 export class OntologyController {
-  constructor(private readonly ontologyService: OntologyService) {}
+  constructor(
+    private readonly ontologyService: OntologyService,
+    private readonly indexManager: IndexManagerService,
+  ) {}
 
   @Get('types')
   listTypes(@CurrentUser('tenantId') tenantId: string): Promise<unknown> {
@@ -34,6 +38,15 @@ export class OntologyController {
   @Delete('types/:id')
   deleteType(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string): Promise<unknown> {
     return this.ontologyService.deleteObjectType(tenantId, id);
+  }
+
+  @Post('types/:id/reconcile-indexes')
+  @HttpCode(200)
+  reconcileIndexes(
+    @CurrentUser('tenantId') tenantId: string,
+    @Param('id') id: string,
+  ): Promise<unknown> {
+    return this.indexManager.reconcile(tenantId, id);
   }
 
   @Get('relationships')

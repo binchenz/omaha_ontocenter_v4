@@ -3,6 +3,10 @@ export interface PropertyDefinition {
   label: string;
   type: 'string' | 'number' | 'boolean' | 'date' | 'json';
   required?: boolean;
+  filterable?: boolean;
+  sortable?: boolean;
+  precision?: number;
+  scale?: number;
 }
 
 export interface CreateObjectTypeRequest {

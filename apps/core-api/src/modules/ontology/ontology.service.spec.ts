@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { OntologyService } from './ontology.service';
+import { IndexManagerService } from './index-manager.service';
 import { PrismaService } from '@omaha/db';
 import { NotFoundException } from '@nestjs/common';
 
@@ -41,6 +42,7 @@ describe('OntologyService', () => {
       providers: [
         OntologyService,
         { provide: PrismaService, useValue: prisma },
+        { provide: IndexManagerService, useValue: { reconcile: jest.fn().mockResolvedValue({ created: [], dropped: [], kept: [] }) } },
       ],
     }).compile();
     service = module.get<OntologyService>(OntologyService);

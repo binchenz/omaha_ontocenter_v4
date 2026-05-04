@@ -2,10 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, PrismaService } from '@omaha/db';
 import { CreateObjectTypeRequest, UpdateObjectTypeRequest, CreateRelationshipRequest } from '@omaha/shared-types';
 import { assertTenantOwnership } from '../../common/helpers/assert-tenant-ownership';
+import { IndexManagerService } from './index-manager.service';
 
 @Injectable()
 export class OntologyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly indexManager: IndexManagerService,
+  ) {}
 
   async listObjectTypes(tenantId: string) {
     return this.prisma.objectType.findMany({
@@ -21,7 +25,7 @@ export class OntologyService {
   }
 
   async createObjectType(tenantId: string, dto: CreateObjectTypeRequest) {
-    return this.prisma.objectType.create({
+    const created = await this.prisma.objectType.create({
       data: {
         tenantId,
         name: dto.name,
@@ -30,11 +34,13 @@ export class OntologyService {
         derivedProperties: (dto.derivedProperties ?? []) as unknown as Prisma.InputJsonValue,
       },
     });
+    await this.indexManager.reconcile(tenantId, created.id);
+    return created;
   }
 
   async updateObjectType(tenantId: string, id: string, dto: UpdateObjectTypeRequest) {
     await this.getObjectType(tenantId, id);
-    return this.prisma.objectType.update({
+    const updated = await this.prisma.objectType.update({
       where: { id },
       data: {
         ...(dto.label !== undefined && { label: dto.label }),
@@ -43,6 +49,8 @@ export class OntologyService {
         version: { increment: 1 },
       },
     });
+    await this.indexManager.reconcile(tenantId, id);
+    return updated;
   }
 
   async deleteObjectType(tenantId: string, id: string) {

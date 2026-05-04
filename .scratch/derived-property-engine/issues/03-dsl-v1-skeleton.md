@@ -1,0 +1,31 @@
+---
+status: needs-triage
+type: AFK
+created: 2026-05-04
+---
+
+# 03 - DSL v1 skeleton: same-object derived properties end-to-end
+
+## Parent
+
+`.scratch/derived-property-engine/PRD.md`
+
+## What to build
+
+Stand up the `@omaha/dsl` package with a v1.0 grammar that covers comparison (`=`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `like`), boolean (`and`, `or`, `not`), and same-Object-Type property references only. Expose `parse`, `analyze` (returns dependency list + complexity score), and `compile(ast, ctx) → { sql, params }`. Wire the Ontology `DerivedPropertyDefinition` to store `expression: string`, run `dsl.analyze` on save, and reject expressions that reference unknown properties. Wire `query-planner` (extracted from `QueryService`) to expand a derived property reference in `filters[]` into its compiled SQL fragment inline.
+
+Demo target: declare `Order.isHighValue := totalAmount >= 1000` and run `POST /query/objects` with `filters: [{ derivedProperty: 'isHighValue', eq: true }]` end-to-end.
+
+## Acceptance criteria
+
+- [ ] `@omaha/dsl` package published in the pnpm workspace; only exports `parse`, `analyze`, `compile`, and error types
+- [ ] Grammar supports scalar comparison, boolean composition, negation, parenthesized expressions
+- [ ] Table-driven unit tests cover every operator, parenthesization, operator precedence, and every diagnostic shape
+- [ ] `Ontology.DerivedPropertyDefinition` accepts `expression: string`; save calls `dsl.analyze` and rejects references to unknown properties
+- [ ] `query-planner` is a new stateless service with signature `plan(queryPlan, ontology, permissions) → { sql, params, projection }`
+- [ ] `query.service` is refactored to call `query-planner` + `prisma.$queryRaw`; no direct filter compilation left inline
+- [ ] E2E seeds orders of varied `totalAmount`, declares `isHighValue`, asserts the filtered result set
+
+## Blocked by
+
+None - can start immediately

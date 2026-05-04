@@ -1,0 +1,30 @@
+---
+status: needs-triage
+type: AFK
+created: 2026-05-04
+---
+
+# 01 - Soft-delete baseline for object_instances
+
+## Parent
+
+`.scratch/derived-property-engine/PRD.md`
+
+## What to build
+
+Add a `deletedAt` column to `object_instances` and make every read path filter `deletedAt IS NULL` automatically. A single enforcement point (Prisma middleware or a wrapped repository) must ensure that no query service can accidentally return soft-deleted rows. An internal `includeDeleted: true` flag exists for audit replay but is not exposed in the public `POST /query/objects` DTO.
+
+After this slice, the system is ready to distinguish live vs deleted rows; deletion is not yet produced by any sync code (that stays ADR-0006 future work) — this slice only creates the mechanism and the enforcement invariant.
+
+## Acceptance criteria
+
+- [ ] Prisma migration adds `deleted_at TIMESTAMP NULL` to `object_instances`, plus an index on `(tenant_id, object_type, deleted_at)`
+- [ ] A single shared helper / middleware enforces `deletedAt IS NULL` on every read of `object_instances`
+- [ ] `POST /query/objects` excludes rows with `deletedAt IS NOT NULL` even when no explicit filter is set
+- [ ] An internal `includeDeleted: true` path exists (not in the public DTO) and is covered by an audit-replay unit test
+- [ ] Existing query E2E tests still pass; a new E2E seeds one soft-deleted row and asserts it does not appear
+- [ ] Any other code path that reads `object_instances` directly is updated or explicitly annotated
+
+## Blocked by
+
+None - can start immediately
