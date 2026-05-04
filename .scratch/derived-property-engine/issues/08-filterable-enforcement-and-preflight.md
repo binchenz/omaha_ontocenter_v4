@@ -1,5 +1,7 @@
 ---
-status: needs-triage
+status: done
+shipped: 2026-05-04
+commit: cd8be1a
 type: AFK
 created: 2026-05-04
 ---
