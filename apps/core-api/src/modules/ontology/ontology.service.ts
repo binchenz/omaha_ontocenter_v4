@@ -114,6 +114,8 @@ export class OntologyService {
     const knownRelations = objectTypeId
       ? await this.relationsForSource(tenantId, objectTypeId)
       : undefined;
+
+    const depsByName = new Map<string, string[]>();
     for (const d of derived) {
       const result = analyze(d.expression, { knownProperties, knownDerivedProperties, knownRelations });
       if (!result.valid) {
@@ -121,6 +123,14 @@ export class OntologyService {
           `Derived property '${d.name}' has invalid expression: ${result.errors.join('; ')}`,
         );
       }
+      depsByName.set(d.name, result.dependencies.filter((dep) => knownDerivedProperties.has(dep)));
+    }
+
+    const cycle = findCycle(depsByName);
+    if (cycle) {
+      throw new BadRequestException(
+        `Derived property cycle detected: ${cycle.join(' -> ')}`,
+      );
     }
   }
 
@@ -141,4 +151,40 @@ export class OntologyService {
     const knownRelations = await this.relationsForSource(tenantId, objectTypeId);
     return analyze(expression, { knownProperties, knownDerivedProperties, knownRelations });
   }
+}
+
+function findCycle(graph: Map<string, string[]>): string[] | null {
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color = new Map<string, number>();
+  for (const k of graph.keys()) color.set(k, WHITE);
+
+  const stack: string[] = [];
+
+  function dfs(node: string): string[] | null {
+    color.set(node, GRAY);
+    stack.push(node);
+    for (const next of graph.get(node) ?? []) {
+      if (!graph.has(next)) continue;
+      const c = color.get(next);
+      if (c === GRAY) {
+        const cycleStart = stack.indexOf(next);
+        return [...stack.slice(cycleStart), next];
+      }
+      if (c === WHITE) {
+        const found = dfs(next);
+        if (found) return found;
+      }
+    }
+    stack.pop();
+    color.set(node, BLACK);
+    return null;
+  }
+
+  for (const node of graph.keys()) {
+    if (color.get(node) === WHITE) {
+      const found = dfs(node);
+      if (found) return found;
+    }
+  }
+  return null;
 }

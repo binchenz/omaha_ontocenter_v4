@@ -69,3 +69,19 @@ describe('DSL analyzer', () => {
     expect(result.parameters).toEqual(['cutoffTime']);
   });
 });
+
+describe('Cycle detection across derived properties', () => {
+  it('detects a direct cycle: A references B and B references A', () => {
+    const aResult = analyze('b = true', {
+      knownProperties: new Set(['x']),
+      knownDerivedProperties: new Set(['a', 'b']),
+    });
+    expect(aResult.dependencies).toContain('b');
+
+    const bResult = analyze('a = true', {
+      knownProperties: new Set(['x']),
+      knownDerivedProperties: new Set(['a', 'b']),
+    });
+    expect(bResult.dependencies).toContain('a');
+  });
+});
