@@ -1,9 +1,11 @@
 import { Global, Module } from '@nestjs/common';
-import { PermissionService } from './permission.service';
+import { PermissionResolver } from './permission-resolver.service';
+import { OntologyModule } from '../ontology/ontology.module';
 
 @Global()
 @Module({
-  providers: [PermissionService],
-  exports: [PermissionService],
+  imports: [OntologyModule],
+  providers: [PermissionResolver],
+  exports: [PermissionResolver],
 })
 export class PermissionModule {}

@@ -1,13 +1,14 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '@omaha/db';
-import { PermissionService } from '../permission/permission.service';
+import { PermissionResolver } from '../permission/permission-resolver.service';
 import {
   CurrentUser as CurrentUserType,
   QueryObjectsRequest,
   QueryObjectsResponse,
 } from '@omaha/shared-types';
 import { QueryPlannerService, PermissionTemplateVars } from './query-planner.service';
+import { filterMaskedFields } from '../../common/filter-masked-fields';
 
 interface RawInstanceRow {
   id: string;
@@ -25,7 +26,7 @@ interface RawInstanceRow {
 export class QueryService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly permissionService: PermissionService,
+    private readonly permissionResolver: PermissionResolver,
     private readonly planner: QueryPlannerService,
   ) {}
 
@@ -33,7 +34,12 @@ export class QueryService {
     user: CurrentUserType,
     req: QueryObjectsRequest,
   ): Promise<QueryObjectsResponse> {
-    this.permissionService.assertCanAccess(user.permissions, 'object', 'read');
+    const resolution = await this.permissionResolver.resolveOrThrow(
+      user,
+      'object',
+      'read',
+      req.objectType,
+    );
 
     const page = req.page ?? 1;
     const pageSize = Math.min(req.pageSize ?? 20, 100);
@@ -73,14 +79,13 @@ export class QueryService {
     ]);
     const total = Number(countRows[0]?.count ?? 0);
 
-    const allowedFields = this.permissionService.getAllowedFields(user.permissions, 'object', 'read');
     const includes = await this.resolveIncludes(user.tenantId, req.objectType, req.include ?? []);
     const includedByParent = await this.fetchIncludes(user.tenantId, rows.map((r) => r.id), includes);
 
     const data = rows.map((inst) => {
-      const properties = this.permissionService.filterFields(
+      const properties = filterMaskedFields(
         (inst.properties ?? {}) as Record<string, unknown>,
-        allowedFields,
+        resolution.allowedFields,
       );
       const projected = req.select && req.select.length > 0
         ? Object.fromEntries(req.select.filter((k) => k in properties).map((k) => [k, properties[k]]))
