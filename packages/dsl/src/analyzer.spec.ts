@@ -38,4 +38,34 @@ describe('DSL analyzer', () => {
     expect(result.valid).toBe(false);
     expect(result.errors[0]).toMatch(/end of expression|unexpected/i);
   });
+
+  it('treats fields inside exists <rel> where … as scoped to the relation, and reports the relation as a dependency', () => {
+    const result = analyze("exists payments where status = 'Success'", {
+      knownProperties: new Set(['totalAmount']),
+      knownDerivedProperties: new Set(),
+      knownRelations: new Set(['payments']),
+    });
+    expect(result.valid).toBe(true);
+    expect(result.dependencies).toContain('payments');
+    expect(result.errors).toEqual([]);
+  });
+
+  it('rejects exists referencing an unknown relation', () => {
+    const result = analyze("exists nonexistent where status = 'Success'", {
+      knownProperties: new Set(['totalAmount']),
+      knownDerivedProperties: new Set(),
+      knownRelations: new Set(['payments']),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toMatch(/unknown relation/i);
+  });
+
+  it('records a parameter reference as a parameter dependency, not an identifier', () => {
+    const result = analyze('paidAt <= :cutoffTime', {
+      knownProperties: new Set(['paidAt']),
+      knownDerivedProperties: new Set(),
+    });
+    expect(result.valid).toBe(true);
+    expect(result.parameters).toEqual(['cutoffTime']);
+  });
 });

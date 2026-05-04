@@ -3,52 +3,71 @@ import { parse, Ast } from './parser';
 export interface AnalyzerContext {
   knownProperties: Set<string>;
   knownDerivedProperties: Set<string>;
+  knownRelations?: Set<string>;
 }
 
 export interface AnalyzeResult {
   valid: boolean;
   dependencies: string[];
+  parameters: string[];
   errors: string[];
 }
 
 export function analyze(src: string, ctx: AnalyzerContext): AnalyzeResult {
   const deps: string[] = [];
+  const params: string[] = [];
   const errors: string[] = [];
 
   let ast: Ast;
   try {
     ast = parse(src);
   } catch (e) {
-    return { valid: false, dependencies: [], errors: [(e as Error).message] };
+    return { valid: false, dependencies: [], parameters: [], errors: [(e as Error).message] };
   }
 
-  walk(ast, (node) => {
-    if (node.kind === 'ident') {
-      if (!ctx.knownProperties.has(node.name) && !ctx.knownDerivedProperties.has(node.name)) {
-        errors.push(`Unknown identifier: ${node.name}`);
-      } else if (!deps.includes(node.name)) {
-        deps.push(node.name);
-      }
-    }
-  });
-
-  return { valid: errors.length === 0, dependencies: deps, errors };
+  check(ast, { ...ctx, insideRelation: false }, deps, params, errors);
+  return { valid: errors.length === 0, dependencies: deps, parameters: params, errors };
 }
 
-function walk(ast: Ast, visit: (node: Ast) => void): void {
-  visit(ast);
+interface CheckCtx extends AnalyzerContext {
+  insideRelation: boolean;
+}
+
+function check(ast: Ast, ctx: CheckCtx, deps: string[], params: string[], errors: string[]): void {
   switch (ast.kind) {
+    case 'ident':
+      if (ctx.insideRelation) return; // relation-scoped fields are not validated at this layer
+      if (!ctx.knownProperties.has(ast.name) && !ctx.knownDerivedProperties.has(ast.name)) {
+        errors.push(`Unknown identifier: ${ast.name}`);
+      } else if (!deps.includes(ast.name)) {
+        deps.push(ast.name);
+      }
+      return;
+    case 'param':
+      if (!params.includes(ast.name)) params.push(ast.name);
+      return;
+    case 'number':
+    case 'string':
+    case 'bool':
+      return;
     case 'compare':
-      walk(ast.left, visit);
-      walk(ast.right, visit);
+      check(ast.left, ctx, deps, params, errors);
+      check(ast.right, ctx, deps, params, errors);
       return;
     case 'and':
     case 'or':
-      walk(ast.left, visit);
-      walk(ast.right, visit);
+      check(ast.left, ctx, deps, params, errors);
+      check(ast.right, ctx, deps, params, errors);
       return;
     case 'not':
-      walk(ast.expr, visit);
+      check(ast.expr, ctx, deps, params, errors);
+      return;
+    case 'exists':
+      if (ctx.knownRelations && !ctx.knownRelations.has(ast.relation)) {
+        errors.push(`Unknown relation: ${ast.relation}`);
+      }
+      if (!deps.includes(ast.relation)) deps.push(ast.relation);
+      check(ast.predicate, { ...ctx, insideRelation: true }, deps, params, errors);
       return;
   }
 }

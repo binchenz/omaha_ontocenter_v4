@@ -16,6 +16,10 @@ class QueryFilterDto {
 
   @Allow()
   value!: unknown;
+
+  @IsOptional()
+  @Allow()
+  params?: Record<string, unknown>;
 }
 
 class QuerySortDto {

@@ -11,6 +11,7 @@ export interface PropertyDefinition {
 
 export interface DerivedPropertyDefinition extends PropertyDefinition {
   expression: string;
+  params?: Array<{ name: string; type: 'datetime' | 'decimal' | 'string' | 'int' | 'boolean' }>;
 }
 
 export interface CreateObjectTypeRequest {

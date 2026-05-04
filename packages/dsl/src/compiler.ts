@@ -1,9 +1,16 @@
 import { Ast, CompareOp } from './parser';
 
+export interface RelationInfo {
+  /** Field name in the child's relationships JSONB that holds the parent id. */
+  foreignKey: string;
+}
+
 export interface CompileContext {
   numericFields: Set<string>;
   stringFields?: Set<string>;
   booleanFields?: Set<string>;
+  relations?: Record<string, RelationInfo>;
+  params?: Record<string, unknown>;
 }
 
 export interface CompiledFragment {
@@ -13,40 +20,78 @@ export interface CompiledFragment {
 
 export function compile(ast: Ast, ctx: CompileContext): CompiledFragment {
   const params: unknown[] = [];
-  const sql = emit(ast, ctx, params);
+  const sql = emit(ast, ctx, params, 'properties');
   return { sql, params };
 }
 
-function emit(ast: Ast, ctx: CompileContext, params: unknown[]): string {
+type Scope = string;
+
+function emit(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scope): string {
   switch (ast.kind) {
     case 'compare':
-      return emitCompare(ast.op, ast.left, ast.right, ctx, params);
+      return emitCompare(ast.op, ast.left, ast.right, ctx, params, scope);
     case 'and':
-      return `(${emit(ast.left, ctx, params)} AND ${emit(ast.right, ctx, params)})`;
+      return `(${emit(ast.left, ctx, params, scope)} AND ${emit(ast.right, ctx, params, scope)})`;
     case 'or':
-      return `(${emit(ast.left, ctx, params)} OR ${emit(ast.right, ctx, params)})`;
+      return `(${emit(ast.left, ctx, params, scope)} OR ${emit(ast.right, ctx, params, scope)})`;
     case 'not':
-      return `(NOT ${emit(ast.expr, ctx, params)})`;
+      return `(NOT ${emit(ast.expr, ctx, params, scope)})`;
+    case 'exists': {
+      const relInfo = ctx.relations?.[ast.relation];
+      if (!relInfo) {
+        throw new Error(`Unknown relation: ${ast.relation}`);
+      }
+      const childScope = 'child.properties';
+      const predicate = emit(ast.predicate, ctx, params, childScope);
+      return (
+        `EXISTS (` +
+        `SELECT 1 FROM object_instances child ` +
+        `WHERE child.tenant_id = object_instances.tenant_id ` +
+        `AND child.deleted_at IS NULL ` +
+        `AND (child.relationships->>'${relInfo.foreignKey}') = object_instances.id::text ` +
+        `AND ${predicate}` +
+        `)`
+      );
+    }
     default:
       throw new Error(`Unexpected top-level node: ${ast.kind}`);
   }
 }
 
-function emitCompare(op: CompareOp, left: Ast, right: Ast, ctx: CompileContext, params: unknown[]): string {
-  const l = emitOperand(left, ctx, params);
-  const r = emitOperand(right, ctx, params);
+function emitCompare(
+  op: CompareOp,
+  left: Ast,
+  right: Ast,
+  ctx: CompileContext,
+  params: unknown[],
+  scope: Scope,
+): string {
+  const l = emitOperand(left, ctx, params, scope);
+  const r = emitOperand(right, ctx, params, scope);
   return `(${l.sql} ${sqlOp(op)} ${r.sql})`;
 }
 
-function emitOperand(ast: Ast, ctx: CompileContext, params: unknown[]): { sql: string } {
+function emitOperand(
+  ast: Ast,
+  ctx: CompileContext,
+  params: unknown[],
+  scope: Scope,
+): { sql: string } {
   if (ast.kind === 'ident') {
     if (ctx.numericFields.has(ast.name)) {
-      return { sql: `(properties->>'${ast.name}')::numeric` };
+      return { sql: `(${scope}->>'${ast.name}')::numeric` };
     }
     if (ctx.booleanFields?.has(ast.name)) {
-      return { sql: `((properties->>'${ast.name}')::boolean)` };
+      return { sql: `((${scope}->>'${ast.name}')::boolean)` };
     }
-    return { sql: `(properties->>'${ast.name}')` };
+    return { sql: `(${scope}->>'${ast.name}')` };
+  }
+  if (ast.kind === 'param') {
+    if (!ctx.params || !(ast.name in ctx.params)) {
+      throw new Error(`Missing parameter: ${ast.name}`);
+    }
+    params.push(ctx.params[ast.name]);
+    return { sql: `$${params.length}` };
   }
   if (ast.kind === 'number') {
     params.push(ast.value);

@@ -54,6 +54,17 @@ export class QueryPlannerService {
     );
     const derivedByName = new Map(derived.map((d) => [d.name, d]));
 
+    let relationsMap: Record<string, { foreignKey: string }> = {};
+    if (ot) {
+      const rels = await this.prisma.objectRelationship.findMany({
+        where: { tenantId: args.tenantId, sourceTypeId: ot.id },
+        select: { name: true, targetType: { select: { name: true } } },
+      });
+      for (const r of rels) {
+        relationsMap[r.name] = { foreignKey: `${ot.name}Id` };
+      }
+    }
+
     const params: unknown[] = [];
     const wherePieces: string[] = [
       `tenant_id = $${params.push(args.tenantId)}::uuid`,
@@ -72,7 +83,12 @@ export class QueryPlannerService {
           throw new BadRequestException(`Unknown derived property: ${f.derivedProperty}`);
         }
         const ast = parse(def.expression);
-        const fragment = compile(ast, { numericFields, booleanFields });
+        const fragment = compile(ast, {
+          numericFields,
+          booleanFields,
+          relations: relationsMap,
+          params: f.params ?? {},
+        });
         const offsetParams = params.length;
         const remappedSql = fragment.sql.replace(/\$(\d+)/g, (_m, idx) => `$${Number(idx) + offsetParams}`);
         for (const p of fragment.params) params.push(p);

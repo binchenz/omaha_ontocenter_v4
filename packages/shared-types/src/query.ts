@@ -7,6 +7,7 @@ export interface QueryFilter {
   derivedProperty?: string;
   operator: FilterOperator;
   value: unknown;
+  params?: Record<string, unknown>;
 }
 
 export interface QuerySort {

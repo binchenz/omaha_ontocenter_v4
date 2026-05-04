@@ -51,4 +51,45 @@ describe('DSL parser', () => {
       },
     });
   });
+
+  it('parses exists <rel> where <predicate>', () => {
+    const ast = parse("exists payments where status = 'Success'");
+    expect(ast).toEqual({
+      kind: 'exists',
+      relation: 'payments',
+      predicate: {
+        kind: 'compare',
+        op: '=',
+        left: { kind: 'ident', name: 'status' },
+        right: { kind: 'string', value: 'Success' },
+      },
+    });
+  });
+
+  it('parses not exists <rel> where <predicate>', () => {
+    const ast = parse('not exists payments where amount > 0');
+    expect(ast).toEqual({
+      kind: 'not',
+      expr: {
+        kind: 'exists',
+        relation: 'payments',
+        predicate: {
+          kind: 'compare',
+          op: '>',
+          left: { kind: 'ident', name: 'amount' },
+          right: { kind: 'number', value: 0 },
+        },
+      },
+    });
+  });
+
+  it('parses a parameter reference like :cutoffTime', () => {
+    const ast = parse('paidAt <= :cutoffTime');
+    expect(ast).toEqual({
+      kind: 'compare',
+      op: '<=',
+      left: { kind: 'ident', name: 'paidAt' },
+      right: { kind: 'param', name: 'cutoffTime' },
+    });
+  });
 });

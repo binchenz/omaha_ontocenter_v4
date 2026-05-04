@@ -2,19 +2,22 @@ export type CompareOp = '=' | '!=' | '<' | '<=' | '>' | '>=';
 
 export type Ast =
   | { kind: 'ident'; name: string }
+  | { kind: 'param'; name: string }
   | { kind: 'number'; value: number }
   | { kind: 'string'; value: string }
   | { kind: 'bool'; value: boolean }
   | { kind: 'compare'; op: CompareOp; left: Ast; right: Ast }
   | { kind: 'and'; left: Ast; right: Ast }
   | { kind: 'or'; left: Ast; right: Ast }
-  | { kind: 'not'; expr: Ast };
+  | { kind: 'not'; expr: Ast }
+  | { kind: 'exists'; relation: string; predicate: Ast };
 
 type Tok =
   | { kind: 'ident'; value: string }
   | { kind: 'number'; value: number }
   | { kind: 'string'; value: string }
   | { kind: 'op'; value: string }
+  | { kind: 'colon' }
   | { kind: 'lparen' }
   | { kind: 'rparen' };
 
@@ -36,6 +39,11 @@ function tokenize(src: string): Tok[] {
     }
     if (c === ')') {
       out.push({ kind: 'rparen' });
+      i++;
+      continue;
+    }
+    if (c === ':') {
+      out.push({ kind: 'colon' });
       i++;
       continue;
     }
@@ -87,6 +95,8 @@ export function parse(src: string): Ast {
   return expr;
 }
 
+const KEYWORDS = new Set(['and', 'or', 'not', 'exists', 'where', 'true', 'false']);
+
 class Parser {
   private pos = 0;
   constructor(private readonly toks: Tok[]) {}
@@ -126,6 +136,22 @@ class Parser {
       const expr = this.parseNot();
       return { kind: 'not', expr };
     }
+    return this.parseExists();
+  }
+
+  private parseExists(): Ast {
+    if (this.matchKeyword('exists')) {
+      const relTok = this.peek();
+      if (!relTok || relTok.kind !== 'ident' || KEYWORDS.has(relTok.value)) {
+        throw new Error("Expected relation identifier after 'exists'");
+      }
+      this.pos++;
+      if (!this.matchKeyword('where')) {
+        throw new Error("Expected 'where' after exists <relation>");
+      }
+      const predicate = this.parseOr();
+      return { kind: 'exists', relation: relTok.value, predicate };
+    }
     return this.parseCompare();
   }
 
@@ -160,6 +186,13 @@ class Parser {
       if (!close || close.kind !== 'rparen') throw new Error("Expected ')'");
       this.pos++;
       return expr;
+    }
+    if (t.kind === 'colon') {
+      this.pos++;
+      const next = this.peek();
+      if (!next || next.kind !== 'ident') throw new Error("Expected parameter name after ':'");
+      this.pos++;
+      return { kind: 'param', name: next.value };
     }
     if (t.kind === 'number') {
       this.pos++;

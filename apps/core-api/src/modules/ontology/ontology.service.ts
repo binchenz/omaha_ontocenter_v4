@@ -32,7 +32,7 @@ export class OntologyService {
   }
 
   async createObjectType(tenantId: string, dto: CreateObjectTypeRequest) {
-    this.validateDerivedProperties(dto.properties, dto.derivedProperties ?? []);
+    await this.validateDerivedProperties(tenantId, undefined, dto.properties, dto.derivedProperties ?? []);
     const created = await this.prisma.objectType.create({
       data: {
         tenantId,
@@ -52,7 +52,7 @@ export class OntologyService {
     const nextDerived = dto.derivedProperties
       ?? ((existing!.derivedProperties ?? []) as unknown as DerivedPropertyDefinition[]);
     if (dto.properties !== undefined || dto.derivedProperties !== undefined) {
-      this.validateDerivedProperties(nextProps, nextDerived);
+      await this.validateDerivedProperties(tenantId, id, nextProps, nextDerived);
     }
     const updated = await this.prisma.objectType.update({
       where: { id },
@@ -102,20 +102,33 @@ export class OntologyService {
     return rel;
   }
 
-  private validateDerivedProperties(
+  private async validateDerivedProperties(
+    tenantId: string,
+    objectTypeId: string | undefined,
     properties: PropertyDefinition[],
     derived: DerivedPropertyDefinition[],
-  ): void {
+  ): Promise<void> {
     if (!derived.length) return;
     const knownProperties = new Set(properties.map((p) => p.name));
     const knownDerivedProperties = new Set(derived.map((d) => d.name));
+    const knownRelations = objectTypeId
+      ? await this.relationsForSource(tenantId, objectTypeId)
+      : undefined;
     for (const d of derived) {
-      const result = analyze(d.expression, { knownProperties, knownDerivedProperties });
+      const result = analyze(d.expression, { knownProperties, knownDerivedProperties, knownRelations });
       if (!result.valid) {
         throw new BadRequestException(
           `Derived property '${d.name}' has invalid expression: ${result.errors.join('; ')}`,
         );
       }
     }
+  }
+
+  private async relationsForSource(tenantId: string, sourceTypeId: string): Promise<Set<string>> {
+    const rels = await this.prisma.objectRelationship.findMany({
+      where: { tenantId, sourceTypeId },
+      select: { name: true },
+    });
+    return new Set(rels.map((r) => r.name));
   }
 }
