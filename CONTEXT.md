@@ -72,6 +72,28 @@ _Avoid_: Integration, Connector mapping
 One execution of a Mapping. A `full` Sync Job is a world snapshot (upsert + soft-delete of missing rows); an `incremental` Sync Job pulls rows past a watermark and never detects deletes. See `docs/adr/0006-sync-model.md`.
 _Avoid_: Import, Run, Ingestion job
 
+### Agent Layer
+
+**Agent**:
+The conversational AI that is the platform's primary user interface. A single LLM-driven loop that understands user intent, activates Skills, calls Tools via the SDK, and streams responses. Operates within one Tenant's Ontology. See `docs/adr/0008-agent-first-architecture.md`.
+_Avoid_: Bot, Assistant, Copilot
+
+**Skill**:
+A domain capability package that the Agent auto-activates based on user intent. Contains a system prompt fragment, a subset of available Tools, and optional workflow guidance. Code-defined, not tenant-configurable. Examples: data ingestion skill, ontology design skill, query skill.
+_Avoid_: Plugin, Module (in agent context), Capability
+
+**Tool**:
+An atomic operation the LLM can invoke via function calling. Stateless, single-purpose. Examples: `create_object_type`, `query_objects`, `import_data`. Defined as JSON Schema; executed by the agent loop; results fed back to the LLM.
+_Avoid_: Function, Command, API call (in agent context)
+
+**SDK (Ontology SDK)**:
+The ontology-aware typed interface layer between Tools and underlying services. Tools call SDK methods; SDK calls OntologyService/QueryService/etc. Provides the Agent with a unified view of the current Tenant's Ontology without exposing internal service details. Lives in core-api as an internal module.
+_Avoid_: API client, Service layer (in agent context)
+
+**Conversation**:
+A persistent dialogue session between a User and the Agent. Stores the full sequence of turns (user messages, agent responses, tool calls, results) for audit and context. The Agent dynamically compresses older turns when feeding history to the LLM.
+_Avoid_: Chat, Session, Thread
+
 ## Relationships
 
 - A **User** belongs to exactly one **Tenant**
@@ -81,6 +103,10 @@ _Avoid_: Import, Run, Ingestion job
 - A **Query Plan** targets one **Object Type** and may reference its **Derived Properties**
 - An **Action** is declared on an **Object Type** and run by its **Action Handler**
 - **Preview** of an **Action** produces an **ActionPlan**; **Execute** consumes it
+- An **Agent** operates within one **Tenant**'s **Ontology**, calling **Tools** via the **SDK**
+- A **Skill** exposes a subset of **Tools** and is auto-activated by the **Agent**
+- A **Conversation** belongs to one **User** and one **Agent** session
+- A **Tool** invokes **SDK** methods; the **SDK** delegates to underlying services (OntologyService, QueryService, etc.)
 
 (`Order`, `Customer`, `Payment`, `Review`, `Task` etc. that appear in PRD §7.2 are **example** Object Types used for the demo tenant — they are not platform-level concepts.)
 
@@ -91,6 +117,12 @@ _Avoid_: Import, Run, Ingestion job
 
 > **Dev:** "Permission rule `salesOwnerId = {{user.id}}` — does that match the logged-in person?"
 > **Domain expert:** "Yes. Current **User** == order's salesOwner **User**. No indirection."
+
+> **Dev:** "When the user says '帮我导入这个 Excel', should the Agent call the import Tool directly, or does it need to go through a Skill first?"
+> **Domain expert:** "The Agent activates the data-ingestion **Skill**, which knows the workflow (create Connector → infer schema → confirm → Mapping → Sync). The Skill exposes the relevant **Tools** in sequence. The Agent doesn't freestyle — the Skill provides the guardrails."
+
+> **Dev:** "Is the SDK just a wrapper around our existing services?"
+> **Domain expert:** "Yes, but ontology-aware. A **Tool** calls `sdk.queryObjects(...)` — the **SDK** resolves the Object Type from the current Tenant's Ontology, applies permissions, and delegates to QueryService. Tools never touch services directly."
 
 ## Flagged ambiguities
 

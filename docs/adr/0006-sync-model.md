@@ -1,5 +1,7 @@
 # Sync Model: Full-Rebuild Default, Incremental Opt-In, Soft-Delete
 
+> **Status: Draft — not yet implemented.** Schema tables (`SyncJob`, `Connector`, `ObjectMapping`) and stub modules exist but no sync execution logic has been written. This ADR records the design intent for when the sync engine is built.
+
 MVP supports two sync strategies per `ObjectMapping`: `full` (default) and `incremental` (opt-in). A `full` sync treats each run as a world snapshot — upserts every row by `external_id`, and soft-deletes Object Instances that were present on the previous run but absent this time. An `incremental` sync requires the tenant admin to declare a watermark column on the source table (typically `updated_at`); it pulls only rows newer than the last stored watermark, upserts them, and performs **no** delete detection — removing rows in `incremental` mode requires a manual "Full Resync." Soft deletes are mandatory: every `object_instances` row gets a nullable `deletedAt`, and queries are required to filter `deletedAt IS NULL` at the compiler level. CDC / binlog subscription is explicitly deferred to V2.
 
 ## Why

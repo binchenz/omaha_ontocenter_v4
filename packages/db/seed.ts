@@ -213,15 +213,24 @@ async function main() {
     });
   }
 
+  const customerC001 = await prisma.objectInstance.findUnique({
+    where: { tenantId_objectType_externalId: { tenantId: tenant.id, objectType: 'customer', externalId: 'C001' } },
+    select: { id: true },
+  });
+  const customerC002 = await prisma.objectInstance.findUnique({
+    where: { tenantId_objectType_externalId: { tenantId: tenant.id, objectType: 'customer', externalId: 'C002' } },
+    select: { id: true },
+  });
+
   const orders = [
-    { externalId: 'O2024001', label: '订单 O2024001', properties: { orderNo: 'O2024001', orderDate: '2024-03-15', totalAmount: 75000, status: '已完成' }, relationships: { customer: 'C001', products: ['P001', 'P002'] } },
-    { externalId: 'O2024002', label: '订单 O2024002', properties: { orderNo: 'O2024002', orderDate: '2024-04-20', totalAmount: 25000, status: '进行中' }, relationships: { customer: 'C002', products: ['P001'] } },
+    { externalId: 'O2024001', label: '订单 O2024001', properties: { orderNo: 'O2024001', orderDate: '2024-03-15', totalAmount: 75000, status: '已完成' }, relationships: { customerId: customerC001!.id } },
+    { externalId: 'O2024002', label: '订单 O2024002', properties: { orderNo: 'O2024002', orderDate: '2024-04-20', totalAmount: 25000, status: '进行中' }, relationships: { customerId: customerC002!.id } },
   ];
 
   for (const o of orders) {
     await prisma.objectInstance.upsert({
       where: { tenantId_objectType_externalId: { tenantId: tenant.id, objectType: 'order', externalId: o.externalId } },
-      update: {},
+      update: { relationships: o.relationships },
       create: {
         tenantId: tenant.id,
         objectType: 'order',

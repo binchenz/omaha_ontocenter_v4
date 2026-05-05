@@ -1,4 +1,6 @@
-# LLM Lives in core-api as a Plan Generator, Not in agent-worker
+# [SUPERSEDED by ADR-0008] LLM Lives in core-api as a Plan Generator, Not in agent-worker
+
+> **Status: Superseded by [ADR-0008](./0008-agent-first-architecture.md).** The two-step "NL → Plan → confirm → execute" model is replaced by an agent-first architecture where the LLM operates as a conversational agent with tool calling. Risk-based confirmation replaces mandatory plan preview. The LLM still lives in core-api (single process), but as an agent loop, not a single-shot plan generator.
 
 The MVP places LLM-driven natural language understanding inside `core-api` as a new `llm` module that generates Query Plans and Action inputs via single-shot function calling. The frontend submits raw NL input to `POST /nl/query` and receives **either** a Query Plan (for the user to review and execute) **or** a clarifying question (one round max). Plans are always executed via the existing `POST /query/objects` endpoint — the same path a hand-written Plan takes — so all permission, ontology, and audit machinery applies uniformly. `agent-worker` is reserved for scheduled sync jobs and long-running V1.1 features (multi-turn agent loops, batch summaries); it is **not** on the MVP NL path.
 

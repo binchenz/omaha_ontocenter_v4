@@ -1,5 +1,7 @@
 # Action Preview is a Dry-Run that Produces an ActionPlan
 
+> **Status: Draft — not yet implemented.** Schema tables (`ActionDefinition`, `ActionPreview`, `ActionRun`) exist but no module or service code has been written. This ADR records the design intent for when Action support is built.
+
 Every Action handler returns a structured `ActionPlan` describing intended writes and external calls; it never commits directly. **Preview** invokes the handler, persists the plan, validates permissions/preconditions, and returns a `previewId` plus a hash of the plan. **Execute** accepts the `previewId`, recomputes the hash, re-checks permissions, then hands the frozen plan to a commit engine that performs the writes inside a transaction. MVP supports db-only plans; external (non-revocable) API calls are deferred to V1.1. The PRD-stated lifecycle `Discover → Validate → Authorize → Preview → Confirm → Execute → Audit` maps onto this split, with Validate / Authorize / Precondition checks running inside Preview (and re-run partially at Execute).
 
 ## Why
