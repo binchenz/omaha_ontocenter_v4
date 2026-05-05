@@ -48,10 +48,10 @@ export class AgentController {
         comment: body.comment,
       })) {
         if (event.type === 'tool_call') {
-          toolCalls.push({ name: event.name, args: event.args });
+          toolCalls.push({ id: event.id, name: event.name, args: event.args });
         }
         if (event.type === 'tool_result') {
-          toolResults.push({ name: event.name, data: event.data });
+          toolResults.push({ id: event.id, name: event.name, data: event.data });
         }
         if (event.type === 'text') {
           textContent = event.content;
@@ -113,10 +113,10 @@ export class AgentController {
           event.conversationId = conversation.id;
         }
         if (event.type === 'tool_call') {
-          toolCalls.push({ name: event.name, args: event.args });
+          toolCalls.push({ id: event.id, name: event.name, args: event.args });
         }
         if (event.type === 'tool_result') {
-          toolResults.push({ name: event.name, data: event.data });
+          toolResults.push({ id: event.id, name: event.name, data: event.data });
         }
         if (event.type === 'text') {
           textContent = event.content;

@@ -87,5 +87,32 @@ describe('ConversationService', () => {
       expect(history[0]).toEqual({ role: 'user', content: '你好' });
       expect(history[1]).toEqual({ role: 'assistant', content: '你好！有什么可以帮你的？' });
     });
+
+    it('produces tool_calls with non-empty id even when stored tool calls have no id (regression)', async () => {
+      // Reproduce the actual stored shape from production: { name, args } with no id.
+      // DeepSeek rejects assistant messages with tool_calls missing id.
+      mockPrisma.conversationTurn.findMany.mockResolvedValue([
+        { role: 'user', content: '我们有什么数据', toolCalls: null, toolResults: null },
+        {
+          role: 'assistant',
+          content: null,
+          toolCalls: [{ name: 'get_ontology_schema', args: {} }],
+          toolResults: [{ name: 'get_ontology_schema', data: { types: [] } }],
+        },
+      ]);
+
+      const history = await service.buildLlmHistory('conv-1');
+
+      const assistantMsg = history.find(m => m.role === 'assistant');
+      expect(assistantMsg?.tool_calls).toBeDefined();
+      expect(assistantMsg!.tool_calls!.length).toBeGreaterThan(0);
+      for (const tc of assistantMsg!.tool_calls!) {
+        expect(typeof tc.id).toBe('string');
+        expect(tc.id.length).toBeGreaterThan(0);
+      }
+
+      const toolMsg = history.find(m => m.role === 'tool');
+      expect(toolMsg?.tool_call_id).toBe(assistantMsg!.tool_calls![0].id);
+    });
   });
 });

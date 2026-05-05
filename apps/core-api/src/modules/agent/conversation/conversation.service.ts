@@ -65,26 +65,32 @@ export class ConversationService {
 
     for (const turn of turns) {
       if (turn.toolCalls && Array.isArray(turn.toolCalls) && (turn.toolCalls as any[]).length > 0) {
-        const toolCalls = turn.toolCalls as Array<{ id: string; name: string; args: unknown }>;
+        const rawCalls = turn.toolCalls as Array<{ id?: string; name: string; args: unknown }>;
+        const rawResults = (Array.isArray(turn.toolResults) ? turn.toolResults : []) as Array<{ id?: string; name: string; data: unknown }>;
+
+        const callsWithIds = rawCalls.map((tc, idx) => ({
+          id: tc.id ?? `legacy_${idx}`,
+          name: tc.name,
+          args: tc.args,
+        }));
+
         messages.push({
           role: 'assistant',
           content: null,
-          tool_calls: toolCalls.map(tc => ({
+          tool_calls: callsWithIds.map(tc => ({
             id: tc.id,
             type: 'function' as const,
             function: { name: tc.name, arguments: JSON.stringify(tc.args) },
           })),
         });
 
-        if (turn.toolResults && Array.isArray(turn.toolResults)) {
-          const toolResults = turn.toolResults as Array<{ id: string; name: string; data: unknown }>;
-          for (const tr of toolResults) {
-            messages.push({
-              role: 'tool',
-              content: JSON.stringify(tr.data),
-              tool_call_id: tr.id,
-            });
-          }
+        for (let i = 0; i < callsWithIds.length; i++) {
+          const matchingResult = rawResults[i];
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify(matchingResult?.data ?? null),
+            tool_call_id: callsWithIds[i].id,
+          });
         }
       } else {
         messages.push({

@@ -7,8 +7,8 @@ import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
 import { estimateTokens, PROMPT_BUDGET_WARN, PROMPT_BUDGET_ERROR } from './prompt-budget';
 
 export type AgentEvent =
-  | { type: 'tool_call'; name: string; args: Record<string, unknown> }
-  | { type: 'tool_result'; name: string; data: unknown }
+  | { type: 'tool_call'; id: string; name: string; args: Record<string, unknown> }
+  | { type: 'tool_result'; id: string; name: string; data: unknown }
   | { type: 'text'; content: string }
   | { type: 'confirmation_request'; id: string; toolName: string; args: Record<string, unknown>; message: string }
   | { type: 'error'; message: string }
@@ -83,7 +83,7 @@ export class AgentService {
 
       try {
         const result = await tool.execute(pending.args, { user: input.user });
-        yield { type: 'tool_result', name: pending.toolName, data: result };
+        yield { type: 'tool_result', id: pending.toolCallId, name: pending.toolName, data: result };
         messages.push({ role: 'tool', content: `<data>${JSON.stringify(result)}</data>`, tool_call_id: pending.toolCallId });
       } catch (err: any) {
         const errorPayload = { error: err.message ?? 'Tool execution failed' };
@@ -130,7 +130,7 @@ export class AgentService {
       let pendingConfirmation = false;
 
       for (const call of response.calls) {
-        yield { type: 'tool_call', name: call.name, args: call.arguments };
+        yield { type: 'tool_call', id: call.id, name: call.name, args: call.arguments };
 
         const tool = this.tools.find(t => t.name === call.name);
         if (!tool) {
@@ -161,7 +161,7 @@ export class AgentService {
 
         try {
           const result = await tool.execute(call.arguments, { user: input.user });
-          yield { type: 'tool_result', name: call.name, data: result };
+          yield { type: 'tool_result', id: call.id, name: call.name, data: result };
           messages.push({ role: 'tool', content: `<data>${JSON.stringify(result)}</data>`, tool_call_id: call.id });
         } catch (err: any) {
           const errorPayload = { error: err.message ?? 'Tool execution failed' };
