@@ -142,5 +142,43 @@ describe('DeepSeekLlmClient', () => {
       expect(msg).toContain('1234');
       logSpy.mockRestore();
     });
+
+    it('retries on transient network error and succeeds on a later attempt', async () => {
+      const networkErr = new TypeError('fetch failed');
+      (networkErr as any).cause = { code: 'UND_ERR_CONNECT_TIMEOUT', message: 'Connect Timeout Error' };
+
+      mockFetch
+        .mockRejectedValueOnce(networkErr)
+        .mockRejectedValueOnce(networkErr)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { role: 'assistant', content: 'recovered' }, finish_reason: 'stop' }],
+          }),
+        });
+
+      const result = await client.chatWithTools(
+        [{ role: 'user', content: 'hi' }],
+        [{ name: 'query_objects', description: 'Query', parameters: {} }],
+      );
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(result.type).toBe('text');
+      if (result.type === 'text') expect(result.content).toBe('recovered');
+    });
+
+    it('throws after exhausting retries on persistent network error', async () => {
+      const networkErr = new TypeError('fetch failed');
+      mockFetch.mockRejectedValue(networkErr);
+
+      await expect(
+        client.chatWithTools(
+          [{ role: 'user', content: 'hi' }],
+          [{ name: 'query_objects', description: 'Query', parameters: {} }],
+        ),
+      ).rejects.toThrow();
+
+      expect(mockFetch.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
   });
 });

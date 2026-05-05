@@ -6,6 +6,8 @@ export class DeepSeekLlmClient implements LlmClient {
   private readonly logger = new Logger(DeepSeekLlmClient.name);
   private readonly apiUrl = 'https://api.deepseek.com/chat/completions';
   private readonly model = 'deepseek-chat';
+  private readonly maxRetries = 3;
+  private readonly retryBaseDelayMs = 200;
 
   async chat(messages: LlmMessage[], options?: LlmOptions): Promise<string> {
     const res = await this.callApi(messages, undefined, options);
@@ -51,7 +53,7 @@ export class DeepSeekLlmClient implements LlmClient {
     if (options?.temperature !== undefined) body.temperature = options.temperature;
     if (options?.jsonMode) body.response_format = { type: 'json_object' };
 
-    const res = await fetch(this.apiUrl, {
+    const res = await this.fetchWithRetry(this.apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -71,5 +73,21 @@ export class DeepSeekLlmClient implements LlmClient {
       this.logger.log(`DeepSeek call: prompt_tokens=${promptTokens}`);
     }
     return json;
+  }
+
+  private async fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        return await fetch(url, init);
+      } catch (err) {
+        lastErr = err;
+        if (attempt === this.maxRetries) break;
+        const delay = this.retryBaseDelayMs * 2 ** (attempt - 1);
+        this.logger.warn(`DeepSeek fetch failed (attempt ${attempt}/${this.maxRetries}), retrying in ${delay}ms: ${(err as Error)?.message}`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+    throw lastErr;
   }
 }
