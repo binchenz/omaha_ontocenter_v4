@@ -1,4 +1,5 @@
 import { DeepSeekLlmClient } from './deepseek-llm-client';
+import { Logger } from '@nestjs/common';
 
 describe('DeepSeekLlmClient', () => {
   let client: DeepSeekLlmClient;
@@ -119,6 +120,27 @@ describe('DeepSeekLlmClient', () => {
       }]);
       expect(body.temperature).toBe(0);
       expect(options.headers['Authorization']).toBe('Bearer test-key');
+    });
+
+    it('logs prompt_tokens from the response usage field', async () => {
+      const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1234, completion_tokens: 5, total_tokens: 1239 },
+        }),
+      });
+
+      await client.chatWithTools(
+        [{ role: 'user', content: 'test' }],
+        [{ name: 'query_objects', description: 'Query', parameters: {} }],
+      );
+
+      expect(logSpy).toHaveBeenCalled();
+      const msg = logSpy.mock.calls.map(c => c[0]).join(' ');
+      expect(msg).toContain('1234');
+      logSpy.mockRestore();
     });
   });
 });

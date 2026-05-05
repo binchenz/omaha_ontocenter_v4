@@ -10,7 +10,7 @@ export interface PendingConfirmation {
 
 @Injectable()
 export class ConfirmationGate {
-  constructor(private readonly store: Map<string, PendingConfirmation> = new Map()) {}
+  private readonly store = new Map<string, PendingConfirmation>();
 
   async suspend(conversationId: string, pending: PendingConfirmation): Promise<void> {
     this.store.set(conversationId, pending);

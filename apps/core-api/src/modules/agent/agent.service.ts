@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { LlmClient, LlmMessage, ToolDefinition } from './llm/llm-client.interface';
 import { AgentTool } from './tools/tool.interface';
 import { AgentSkill } from './skills/skill.interface';
 import { ConfirmationGate } from './confirmation/confirmation-gate.service';
 import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
+import { estimateTokens, PROMPT_BUDGET_WARN, PROMPT_BUDGET_ERROR } from './prompt-budget';
 
 export type AgentEvent =
   | { type: 'tool_call'; name: string; args: Record<string, unknown> }
@@ -25,6 +26,8 @@ const MAX_TOOL_ITERATIONS = 5;
 
 @Injectable()
 export class AgentService {
+  private readonly logger = new Logger(AgentService.name);
+
   constructor(
     private readonly llm: LlmClient,
     private readonly tools: AgentTool[],
@@ -37,8 +40,11 @@ export class AgentService {
       ? `${input.message}\n\n[附件 fileId: ${input.fileId}]`
       : input.message;
 
+    const systemPrompt = this.buildSystemPrompt();
+    this.checkPromptBudget(systemPrompt, input.conversationId);
+
     const messages: LlmMessage[] = [
-      { role: 'system', content: this.buildSystemPrompt() },
+      { role: 'system', content: systemPrompt },
       ...(input.history ?? []),
       { role: 'user', content: userContent },
     ];
@@ -195,5 +201,15 @@ export class AgentService {
 
     const skillPrompts = this.skills.map(s => s.systemPrompt({ tenantId: '' })).join('\n\n');
     return `${base}\n\n${skillPrompts}`;
+  }
+
+  private checkPromptBudget(prompt: string, conversationId?: string): void {
+    const tokens = estimateTokens(prompt);
+    const convTag = conversationId ? `[conv=${conversationId}] ` : '';
+    if (tokens >= PROMPT_BUDGET_ERROR) {
+      this.logger.error(`${convTag}System prompt exceeds ERROR budget: ~${tokens} tokens (limit ${PROMPT_BUDGET_ERROR})`);
+    } else if (tokens >= PROMPT_BUDGET_WARN) {
+      this.logger.warn(`${convTag}System prompt approaching budget: ~${tokens} tokens (warn ${PROMPT_BUDGET_WARN})`);
+    }
   }
 }

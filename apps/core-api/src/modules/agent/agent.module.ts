@@ -32,9 +32,8 @@ import { AgentSkill } from './skills/skill.interface';
 import { QuerySkill } from './skills/query.skill';
 import { DataIngestionSkill } from './skills/data-ingestion.skill';
 import { OntologyDesignSkill } from './skills/ontology-design.skill';
-
-const AGENT_TOOLS = 'AGENT_TOOLS';
-const AGENT_SKILLS = 'AGENT_SKILLS';
+import { AgentBootstrap } from './agent.bootstrap';
+import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
 
 @Module({
   imports: [OntologyModule, QueryModule, MulterModule.register({ dest: './uploads' })],
@@ -81,6 +80,7 @@ const AGENT_SKILLS = 'AGENT_SKILLS';
       inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate],
     },
     ConversationService,
+    AgentBootstrap,
   ],
 })
 export class AgentModule {}

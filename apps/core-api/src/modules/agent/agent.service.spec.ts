@@ -3,6 +3,7 @@ import { LlmClient, LlmMessage, LlmOptions, LlmResponse, ToolDefinition } from '
 import { AgentTool, ToolContext } from './tools/tool.interface';
 import { AgentSkill, SkillContext } from './skills/skill.interface';
 import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
+import { Logger } from '@nestjs/common';
 
 const TEST_USER: CurrentUserType = {
   id: 'u1',
@@ -282,5 +283,63 @@ describe('AgentService', () => {
 
     expect(llm.lastTools.map(t => t.name)).toEqual(['query_objects']);
     expect(llm.lastTools.map(t => t.name)).not.toContain('delete_object_type');
+  });
+
+  describe('prompt budget monitoring', () => {
+    let warnSpy: jest.SpyInstance;
+    let errorSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+      errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    it('logs a warning when system prompt exceeds 4000 tokens', async () => {
+      const fatSkill: AgentSkill = {
+        name: 'fat',
+        description: '',
+        tools: [],
+        systemPrompt: () => 'x'.repeat(6500),
+      };
+      const fatService = new AgentService(llm, [], [fatSkill]);
+      llm.queueResponse({ type: 'text', content: 'ok' });
+      for await (const _ of fatService.run({ user: TEST_USER, message: 'hi', conversationId: 'conv-1' })) {}
+
+      expect(warnSpy).toHaveBeenCalled();
+      const msg = warnSpy.mock.calls[0][0];
+      expect(msg).toContain('conv-1');
+      expect(msg).toMatch(/tokens/);
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it('logs an error when system prompt exceeds 5000 tokens', async () => {
+      const hugeSkill: AgentSkill = {
+        name: 'huge',
+        description: '',
+        tools: [],
+        systemPrompt: () => 'x'.repeat(8000),
+      };
+      const hugeService = new AgentService(llm, [], [hugeSkill]);
+      llm.queueResponse({ type: 'text', content: 'ok' });
+      for await (const _ of hugeService.run({ user: TEST_USER, message: 'hi', conversationId: 'conv-2' })) {}
+
+      expect(errorSpy).toHaveBeenCalled();
+      const msg = errorSpy.mock.calls[0][0];
+      expect(msg).toContain('conv-2');
+      expect(msg).toMatch(/tokens/);
+    });
+
+    it('does not log when system prompt is under threshold', async () => {
+      llm.queueResponse({ type: 'text', content: 'ok' });
+      for await (const _ of service.run({ user: TEST_USER, message: 'hi', conversationId: 'conv-3' })) {}
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
   });
 });

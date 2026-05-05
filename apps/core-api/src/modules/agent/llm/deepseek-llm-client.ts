@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { LlmClient, LlmMessage, LlmOptions, LlmResponse, ToolDefinition } from './llm-client.interface';
 
 @Injectable()
 export class DeepSeekLlmClient implements LlmClient {
+  private readonly logger = new Logger(DeepSeekLlmClient.name);
   private readonly apiUrl = 'https://api.deepseek.com/chat/completions';
   private readonly model = 'deepseek-chat';
 
@@ -64,6 +65,11 @@ export class DeepSeekLlmClient implements LlmClient {
       throw new Error(`DeepSeek API error ${res.status}: ${err}`);
     }
 
-    return res.json();
+    const json = await res.json();
+    const promptTokens = json?.usage?.prompt_tokens;
+    if (typeof promptTokens === 'number') {
+      this.logger.log(`DeepSeek call: prompt_tokens=${promptTokens}`);
+    }
+    return json;
   }
 }

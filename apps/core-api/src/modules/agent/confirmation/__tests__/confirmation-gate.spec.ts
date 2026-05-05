@@ -1,15 +1,13 @@
-import { ConfirmationGate, PendingConfirmation } from '../confirmation-gate.service';
+import { ConfirmationGate } from '../confirmation-gate.service';
 
 describe('ConfirmationGate', () => {
-  const store = new Map<string, PendingConfirmation>();
   let gate: ConfirmationGate;
 
   beforeEach(() => {
-    store.clear();
-    gate = new ConfirmationGate(store);
+    gate = new ConfirmationGate();
   });
 
-  it('suspend stores pending state keyed by conversationId', async () => {
+  it('resolve returns the pending state previously suspended', async () => {
     await gate.suspend('conv-1', {
       toolName: 'create_connector',
       toolCallId: 'call-1',
@@ -17,13 +15,13 @@ describe('ConfirmationGate', () => {
       messages: [{ role: 'user', content: 'connect my db' }],
     });
 
-    expect(store.has('conv-1')).toBe(true);
-    const pending = store.get('conv-1')!;
-    expect(pending.toolName).toBe('create_connector');
-    expect(pending.toolCallId).toBe('call-1');
+    const pending = await gate.resolve('conv-1');
+    expect(pending).not.toBeNull();
+    expect(pending!.toolName).toBe('create_connector');
+    expect(pending!.toolCallId).toBe('call-1');
   });
 
-  it('resolve returns pending state and removes it from store', async () => {
+  it('resolve removes the pending state — second resolve returns null', async () => {
     await gate.suspend('conv-1', {
       toolName: 'delete_object_type',
       toolCallId: 'call-2',
@@ -31,10 +29,11 @@ describe('ConfirmationGate', () => {
       messages: [{ role: 'user', content: 'delete Customer' }],
     });
 
-    const pending = await gate.resolve('conv-1');
-    expect(pending).not.toBeNull();
-    expect(pending!.toolName).toBe('delete_object_type');
-    expect(store.has('conv-1')).toBe(false);
+    const first = await gate.resolve('conv-1');
+    expect(first).not.toBeNull();
+
+    const second = await gate.resolve('conv-1');
+    expect(second).toBeNull();
   });
 
   it('resolve returns null when no pending confirmation exists', async () => {
@@ -56,7 +55,7 @@ describe('ConfirmationGate', () => {
       messages: [],
     });
 
-    const pending = store.get('conv-1')!;
-    expect(pending.toolName).toBe('second_tool');
+    const pending = await gate.resolve('conv-1');
+    expect(pending!.toolName).toBe('second_tool');
   });
 });
