@@ -83,9 +83,26 @@ model ObjectType {
   sourceRelations ObjectRelationship[] @relation("SourceType")
   targetRelations ObjectRelationship[] @relation("TargetType")
   mappings        ObjectMapping[]
+  indexes         ObjectTypeIndex[]
 
   @@unique([tenantId, name])
   @@map("object_types")
+}
+
+model ObjectTypeIndex {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  objectTypeId String   @map("object_type_id") @db.Uuid
+  field        String
+  kind         String
+  indexName    String   @unique @map("index_name")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  objectType ObjectType @relation(fields: [objectTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, objectTypeId, field, kind])
+  @@index([tenantId, objectTypeId])
+  @@map("object_type_indexes")
 }
 
 model ObjectRelationship {
