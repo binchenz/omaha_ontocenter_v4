@@ -110,6 +110,22 @@ export interface IngestResult {
   errors: number;
 }
 
+export function tallyResults(results: IngestResult[]): IngestResult {
+  return results.reduce(
+    (acc, r) => ({
+      imported: acc.imported + r.imported,
+      updated: acc.updated + r.updated,
+      skipped: acc.skipped + r.skipped,
+      errors: acc.errors + r.errors,
+    }),
+    { imported: 0, updated: 0, skipped: 0, errors: 0 },
+  );
+}
+
+export function hasErrors(tally: IngestResult): boolean {
+  return tally.errors > 0;
+}
+
 // ============================================================================
 // The deep module.
 // ============================================================================

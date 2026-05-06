@@ -7,13 +7,20 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 import { bootstrapTenant } from './lib/tenant-bootstrap';
 import { bootstrapOntology } from './lib/ontology-bootstrap';
-import { importInstances, type InstanceInput } from './lib/object-instance-importer';
-import { flattenBookAnalysis } from './lib/book-analysis-flattener';
-import { runRecipe } from './lib/run-recipe';
+import { importInstances } from './lib/object-instance-importer';
+import { runRecipe, tallyResults, hasErrors, type IngestRecipe, type IngestResult } from './lib/run-recipe';
 import { createIngestCtx } from './lib/ingest-ctx';
-import { bookRecipe, bookCharacterRecipe, bookCharacterEdgeRecipe, plotBeatRecipe, emotionalCurvePointRecipe, marketScoreRecipe, chapterSummaryRecipe, chapterCharacterMentionRecipe } from './lib/film-ai-v2-recipes';
-import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded, type EdgeExpanded, type PlotBeatExpanded, type EmotionalPointExpanded, type MarketScoreExpanded, type ChapterSummaryRow } from './lib/film-ai-v2-source-reader';
-import { resolveCharacterName, type CandidateCharacter } from './lib/entity-resolver';
+import {
+  bookRecipe,
+  bookCharacterRecipe,
+  bookCharacterEdgeRecipe,
+  plotBeatRecipe,
+  emotionalCurvePointRecipe,
+  marketScoreRecipe,
+  chapterSummaryRecipe,
+  chapterCharacterMentionRecipe,
+} from './lib/film-ai-v2-recipes';
+import { FilmAiV2SourceReader } from './lib/film-ai-v2-source-reader';
 import {
   FILM_AI_TENANT_SLUG,
   FILM_AI_TENANT_NAME,
@@ -38,178 +45,6 @@ function generatePassword(): string {
   return crypto.randomBytes(9).toString('base64').replace(/[+/=]/g, '').slice(0, 12);
 }
 
-function bookToInstance(bwa: BookWithAnalysis): InstanceInput {
-  const props = flattenBookAnalysis(bwa.book, bwa.analysis);
-  return {
-    externalId: bwa.book.id,
-    label: bwa.book.title || bwa.book.id,
-    properties: props as unknown as Record<string, unknown>,
-    searchText: [
-      props.title,
-      props.tone,
-      props.pace,
-      ...(props.tags ?? []),
-    ].filter(Boolean).join(' '),
-  };
-}
-
-function bookCharacterExternalId(bookId: string, name: string): string {
-  return `${bookId}::${name}`;
-}
-
-function mainCharToInstance(mc: MainCharExpanded, bookPlatformId: string): InstanceInput {
-  return {
-    externalId: bookCharacterExternalId(mc.book_external_id, mc.name),
-    label: mc.name,
-    properties: {
-      name: mc.name,
-      desc: mc.desc,
-      role: mc.role,
-    },
-    relationships: { belongsTo: bookPlatformId },
-    searchText: [mc.name, mc.desc].filter(Boolean).join(' '),
-  };
-}
-
-function edgeExternalId(bookId: string, seq: number): string {
-  return `${bookId}::edge::${seq}`;
-}
-
-function edgeToInstance(
-  edge: EdgeExpanded,
-  bookPlatformId: string,
-  fromCharExternalId: string | null,
-  toCharExternalId: string | null,
-): InstanceInput {
-  const resolutionStatus =
-    fromCharExternalId && toCharExternalId
-      ? 'fully_resolved'
-      : fromCharExternalId || toCharExternalId
-        ? 'partially_resolved'
-        : 'unresolved';
-  return {
-    externalId: edgeExternalId(edge.book_external_id, edge.seq),
-    label: `${edge.from_name} → ${edge.to_name}${edge.label ? ` (${edge.label})` : ''}`,
-    properties: {
-      from_string: edge.from_name,
-      to_string: edge.to_name,
-      label: edge.label,
-      from_character_id: fromCharExternalId,
-      to_character_id: toCharExternalId,
-      resolution_status: resolutionStatus,
-    },
-    relationships: { belongsTo: bookPlatformId },
-    searchText: [edge.from_name, edge.to_name, edge.label].filter(Boolean).join(' '),
-  };
-}
-
-function plotBeatToInstance(beat: PlotBeatExpanded, bookPlatformId: string): InstanceInput {
-  return {
-    externalId: `${beat.book_external_id}::beat::${beat.seq}`,
-    label: beat.label || `节拍 ${beat.seq + 1}`,
-    properties: {
-      seq: beat.seq,
-      pct: beat.pct,
-      label: beat.label,
-      desc: beat.desc,
-    },
-    relationships: { belongsTo: bookPlatformId },
-    searchText: [beat.label, beat.desc].filter(Boolean).join(' '),
-  };
-}
-
-function emotionalPointToInstance(p: EmotionalPointExpanded, bookPlatformId: string): InstanceInput {
-  return {
-    externalId: `${p.book_external_id}::ep::${p.seq}`,
-    label: `点 ${p.seq + 1} = ${p.value}`,
-    properties: {
-      seq: p.seq,
-      value: p.value,
-    },
-    relationships: { belongsTo: bookPlatformId },
-  };
-}
-
-function marketScoreToInstance(m: MarketScoreExpanded, bookPlatformId: string): InstanceInput {
-  return {
-    externalId: `${m.book_external_id}::ms::${m.label}`,
-    label: `${m.label}: ${m.score ?? '-'}`,
-    properties: {
-      label: m.label,
-      score: m.score,
-    },
-    relationships: { belongsTo: bookPlatformId },
-    searchText: m.label,
-  };
-}
-
-function chapterSummaryToInstance(cs: ChapterSummaryRow, bookPlatformId: string): InstanceInput {
-  const ss = cs.structured_summary ?? {};
-  const keyEvents = Array.isArray(ss.keyEvents) ? ss.keyEvents : [];
-  const revelations = Array.isArray(ss.revelations) ? ss.revelations : [];
-  const charactersStr = Array.isArray(ss.characters) ? ss.characters : [];
-  return {
-    externalId: cs.id,
-    label: cs.chapter_title || `第${cs.chapter_seq ?? '?'}章`,
-    properties: {
-      chapter_seq: cs.chapter_seq,
-      chapter_title: cs.chapter_title,
-      location: ss.location ?? null,
-      plotAdvancement: ss.plotAdvancement ?? null,
-      emotionalTone: ss.emotionalTone ?? null,
-      pacingDensity: ss.pacingDensity ?? null,
-      key_events: keyEvents,
-      revelations,
-      characters_string: charactersStr,
-    },
-    relationships: { belongsTo: bookPlatformId },
-    searchText: [
-      cs.chapter_title,
-      ss.location,
-      ss.plotAdvancement,
-      ...keyEvents,
-      ...revelations,
-      ...charactersStr,
-    ].filter(Boolean).join(' ').slice(0, 4000),
-  };
-}
-
-function chapterCharacterMentionToInstance(
-  chapterId: string,
-  bookExternalId: string,
-  bookPlatformId: string,
-  rawName: string,
-  resolvedCharExternalId: string | null,
-  seq: number,
-): InstanceInput {
-  return {
-    externalId: `${chapterId}::ccm::${seq}`,
-    label: `${rawName} @ ${chapterId.slice(0, 8)}`,
-    properties: {
-      chapter_summary_id: chapterId,
-      book_character_id: resolvedCharExternalId,
-      character_name_raw: rawName,
-      resolution_status: resolvedCharExternalId ? 'resolved' : 'unresolved',
-    },
-    relationships: { belongsTo: bookPlatformId },
-    searchText: rawName,
-  };
-}
-
-async function loadExternalIdMap(
-  prisma: PrismaClient,
-  tenantId: string,
-  objectTypeName: string,
-): Promise<Record<string, string>> {
-  const rows = await prisma.objectInstance.findMany({
-    where: { tenantId, objectType: objectTypeName },
-    select: { id: true, externalId: true },
-  });
-  const out: Record<string, string> = {};
-  for (const r of rows) out[r.externalId] = r.id;
-  return out;
-}
-
 async function cleanupV1ObjectTypes(prisma: PrismaClient, tenantId: string): Promise<number> {
   let dropped = 0;
   for (const name of V1_OBJECT_TYPES_TO_CLEANUP) {
@@ -222,9 +57,7 @@ async function cleanupV1ObjectTypes(prisma: PrismaClient, tenantId: string): Pro
       where: { tenantId, objectType: name },
     });
     if (instanceCount > 0) {
-      await prisma.objectInstance.deleteMany({
-        where: { tenantId, objectType: name },
-      });
+      await prisma.objectInstance.deleteMany({ where: { tenantId, objectType: name } });
     }
     const rels = await prisma.objectRelationship.findMany({
       where: { tenantId, OR: [{ sourceTypeId: existing.id }, { targetTypeId: existing.id }] },
@@ -277,15 +110,12 @@ async function main(): Promise<void> {
   console.log(`[source] uploaded_books rows = ${booksCount}`);
   const analysesCount = await reader.countTable('book_analyses');
   console.log(`[source] book_analyses rows = ${analysesCount}`);
-  const mainChars = flags.confirm ? null : await reader.readMainCharacters();
-  if (mainChars) console.log(`[source] mainChars total = ${mainChars.length}`);
 
   if (flags.dryRun) {
     console.log(`[plan] would ensure tenant slug=${FILM_AI_TENANT_SLUG}`);
     console.log(`[plan] would drop any existing v1 ObjectTypes from ${V1_OBJECT_TYPES_TO_CLEANUP.join(', ')}`);
     console.log(`[plan] would register ${filmAiV2OntologySpec.objectTypes.length} v2 ObjectType(s)`);
     console.log(`[plan] would upsert ${booksCount} Book instance(s) (${analysesCount} with analysis joined)`);
-    console.log(`[plan] would upsert ${mainChars?.length ?? 0} BookCharacter instance(s)`);
     console.log('[plan] dry-run complete — no writes.');
     await reader.disconnect();
     return;
@@ -332,7 +162,6 @@ async function main(): Promise<void> {
     await reader.disconnect();
     console.log('[source] disconnected — proceeding with local writes');
 
-    console.log('[ingest] books');
     const ingestCtx = createIngestCtx(prisma, tenantResult.tenantId, reader, {
       booksWithAnalysis,
       mainCharRows,
@@ -342,36 +171,45 @@ async function main(): Promise<void> {
       marketScores,
       chapterSummaries,
     });
-    await runRecipe(bookRecipe, ingestCtx, importInstances);
 
-    console.log('[ingest] book characters (mainChars EXPLODE)');
-    await runRecipe(bookCharacterRecipe, ingestCtx, importInstances);
+    // Recipes execute in this order. Dependencies are positional:
+    // - bookCharacterEdgeRecipe and chapterCharacterMentionRecipe both need
+    //   BookCharacter ingested first (they pull candidates from it).
+    // - chapterCharacterMentionRecipe additionally needs Book's externalIdMap
+    //   cached, which the parentRef recipes earlier in the array populate
+    //   transparently via the runner.
+    const recipes: IngestRecipe<any>[] = [
+      bookRecipe,
+      bookCharacterRecipe,
+      bookCharacterEdgeRecipe,
+      plotBeatRecipe,
+      emotionalCurvePointRecipe,
+      marketScoreRecipe,
+      chapterSummaryRecipe,
+      chapterCharacterMentionRecipe,
+    ];
 
-    console.log('[ingest] book character edges (entity resolution)');
-    // Pre-populate Book externalIdMap for the relationships callback in bookCharacterEdgeRecipe.
-    await ingestCtx.loadExternalIdMap('Book');
-    await runRecipe(bookCharacterEdgeRecipe, ingestCtx, importInstances);
+    const results: IngestResult[] = [];
+    for (const recipe of recipes) {
+      const t0 = Date.now();
+      const result = await runRecipe(recipe, ingestCtx, importInstances);
+      results.push(result);
+      const elapsedSec = (Date.now() - t0) / 1000;
+      if (elapsedSec > 5) {
+        console.log(`[ingest] ${recipe.objectType} elapsed=${elapsedSec.toFixed(1)}s`);
+      }
+    }
 
-    console.log('[ingest] plot beats');
-    await runRecipe(plotBeatRecipe, ingestCtx, importInstances);
-
-    console.log('[ingest] emotional curve points');
-    await runRecipe(emotionalCurvePointRecipe, ingestCtx, importInstances);
-
-    console.log('[ingest] market scores');
-    await runRecipe(marketScoreRecipe, ingestCtx, importInstances);
-
-    console.log('[ingest] chapter summaries');
-    const csStart = Date.now();
-    await runRecipe(chapterSummaryRecipe, ingestCtx, importInstances);
-    console.log(`[ingest] chapter summaries elapsed=${((Date.now() - csStart) / 1000).toFixed(1)}s`);
-
-    console.log('[ingest] chapter character mentions (junction)');
-    const ccmStart = Date.now();
-    await runRecipe(chapterCharacterMentionRecipe, ingestCtx, importInstances);
-    console.log(`[ingest] chapter character mentions elapsed=${((Date.now() - ccmStart) / 1000).toFixed(1)}s`);
-
+    const tally = tallyResults(results);
+    console.log(
+      `[summary] passes=${results.length} imported=${tally.imported} updated=${tally.updated} skipped=${tally.skipped} errors=${tally.errors}`,
+    );
     console.log('[done]');
+
+    if (hasErrors(tally)) {
+      console.error('[exit] non-zero — at least one recipe had per-row errors');
+      process.exitCode = 1;
+    }
   } finally {
     await prisma.$disconnect();
   }

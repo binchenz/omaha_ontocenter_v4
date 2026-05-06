@@ -398,3 +398,20 @@ describe('runRecipe', () => {
     });
   });
 });
+
+import { tallyResults, hasErrors } from '../run-recipe';
+import type { IngestResult } from '../run-recipe';
+
+describe('tallyResults / hasErrors', () => {
+  it('sums per-counter across results', () => {
+    const r1: IngestResult = { imported: 5, updated: 2, skipped: 1, errors: 0 };
+    const r2: IngestResult = { imported: 3, updated: 0, skipped: 0, errors: 2 };
+    const tally = tallyResults([r1, r2]);
+    expect(tally).toEqual({ imported: 8, updated: 2, skipped: 1, errors: 2 });
+  });
+
+  it('hasErrors returns true when any tally has non-zero errors', () => {
+    expect(hasErrors({ imported: 0, updated: 0, skipped: 0, errors: 1 })).toBe(true);
+    expect(hasErrors({ imported: 100, updated: 50, skipped: 5, errors: 0 })).toBe(false);
+  });
+});
