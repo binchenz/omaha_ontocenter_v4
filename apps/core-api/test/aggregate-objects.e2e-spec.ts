@@ -161,4 +161,63 @@ describe('aggregate_objects (e2e) — count-only tracer', () => {
       expect(audit!.resultCount).toBe(1); // groups.length, NOT the count of 3
     });
   });
+
+  // ============================================================
+  // Slice #41: groupBy single-field + PROPERTY_NOT_GROUPABLE
+  // ============================================================
+  describe('groupBy (single field)', () => {
+    it('returns one group per distinct value of the groupBy field', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'contains', value: 'AGG-T-' }],
+          groupBy: ['status'],
+          metrics: [{ kind: 'count', alias: 'n' }],
+        })
+        .expect(201);
+
+      // 2 completed + 1 pending → 2 groups
+      expect(res.body.groups).toHaveLength(2);
+      const byStatus = Object.fromEntries(
+        res.body.groups.map((g: { key: { status: string }; metrics: { n: number } }) => [g.key.status, g.metrics.n])
+      );
+      expect(byStatus.completed).toBe(2);
+      expect(byStatus.pending).toBe(1);
+    });
+
+    it('group key is an object with the groupBy field as key (forward-compat for multi-field)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'contains', value: 'AGG-T-' }],
+          groupBy: ['status'],
+          metrics: [{ kind: 'count', alias: 'n' }],
+        })
+        .expect(201);
+      // Each group's `key` must be an object, NOT a bare string.
+      for (const g of res.body.groups) {
+        expect(typeof g.key).toBe('object');
+        expect('status' in g.key).toBe(true);
+      }
+    });
+
+    it('rejects groupBy on a non-filterable property with PROPERTY_NOT_GROUPABLE', async () => {
+      // 'phone' is declared on customer but NOT filterable per the demo seed.
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'customer',
+          groupBy: ['phone'],
+          metrics: [{ kind: 'count', alias: 'n' }],
+        })
+        .expect(400);
+      expect(res.body.error?.code ?? res.body.code).toBe('PROPERTY_NOT_GROUPABLE');
+      expect(JSON.stringify(res.body)).toMatch(/search/i); // hint mentions search fallback
+    });
+  });
 });

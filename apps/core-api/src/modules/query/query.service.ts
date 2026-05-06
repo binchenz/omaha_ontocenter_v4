@@ -189,14 +189,17 @@ export class QueryService {
 
     const rows = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(planned.sql, ...planned.params);
 
-    // Slice #40: no groupBy, so always exactly one group with key={}.
     const groups = rows.map((row) => {
+      const key: Record<string, unknown> = {};
+      for (const field of planned.groupByFields) {
+        key[field] = row[field];
+      }
       const m: Record<string, number> = {};
       for (const metric of metrics) {
         const v = row[metric.alias];
         m[metric.alias] = typeof v === 'bigint' ? Number(v) : (v as number);
       }
-      return { key: {}, metrics: m };
+      return { key, metrics: m };
     });
 
     const compiledSqlHash = createHash('sha256').update(planned.sql).digest('hex').slice(0, 32);

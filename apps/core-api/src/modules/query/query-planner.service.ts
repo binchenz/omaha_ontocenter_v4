@@ -50,6 +50,7 @@ export interface PlannedAggregateQuery {
   sql: string;
   params: unknown[];
   effectivePermissionFilter: string | null;
+  groupByFields: string[];
 }
 
 const ALLOWED_SORT_COLUMNS = new Set(['createdAt', 'updatedAt', 'externalId', 'label']);
@@ -145,26 +146,55 @@ export class QueryPlannerService {
       params,
     );
 
+    // groupBy validation: each field must be filterable on the view.
+    // Non-filterable / json-typed fields (e.g. tags) cannot be grouped on;
+    // emit PROPERTY_NOT_GROUPABLE so the agent can fall back to search.
+    const groupBy = args.groupBy ?? [];
+    if (view) {
+      for (const field of groupBy) {
+        if (view.filterableFields.size > 0 && !view.filterableFields.has(field)) {
+          throw new BadRequestException({
+            error: {
+              code: 'PROPERTY_NOT_GROUPABLE',
+              property: field,
+              objectType: args.objectType,
+              hint: `Property '${field}' is not groupable. json/array properties cannot be group keys; if you wanted to filter by it, try the 'search' parameter on query_objects instead.`,
+            },
+          });
+        }
+      }
+    }
+
+    const groupExprs = groupBy.map((f) => `(properties->>'${f}')`);
+
     // Metric SELECT clauses — slice #40 only handles 'count'.
     const selectExprs: string[] = [];
+    // groupBy fields appear in SELECT first so the service layer can read
+    // them keyed by the original property name.
+    for (let i = 0; i < groupBy.length; i++) {
+      selectExprs.push(`${groupExprs[i]} AS "${groupBy[i]}"`);
+    }
     for (const m of args.metrics) {
       if (m.kind === 'count') {
         selectExprs.push(`count(*)::int AS "${m.alias}"`);
       } else {
-        // Reserved for #42/#43; reaching here in v1 is a contract violation
-        // — the service layer rejects unknown kinds at validation time.
         throw new Error(`metric kind '${m.kind}' not yet supported in v1`);
       }
     }
 
     const where = wherePieces.join(' AND ');
+    const groupByClause = groupBy.length > 0
+      ? `GROUP BY ${groupExprs.join(', ')}`
+      : '';
+
     const sql = `
       SELECT ${selectExprs.join(', ')}
       FROM object_instances
       WHERE ${where}
+      ${groupByClause}
     `;
 
-    return { sql, params, effectivePermissionFilter };
+    return { sql, params, effectivePermissionFilter, groupByFields: groupBy };
   }
 
   private compileFilter(
