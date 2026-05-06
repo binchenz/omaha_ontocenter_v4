@@ -396,4 +396,57 @@ describe('IndexManager reconcile (e2e)', () => {
       .delete(`/ontology/types/${typeId}`)
       .set('Authorization', `Bearer ${token}`);
   });
+
+  it('drops indexes and registry rows when the ObjectType is deleted (F11 regression)', async () => {
+    const createRes = await request(app.getHttpServer())
+      .post('/ontology/types')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name: 'reconcile_test_delete',
+        label: 'Reconcile Test Delete',
+        properties: [{ name: 'status', label: 'Status', type: 'string', filterable: true }],
+      })
+      .expect(201);
+    const typeId = createRes.body.id;
+    const otidHex = typeId.replace(/-/g, '');
+    const ot = await prisma.objectType.findUnique({ where: { id: typeId } });
+    const tenantId = ot!.tenantId;
+
+    const beforeDelete = await prisma.$queryRawUnsafe<{ indexname: string }[]>(
+      `SELECT indexname FROM pg_indexes
+       WHERE schemaname = 'public' AND tablename = 'object_instances'
+       AND indexname LIKE 'idx_oi_${otidHex}_%'`,
+    );
+    expect(beforeDelete).toHaveLength(1);
+    const registryBefore = await prisma.objectTypeIndex.findMany({
+      where: { tenantId, objectTypeId: typeId },
+    });
+    expect(registryBefore).toHaveLength(1);
+
+    await request(app.getHttpServer())
+      .delete(`/ontology/types/${typeId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const afterDelete = await prisma.$queryRawUnsafe<{ indexname: string }[]>(
+      `SELECT indexname FROM pg_indexes
+       WHERE schemaname = 'public' AND tablename = 'object_instances'
+       AND indexname LIKE 'idx_oi_${otidHex}_%'`,
+    );
+    expect(afterDelete).toEqual([]);
+    const registryAfter = await prisma.objectTypeIndex.findMany({
+      where: { tenantId, objectTypeId: typeId },
+    });
+    expect(registryAfter).toEqual([]);
+  });
+
+  it('dropAllFor on a non-existent (tenant, type) returns empty list without throwing', async () => {
+    const indexManager = app.get(
+      (await import('../src/modules/ontology/index-manager.service')).IndexManagerService,
+    );
+    const ghostTenantId = '00000000-0000-0000-0000-000000000000';
+    const ghostTypeId = '11111111-1111-1111-1111-111111111111';
+    const result = await indexManager.dropAllFor(ghostTenantId, ghostTypeId);
+    expect(result).toEqual([]);
+  });
 });

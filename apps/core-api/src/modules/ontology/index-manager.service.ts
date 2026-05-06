@@ -79,6 +79,25 @@ export class IndexManagerService {
       };
     });
   }
+
+  async dropAllFor(tenantId: string, objectTypeId: string): Promise<string[]> {
+    return this.prisma.$transaction(async (tx) => {
+      await acquireLock(tx, tenantId, objectTypeId);
+
+      const rows = await tx.objectTypeIndex.findMany({
+        where: { tenantId, objectTypeId },
+      });
+      if (rows.length === 0) return [];
+
+      for (const r of rows) {
+        await dropIndex(tx, r.indexName);
+      }
+      await tx.objectTypeIndex.deleteMany({
+        where: { tenantId, objectTypeId },
+      });
+      return rows.map((r) => r.indexName).sort();
+    });
+  }
 }
 
 type Tx = Prisma.TransactionClient;

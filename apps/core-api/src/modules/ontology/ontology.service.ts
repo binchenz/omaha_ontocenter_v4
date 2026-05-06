@@ -69,6 +69,7 @@ export class OntologyService {
 
   async deleteObjectType(tenantId: string, id: string) {
     await this.getObjectType(tenantId, id);
+    await this.indexManager.dropAllFor(tenantId, id);
     return this.prisma.objectType.delete({ where: { id } });
   }
 

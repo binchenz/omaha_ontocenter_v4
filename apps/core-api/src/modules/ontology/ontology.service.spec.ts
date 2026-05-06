@@ -42,7 +42,7 @@ describe('OntologyService', () => {
       providers: [
         OntologyService,
         { provide: PrismaService, useValue: prisma },
-        { provide: IndexManagerService, useValue: { reconcile: jest.fn().mockResolvedValue({ created: [], dropped: [], kept: [] }) } },
+        { provide: IndexManagerService, useValue: { reconcile: jest.fn().mockResolvedValue({ created: [], dropped: [], kept: [] }), dropAllFor: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
     service = module.get<OntologyService>(OntologyService);
