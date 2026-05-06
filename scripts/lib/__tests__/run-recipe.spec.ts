@@ -343,5 +343,58 @@ describe('runRecipe', () => {
       };
       await expect(runRecipe(recipe, ctx, makeFakeImporter().fn)).rejects.toThrow(/mutually exclusive/);
     });
+
+    it('throws when both toInstance and toInstances are set', async () => {
+      const ctx = makeMinimalCtx();
+      const recipe: IngestRecipe<any> = {
+        objectType: 'X',
+        read: () => [],
+        toInstance: () => ({ externalId: 'x', label: 'x', properties: {} }),
+        toInstances: () => [{ externalId: 'x', label: 'x', properties: {} }],
+      };
+      await expect(runRecipe(recipe, ctx, makeFakeImporter().fn)).rejects.toThrow(/mutually exclusive/);
+    });
+  });
+
+  describe('per-row fan-out (toInstances)', () => {
+    it('produces N instances from one source row', async () => {
+      const importer = makeFakeImporter();
+      const ctx = makeMinimalCtx({
+        sourceData: { rows: [{ id: 'r1', items: ['a', 'b', 'c'] }] },
+      });
+      const recipe: IngestRecipe<any> = {
+        objectType: 'X',
+        read: (c) => (c.sourceData['rows'] ?? []) as any[],
+        toInstances: (row) =>
+          row.items.map((item: string, i: number) => ({
+            externalId: `${row.id}::${i}`,
+            label: item,
+            properties: { item },
+          })),
+      };
+      const result = await runRecipe(recipe, ctx, importer.fn);
+      expect(result.imported).toBe(3);
+      expect(importer.calls[0].instances).toHaveLength(3);
+      expect(importer.calls[0].instances.map((i) => i.label)).toEqual(['a', 'b', 'c']);
+    });
+
+    it('per-row fan-out: empty array produces 0 instances for that row', async () => {
+      const importer = makeFakeImporter();
+      const ctx = makeMinimalCtx({
+        sourceData: { rows: [{ id: 'r1', items: [] }, { id: 'r2', items: ['x'] }] },
+      });
+      const recipe: IngestRecipe<any> = {
+        objectType: 'X',
+        read: (c) => (c.sourceData['rows'] ?? []) as any[],
+        toInstances: (row) =>
+          row.items.map((item: string, i: number) => ({
+            externalId: `${row.id}::${i}`,
+            label: item,
+            properties: {},
+          })),
+      };
+      const result = await runRecipe(recipe, ctx, importer.fn);
+      expect(result.imported).toBe(1);
+    });
   });
 });

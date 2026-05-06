@@ -11,7 +11,7 @@ import { importInstances, type InstanceInput } from './lib/object-instance-impor
 import { flattenBookAnalysis } from './lib/book-analysis-flattener';
 import { runRecipe } from './lib/run-recipe';
 import { createIngestCtx } from './lib/ingest-ctx';
-import { bookRecipe, bookCharacterRecipe, bookCharacterEdgeRecipe, plotBeatRecipe, emotionalCurvePointRecipe, marketScoreRecipe } from './lib/film-ai-v2-recipes';
+import { bookRecipe, bookCharacterRecipe, bookCharacterEdgeRecipe, plotBeatRecipe, emotionalCurvePointRecipe, marketScoreRecipe, chapterSummaryRecipe, chapterCharacterMentionRecipe } from './lib/film-ai-v2-recipes';
 import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded, type EdgeExpanded, type PlotBeatExpanded, type EmotionalPointExpanded, type MarketScoreExpanded, type ChapterSummaryRow } from './lib/film-ai-v2-source-reader';
 import { resolveCharacterName, type CandidateCharacter } from './lib/entity-resolver';
 import {
@@ -352,16 +352,6 @@ async function main(): Promise<void> {
     await ingestCtx.loadExternalIdMap('Book');
     await runRecipe(bookCharacterEdgeRecipe, ingestCtx, importInstances);
 
-    // charsByBook still needed for the imperative ChapterCharacterMention stanza below.
-    // Will be removed in #30 when ChapterCharacterMention becomes a recipe.
-    const charsByBook = new Map<string, CandidateCharacter[]>();
-    for (const mc of mainCharRows) {
-      const extId = bookCharacterExternalId(mc.book_external_id, mc.name);
-      const list = charsByBook.get(mc.book_external_id) ?? [];
-      list.push({ id: extId, name: mc.name });
-      charsByBook.set(mc.book_external_id, list);
-    }
-
     console.log('[ingest] plot beats');
     await runRecipe(plotBeatRecipe, ingestCtx, importInstances);
 
@@ -371,52 +361,15 @@ async function main(): Promise<void> {
     console.log('[ingest] market scores');
     await runRecipe(marketScoreRecipe, ingestCtx, importInstances);
 
-    // bookPlatformMap still needed for the 2 remaining imperative stanzas below.
-    // Removed in #30 when ChapterSummary + ChapterCharacterMention become recipes.
-    const bookPlatformMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Book');
-
     console.log('[ingest] chapter summaries');
-    const csInstances: InstanceInput[] = [];
-    let csSkipped = 0;
-    for (const cs of chapterSummaries) {
-      const bookPlatformId = bookPlatformMap[cs.source_id];
-      if (!bookPlatformId) {
-        csSkipped++;
-        continue;
-      }
-      csInstances.push(chapterSummaryToInstance(cs, bookPlatformId));
-    }
     const csStart = Date.now();
-    const csResult = await importInstances(prisma, tenantResult.tenantId, 'ChapterSummary', csInstances);
-    const csElapsedSec = ((Date.now() - csStart) / 1000).toFixed(1);
-    console.log(`[ingest] chapter summaries imported=${csResult.imported} updated=${csResult.updated} skipped=${csResult.skipped + csSkipped} elapsed=${csElapsedSec}s`);
+    await runRecipe(chapterSummaryRecipe, ingestCtx, importInstances);
+    console.log(`[ingest] chapter summaries elapsed=${((Date.now() - csStart) / 1000).toFixed(1)}s`);
 
     console.log('[ingest] chapter character mentions (junction)');
-    const ccmInstances: InstanceInput[] = [];
-    let ccmStats = { resolved: 0, unresolved: 0 };
-    for (const cs of chapterSummaries) {
-      const bookPlatformId = bookPlatformMap[cs.source_id];
-      if (!bookPlatformId) continue;
-      const ss = cs.structured_summary ?? {};
-      const charsArr: string[] = Array.isArray(ss.characters) ? ss.characters : [];
-      const candidates = charsByBook.get(cs.source_id) ?? [];
-      let seq = 0;
-      for (const rawName of charsArr) {
-        if (!rawName || typeof rawName !== 'string') continue;
-        const resolved = resolveCharacterName(rawName, candidates);
-        if (resolved) ccmStats.resolved++;
-        else ccmStats.unresolved++;
-        ccmInstances.push(
-          chapterCharacterMentionToInstance(cs.id, cs.source_id, bookPlatformId, rawName, resolved, seq),
-        );
-        seq++;
-      }
-    }
     const ccmStart = Date.now();
-    const ccmResult = await importInstances(prisma, tenantResult.tenantId, 'ChapterCharacterMention', ccmInstances);
-    const ccmElapsedSec = ((Date.now() - ccmStart) / 1000).toFixed(1);
-    console.log(`[ingest] chapter character mentions imported=${ccmResult.imported} updated=${ccmResult.updated} skipped=${ccmResult.skipped} elapsed=${ccmElapsedSec}s`);
-    console.log(`[ingest] mention resolution: resolved=${ccmStats.resolved} unresolved=${ccmStats.unresolved}`);
+    await runRecipe(chapterCharacterMentionRecipe, ingestCtx, importInstances);
+    console.log(`[ingest] chapter character mentions elapsed=${((Date.now() - ccmStart) / 1000).toFixed(1)}s`);
 
     console.log('[done]');
   } finally {
