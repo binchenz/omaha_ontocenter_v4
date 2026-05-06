@@ -11,7 +11,7 @@ import { importInstances, type InstanceInput } from './lib/object-instance-impor
 import { flattenBookAnalysis } from './lib/book-analysis-flattener';
 import { runRecipe } from './lib/run-recipe';
 import { createIngestCtx } from './lib/ingest-ctx';
-import { bookRecipe } from './lib/film-ai-v2-recipes';
+import { bookRecipe, bookCharacterRecipe, plotBeatRecipe, emotionalCurvePointRecipe, marketScoreRecipe } from './lib/film-ai-v2-recipes';
 import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded, type EdgeExpanded, type PlotBeatExpanded, type EmotionalPointExpanded, type MarketScoreExpanded, type ChapterSummaryRow } from './lib/film-ai-v2-source-reader';
 import { resolveCharacterName, type CandidateCharacter } from './lib/entity-resolver';
 import {
@@ -345,21 +345,10 @@ async function main(): Promise<void> {
     await runRecipe(bookRecipe, ingestCtx, importInstances);
 
     console.log('[ingest] book characters (mainChars EXPLODE)');
-    const bookPlatformMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Book');
-    const characterInstances: InstanceInput[] = [];
-    let charsSkipped = 0;
-    for (const mc of mainCharRows) {
-      const bookPlatformId = bookPlatformMap[mc.book_external_id];
-      if (!bookPlatformId) {
-        charsSkipped++;
-        continue;
-      }
-      characterInstances.push(mainCharToInstance(mc, bookPlatformId));
-    }
-    const charResult = await importInstances(prisma, tenantResult.tenantId, 'BookCharacter', characterInstances);
-    console.log(`[ingest] book characters imported=${charResult.imported} updated=${charResult.updated} skipped=${charResult.skipped + charsSkipped}`);
+    await runRecipe(bookCharacterRecipe, ingestCtx, importInstances);
 
     console.log('[ingest] book character edges (entity resolution)');
+    const bookPlatformMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Book');
     const charsByBook = new Map<string, CandidateCharacter[]>();
     for (const mc of mainCharRows) {
       const extId = bookCharacterExternalId(mc.book_external_id, mc.name);
@@ -389,46 +378,13 @@ async function main(): Promise<void> {
     console.log(`[ingest] edge resolution: fully=${resStats.fully_resolved} partially=${resStats.partially_resolved} unresolved=${resStats.unresolved}`);
 
     console.log('[ingest] plot beats');
-    const beatInstances: InstanceInput[] = [];
-    let beatsSkipped = 0;
-    for (const b of plotBeats) {
-      const bookPlatformId = bookPlatformMap[b.book_external_id];
-      if (!bookPlatformId) {
-        beatsSkipped++;
-        continue;
-      }
-      beatInstances.push(plotBeatToInstance(b, bookPlatformId));
-    }
-    const beatResult = await importInstances(prisma, tenantResult.tenantId, 'PlotBeat', beatInstances);
-    console.log(`[ingest] plot beats imported=${beatResult.imported} updated=${beatResult.updated} skipped=${beatResult.skipped + beatsSkipped}`);
+    await runRecipe(plotBeatRecipe, ingestCtx, importInstances);
 
     console.log('[ingest] emotional curve points');
-    const emoInstances: InstanceInput[] = [];
-    let emoSkipped = 0;
-    for (const p of emoPoints) {
-      const bookPlatformId = bookPlatformMap[p.book_external_id];
-      if (!bookPlatformId) {
-        emoSkipped++;
-        continue;
-      }
-      emoInstances.push(emotionalPointToInstance(p, bookPlatformId));
-    }
-    const emoResult = await importInstances(prisma, tenantResult.tenantId, 'EmotionalCurvePoint', emoInstances);
-    console.log(`[ingest] emotional curve points imported=${emoResult.imported} updated=${emoResult.updated} skipped=${emoResult.skipped + emoSkipped}`);
+    await runRecipe(emotionalCurvePointRecipe, ingestCtx, importInstances);
 
     console.log('[ingest] market scores');
-    const msInstances: InstanceInput[] = [];
-    let msSkipped = 0;
-    for (const m of marketScores) {
-      const bookPlatformId = bookPlatformMap[m.book_external_id];
-      if (!bookPlatformId) {
-        msSkipped++;
-        continue;
-      }
-      msInstances.push(marketScoreToInstance(m, bookPlatformId));
-    }
-    const msResult = await importInstances(prisma, tenantResult.tenantId, 'MarketScore', msInstances);
-    console.log(`[ingest] market scores imported=${msResult.imported} updated=${msResult.updated} skipped=${msResult.skipped + msSkipped}`);
+    await runRecipe(marketScoreRecipe, ingestCtx, importInstances);
 
     console.log('[ingest] chapter summaries');
     const csInstances: InstanceInput[] = [];
