@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@omaha/db';
 import type { PropertyDefinition } from '@omaha/shared-types';
+import { IndexManagerService } from '../../apps/core-api/src/modules/ontology/index-manager.service';
 
 export interface ObjectTypeSpec {
   name: string;
@@ -24,6 +25,7 @@ export interface OntologyBootstrapResult {
   typesCreated: number;
   typesUpdated: number;
   relationshipsCreated: number;
+  indexesReconciled: number;
 }
 
 export async function bootstrapOntology(
@@ -80,5 +82,12 @@ export async function bootstrapOntology(
     relationshipsCreated++;
   }
 
-  return { typeIdByName, typesCreated, typesUpdated, relationshipsCreated };
+  const indexManager = new IndexManagerService(prisma as any);
+  let indexesReconciled = 0;
+  for (const name of Object.keys(typeIdByName)) {
+    await indexManager.reconcile(tenantId, typeIdByName[name]);
+    indexesReconciled++;
+  }
+
+  return { typeIdByName, typesCreated, typesUpdated, relationshipsCreated, indexesReconciled };
 }
