@@ -68,6 +68,10 @@ _Avoid_: Data source, Integration
 A per-Object-Type recipe that points at a Connector + source table and maps source columns to Object Type properties and relationships. Owns the sync strategy (`full` or `incremental`).
 _Avoid_: Integration, Connector mapping
 
+**IngestRecipe**:
+A declarative, code-defined description of how to materialise one Object Type from a single-shot snapshot of a source database. Lives in `scripts/`, not in tenant configuration. Names which source rows to read, how to map each row to an Object Instance, and (optionally) how to resolve parent references and entity-resolution lookups. Distinct from **Mapping**: a Mapping is tenant-configured infrastructure that runs on a schedule via Connector + Sync Job; an IngestRecipe is engineer-authored code that runs once during a customer onboarding (per ADR-0015).
+_Avoid_: IngestPass, Pipeline, Recipe (standalone)
+
 **Sync Job**:
 One execution of a Mapping. A `full` Sync Job is a world snapshot (upsert + soft-delete of missing rows); an `incremental` Sync Job pulls rows past a watermark and never detects deletes. See `docs/adr/0006-sync-model.md`.
 _Avoid_: Import, Run, Ingestion job
