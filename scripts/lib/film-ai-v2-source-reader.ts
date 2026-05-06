@@ -13,6 +13,14 @@ export interface MainCharExpanded {
   role: string | null;
 }
 
+export interface EdgeExpanded {
+  book_external_id: string;
+  seq: number;
+  from_name: string;
+  to_name: string;
+  label: string | null;
+}
+
 export class FilmAiV2SourceReader {
   private client: Client | null = null;
 
@@ -75,6 +83,28 @@ export class FilmAiV2SourceReader {
         name: String(row.mc.name),
         desc: row.mc.desc ?? null,
         role: row.mc.role ?? null,
+      }));
+  }
+
+  async readCharacterEdges(): Promise<EdgeExpanded[]> {
+    const r = await this.c().query<{ book_external_id: string; ord: number; edge: any }>(
+      `SELECT ba.source_id AS book_external_id,
+              (ord - 1)::int AS ord,
+              edge
+       FROM book_analyses ba,
+            jsonb_array_elements(ba.character_network->'edges') WITH ORDINALITY AS t(edge, ord)
+       WHERE ba.source_type = 'uploaded'
+         AND ba.character_network->'edges' IS NOT NULL
+         AND jsonb_typeof(ba.character_network->'edges') = 'array'`,
+    );
+    return r.rows
+      .filter((row) => row.edge && typeof row.edge === 'object' && row.edge.from && row.edge.to)
+      .map((row) => ({
+        book_external_id: row.book_external_id,
+        seq: row.ord,
+        from_name: String(row.edge.from),
+        to_name: String(row.edge.to),
+        label: row.edge.label ?? null,
       }));
   }
 

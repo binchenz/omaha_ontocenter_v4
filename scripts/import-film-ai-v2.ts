@@ -9,7 +9,8 @@ import { bootstrapTenant } from './lib/tenant-bootstrap';
 import { bootstrapOntology } from './lib/ontology-bootstrap';
 import { importInstances, type InstanceInput } from './lib/object-instance-importer';
 import { flattenBookAnalysis } from './lib/book-analysis-flattener';
-import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded } from './lib/film-ai-v2-source-reader';
+import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded, type EdgeExpanded } from './lib/film-ai-v2-source-reader';
+import { resolveCharacterName, type CandidateCharacter } from './lib/entity-resolver';
 import {
   FILM_AI_TENANT_SLUG,
   FILM_AI_TENANT_NAME,
@@ -64,6 +65,38 @@ function mainCharToInstance(mc: MainCharExpanded, bookPlatformId: string): Insta
     },
     relationships: { belongsTo: bookPlatformId },
     searchText: [mc.name, mc.desc].filter(Boolean).join(' '),
+  };
+}
+
+function edgeExternalId(bookId: string, seq: number): string {
+  return `${bookId}::edge::${seq}`;
+}
+
+function edgeToInstance(
+  edge: EdgeExpanded,
+  bookPlatformId: string,
+  fromCharExternalId: string | null,
+  toCharExternalId: string | null,
+): InstanceInput {
+  const resolutionStatus =
+    fromCharExternalId && toCharExternalId
+      ? 'fully_resolved'
+      : fromCharExternalId || toCharExternalId
+        ? 'partially_resolved'
+        : 'unresolved';
+  return {
+    externalId: edgeExternalId(edge.book_external_id, edge.seq),
+    label: `${edge.from_name} → ${edge.to_name}${edge.label ? ` (${edge.label})` : ''}`,
+    properties: {
+      from_string: edge.from_name,
+      to_string: edge.to_name,
+      label: edge.label,
+      from_character_id: fromCharExternalId,
+      to_character_id: toCharExternalId,
+      resolution_status: resolutionStatus,
+    },
+    relationships: { belongsTo: bookPlatformId },
+    searchText: [edge.from_name, edge.to_name, edge.label].filter(Boolean).join(' '),
   };
 }
 
@@ -206,6 +239,36 @@ async function main(): Promise<void> {
     }
     const charResult = await importInstances(prisma, tenantResult.tenantId, 'BookCharacter', characterInstances);
     console.log(`[ingest] book characters imported=${charResult.imported} updated=${charResult.updated} skipped=${charResult.skipped + charsSkipped}`);
+
+    console.log('[ingest] book character edges (entity resolution)');
+    const charsByBook = new Map<string, CandidateCharacter[]>();
+    for (const mc of mainCharRows) {
+      const extId = bookCharacterExternalId(mc.book_external_id, mc.name);
+      const list = charsByBook.get(mc.book_external_id) ?? [];
+      list.push({ id: extId, name: mc.name });
+      charsByBook.set(mc.book_external_id, list);
+    }
+    const edgeRows = await reader.readCharacterEdges();
+    const edgeInstances: InstanceInput[] = [];
+    let edgesSkipped = 0;
+    const resStats = { fully_resolved: 0, partially_resolved: 0, unresolved: 0 };
+    for (const edge of edgeRows) {
+      const bookPlatformId = bookPlatformMap[edge.book_external_id];
+      if (!bookPlatformId) {
+        edgesSkipped++;
+        continue;
+      }
+      const candidates = charsByBook.get(edge.book_external_id) ?? [];
+      const fromId = resolveCharacterName(edge.from_name, candidates);
+      const toId = resolveCharacterName(edge.to_name, candidates);
+      const inst = edgeToInstance(edge, bookPlatformId, fromId, toId);
+      const status = inst.properties.resolution_status as keyof typeof resStats;
+      resStats[status]++;
+      edgeInstances.push(inst);
+    }
+    const edgeResult = await importInstances(prisma, tenantResult.tenantId, 'BookCharacterEdge', edgeInstances);
+    console.log(`[ingest] book character edges imported=${edgeResult.imported} updated=${edgeResult.updated} skipped=${edgeResult.skipped + edgesSkipped}`);
+    console.log(`[ingest] edge resolution: fully=${resStats.fully_resolved} partially=${resStats.partially_resolved} unresolved=${resStats.unresolved}`);
 
     console.log('[done]');
   } finally {

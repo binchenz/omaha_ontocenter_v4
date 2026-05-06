@@ -57,8 +57,21 @@ export const filmAiV2OntologySpec: OntologySpec = {
         { name: 'role', label: '角色定位', type: 'string', filterable: true },
       ],
     },
+    {
+      name: 'BookCharacterEdge',
+      label: '角色关系',
+      properties: [
+        { name: 'from_string', label: '起点（原字符串）', type: 'string' },
+        { name: 'to_string', label: '终点（原字符串）', type: 'string' },
+        { name: 'label', label: '关系描述', type: 'string' },
+        { name: 'from_character_id', label: '起点角色ID', type: 'string', filterable: true },
+        { name: 'to_character_id', label: '终点角色ID', type: 'string', filterable: true },
+        { name: 'resolution_status', label: '解析状态', type: 'string', filterable: true },
+      ],
+    },
   ],
   relationships: [
     { sourceType: 'BookCharacter', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'BookCharacterEdge', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
   ],
 };
