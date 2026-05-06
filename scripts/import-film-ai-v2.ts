@@ -9,6 +9,9 @@ import { bootstrapTenant } from './lib/tenant-bootstrap';
 import { bootstrapOntology } from './lib/ontology-bootstrap';
 import { importInstances, type InstanceInput } from './lib/object-instance-importer';
 import { flattenBookAnalysis } from './lib/book-analysis-flattener';
+import { runRecipe } from './lib/run-recipe';
+import { createIngestCtx } from './lib/ingest-ctx';
+import { bookRecipe } from './lib/film-ai-v2-recipes';
 import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded, type EdgeExpanded, type PlotBeatExpanded, type EmotionalPointExpanded, type MarketScoreExpanded, type ChapterSummaryRow } from './lib/film-ai-v2-source-reader';
 import { resolveCharacterName, type CandidateCharacter } from './lib/entity-resolver';
 import {
@@ -330,9 +333,16 @@ async function main(): Promise<void> {
     console.log('[source] disconnected — proceeding with local writes');
 
     console.log('[ingest] books');
-    const bookInstances = booksWithAnalysis.map(bookToInstance);
-    const bookResult = await importInstances(prisma, tenantResult.tenantId, 'Book', bookInstances);
-    console.log(`[ingest] books imported=${bookResult.imported} updated=${bookResult.updated} skipped=${bookResult.skipped}`);
+    const ingestCtx = createIngestCtx(prisma, tenantResult.tenantId, reader, {
+      booksWithAnalysis,
+      mainCharRows,
+      edgeRows,
+      plotBeats,
+      emoPoints,
+      marketScores,
+      chapterSummaries,
+    });
+    await runRecipe(bookRecipe, ingestCtx, importInstances);
 
     console.log('[ingest] book characters (mainChars EXPLODE)');
     const bookPlatformMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Book');
