@@ -14,6 +14,7 @@ import { TypeResolver } from './sdk/type-resolver.service';
 import { ImportEngine } from './sdk/import-engine.service';
 import { FileParserService } from './tools/file-parser.service';
 import { QueryObjectsTool } from './tools/query-objects.tool';
+import { AggregateObjectsTool } from './tools/aggregate-objects.tool';
 import { GetOntologySchemaTool } from './tools/get-ontology-schema.tool';
 import { ParseFileTool } from './tools/parse-file.tool';
 import { CreateObjectTypeTool } from './tools/create-object-type.tool';
@@ -49,6 +50,7 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
     ConnectorClient,
     SseAgentRunner,
     QueryObjectsTool,
+    AggregateObjectsTool,
     GetOntologySchemaTool,
     ParseFileTool,
     CreateObjectTypeTool,
@@ -65,7 +67,7 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
       provide: AGENT_TOOLS,
       useFactory: (...tools: AgentTool[]): AgentTool[] => tools,
       inject: [
-        QueryObjectsTool, GetOntologySchemaTool, ParseFileTool,
+        QueryObjectsTool, AggregateObjectsTool, GetOntologySchemaTool, ParseFileTool,
         CreateObjectTypeTool, UpdateObjectTypeTool, DeleteObjectTypeTool,
         ImportDataTool, TestDbConnectionTool, CreateConnectorTool,
         ListDbTablesTool, PreviewDbTableTool, CreateRelationshipTool, DeleteRelationshipTool,

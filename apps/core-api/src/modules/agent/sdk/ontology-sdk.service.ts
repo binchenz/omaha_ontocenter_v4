@@ -65,6 +65,10 @@ export class OntologySdkService {
     return this.queryService.queryObjects(user, req);
   }
 
+  async aggregateObjects(user: CurrentUserType, req: any) {
+    return this.queryService.aggregateObjects(user, req);
+  }
+
   async createObjectType(tenantId: string, dto: {
     name: string;
     label: string;
