@@ -198,12 +198,25 @@ export class FilmAiV2SourceReader {
   }
 
   async readChapterSummaries(): Promise<ChapterSummaryRow[]> {
-    const r = await this.c().query<ChapterSummaryRow>(
-      `SELECT cs.id, cs.source_id, cs.chapter_seq, cs.chapter_title, cs.structured_summary
-       FROM chapter_summaries cs
-       WHERE cs.source_type = 'uploaded'`,
-    );
-    return r.rows;
+    const all: ChapterSummaryRow[] = [];
+    const PAGE = 2000;
+    let offset = 0;
+    while (true) {
+      const r = await this.c().query<ChapterSummaryRow>(
+        `SELECT cs.id, cs.source_id, cs.chapter_seq, cs.chapter_title, cs.structured_summary
+         FROM chapter_summaries cs
+         WHERE cs.source_type = 'uploaded'
+         ORDER BY cs.id
+         LIMIT $1 OFFSET $2`,
+        [PAGE, offset],
+      );
+      if (r.rows.length === 0) break;
+      all.push(...r.rows);
+      console.log(`[source]   chapter_summaries paged: ${all.length} so far`);
+      if (r.rows.length < PAGE) break;
+      offset += PAGE;
+    }
+    return all;
   }
 
   async countTable(table: string): Promise<number> {

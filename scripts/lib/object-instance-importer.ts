@@ -15,6 +15,7 @@ export interface ImportResult {
 }
 
 const BATCH_SIZE = 500;
+const LOOKUP_BATCH = 5000;
 
 export async function importInstances(
   prisma: PrismaClient,
@@ -26,15 +27,19 @@ export async function importInstances(
   const skipped = instances.length - valid.length;
   if (valid.length === 0) return { imported: 0, updated: 0, skipped };
 
-  const existing = await prisma.objectInstance.findMany({
-    where: {
-      tenantId,
-      objectType: objectTypeName,
-      externalId: { in: valid.map((v) => v.externalId) },
-    },
-    select: { externalId: true },
-  });
-  const existingIds = new Set(existing.map((e) => e.externalId));
+  const existingIds = new Set<string>();
+  for (let i = 0; i < valid.length; i += LOOKUP_BATCH) {
+    const slice = valid.slice(i, i + LOOKUP_BATCH);
+    const rows = await prisma.objectInstance.findMany({
+      where: {
+        tenantId,
+        objectType: objectTypeName,
+        externalId: { in: slice.map((v) => v.externalId) },
+      },
+      select: { externalId: true },
+    });
+    for (const r of rows) existingIds.add(r.externalId);
+  }
 
   const toInsert = valid.filter((v) => !existingIds.has(v.externalId));
   const toUpdate = valid.filter((v) => existingIds.has(v.externalId));
