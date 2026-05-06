@@ -105,4 +105,35 @@ describe('applyFkRelationships', () => {
       });
     });
   });
+
+  describe('reified relationship: 3 FKs on one row, 2 to same target type with different names', () => {
+    const fkSpec: FkSpec = [
+      { sourceTable: 'novel_character_relations', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
+      { sourceTable: 'novel_character_relations', sourceColumn: 'from_char_id', relationshipName: 'from', targetTable: 'novel_characters' },
+      { sourceTable: 'novel_character_relations', sourceColumn: 'to_char_id', relationshipName: 'to', targetTable: 'novel_characters' },
+    ];
+    const lookup = {
+      novels: { 'n-1': 'platform-n-1' },
+      novel_characters: {
+        'char-a': 'platform-char-a',
+        'char-b': 'platform-char-b',
+      },
+    };
+
+    it('disambiguates two FKs to the same target type by relationship name', () => {
+      const row = {
+        id: 'rel-1',
+        novel_id: 'n-1',
+        from_char_id: 'char-a',
+        to_char_id: 'char-b',
+        relation_type: '父子',
+      };
+      const [out] = applyFkRelationships('novel_character_relations', [row], fkSpec, lookup);
+      expect(out.relationships).toEqual({
+        belongsTo: 'platform-n-1',
+        from: 'platform-char-a',
+        to: 'platform-char-b',
+      });
+    });
+  });
 });

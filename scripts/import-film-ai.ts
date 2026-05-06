@@ -8,7 +8,7 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 import { bootstrapTenant } from './lib/tenant-bootstrap';
 import { bootstrapOntology } from './lib/ontology-bootstrap';
 import { importInstances, type InstanceInput } from './lib/object-instance-importer';
-import { FilmAiSourceReader, type NovelRow, type CharacterRow, type PlotOutlineRow, type ChapterRow } from './lib/film-ai-source-reader';
+import { FilmAiSourceReader, type NovelRow, type CharacterRow, type PlotOutlineRow, type ChapterRow, type CharacterRelationRow } from './lib/film-ai-source-reader';
 import { applyFkRelationships, type TargetTableLookup } from './lib/fk-to-relationships';
 import {
   FILM_AI_TENANT_SLUG,
@@ -103,6 +103,19 @@ function chapterToInstance(row: ChapterRow, relationships: Record<string, string
   };
 }
 
+function characterRelationToInstance(row: CharacterRelationRow, relationships: Record<string, string>): InstanceInput {
+  return {
+    externalId: row.id,
+    label: row.relation_type || row.id,
+    properties: {
+      relation_type: row.relation_type,
+      knowledge_state: row.knowledge_state,
+    },
+    relationships,
+    searchText: [row.relation_type, row.knowledge_state].filter(Boolean).join(' '),
+  };
+}
+
 async function loadExternalIdMap(
   prisma: PrismaClient,
   tenantId: string,
@@ -151,6 +164,8 @@ async function main(): Promise<void> {
   console.log(`[source] novel_plot_outlines rows = ${plotOutlineCount}`);
   const chapterCount = await reader.countTable('novel_chapters');
   console.log(`[source] novel_chapters rows = ${chapterCount}`);
+  const characterRelationCount = await reader.countTable('novel_character_relations');
+  console.log(`[source] novel_character_relations rows = ${characterRelationCount}`);
 
   if (flags.dryRun) {
     console.log(`[plan] would upsert tenant slug=${FILM_AI_TENANT_SLUG}`);
@@ -159,6 +174,7 @@ async function main(): Promise<void> {
     console.log(`[plan] would upsert ${characterCount} Character instance(s)`);
     console.log(`[plan] would upsert ${plotOutlineCount} PlotOutline instance(s)`);
     console.log(`[plan] would upsert ${chapterCount} Chapter instance(s)`);
+    console.log(`[plan] would upsert ${characterRelationCount} CharacterRelation instance(s)`);
     console.log('[plan] dry-run complete — no writes.');
     return;
   }
@@ -249,6 +265,19 @@ async function main(): Promise<void> {
     const chapterInstances = enrichedChapters.map((e) => chapterToInstance(e.row, e.relationships));
     const chapterResult = await importInstances(prisma, tenantResult.tenantId, 'Chapter', chapterInstances);
     console.log(`[ingest] chapters imported=${chapterResult.imported} updated=${chapterResult.updated} skipped=${chapterResult.skipped}`);
+
+    console.log('[ingest] character relations');
+    const characterMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Character');
+    const characterRelations = await reader.readCharacterRelations();
+    const enrichedCRs = applyFkRelationships(
+      'novel_character_relations',
+      characterRelations,
+      filmAiFkSpec,
+      { novels: novelMap, novel_characters: characterMap },
+    );
+    const crInstances = enrichedCRs.map((e) => characterRelationToInstance(e.row, e.relationships));
+    const crResult = await importInstances(prisma, tenantResult.tenantId, 'CharacterRelation', crInstances);
+    console.log(`[ingest] character relations imported=${crResult.imported} updated=${crResult.updated} skipped=${crResult.skipped}`);
 
     console.log('[done]');
   } finally {

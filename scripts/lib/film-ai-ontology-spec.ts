@@ -57,6 +57,14 @@ export const filmAiOntologySpec: OntologySpec = {
         { name: 'manual_content', label: '手工内容', type: 'string' },
       ],
     },
+    {
+      name: 'CharacterRelation',
+      label: '角色关系',
+      properties: [
+        { name: 'relation_type', label: '关系类型', type: 'string' },
+        { name: 'knowledge_state', label: '知情状态', type: 'string' },
+      ],
+    },
   ],
   relationships: [
     { sourceType: 'Character', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
@@ -64,6 +72,9 @@ export const filmAiOntologySpec: OntologySpec = {
     { sourceType: 'PlotOutline', targetType: 'PlotOutline', name: 'parent', cardinality: 'one-to-many' },
     { sourceType: 'Chapter', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
     { sourceType: 'Chapter', targetType: 'PlotOutline', name: 'followsOutline', cardinality: 'one-to-many' },
+    { sourceType: 'CharacterRelation', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'CharacterRelation', targetType: 'Character', name: 'from', cardinality: 'one-to-many' },
+    { sourceType: 'CharacterRelation', targetType: 'Character', name: 'to', cardinality: 'one-to-many' },
   ],
 };
 
@@ -73,4 +84,7 @@ export const filmAiFkSpec: FkSpec = [
   { sourceTable: 'novel_plot_outlines', sourceColumn: 'parent_id', relationshipName: 'parent', targetTable: 'novel_plot_outlines' },
   { sourceTable: 'novel_chapters', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
   { sourceTable: 'novel_chapters', sourceColumn: 'outline_id', relationshipName: 'followsOutline', targetTable: 'novel_plot_outlines' },
+  { sourceTable: 'novel_character_relations', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
+  { sourceTable: 'novel_character_relations', sourceColumn: 'from_char_id', relationshipName: 'from', targetTable: 'novel_characters' },
+  { sourceTable: 'novel_character_relations', sourceColumn: 'to_char_id', relationshipName: 'to', targetTable: 'novel_characters' },
 ];

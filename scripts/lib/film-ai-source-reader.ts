@@ -47,6 +47,15 @@ export interface ChapterRow {
   manual_content: string | null;
 }
 
+export interface CharacterRelationRow {
+  id: string;
+  novel_id: string;
+  from_char_id: string;
+  to_char_id: string;
+  relation_type: string | null;
+  knowledge_state: string | null;
+}
+
 export class FilmAiSourceReader {
   constructor(private readonly connectionString: string) {}
 
@@ -98,6 +107,16 @@ export class FilmAiSourceReader {
       const r = await c.query<ChapterRow>(
         `SELECT id, novel_id, outline_id, seq_order, title, status, manual_content
          FROM novel_chapters`,
+      );
+      return r.rows;
+    });
+  }
+
+  async readCharacterRelations(): Promise<CharacterRelationRow[]> {
+    return this.withClient(async (c) => {
+      const r = await c.query<CharacterRelationRow>(
+        `SELECT id, novel_id, from_char_id, to_char_id, relation_type, knowledge_state
+         FROM novel_character_relations`,
       );
       return r.rows;
     });
