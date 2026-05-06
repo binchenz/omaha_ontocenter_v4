@@ -279,4 +279,47 @@ describe('aggregate_objects (e2e) — count-only tracer', () => {
       expect(JSON.stringify(res.body)).toMatch(/totalAmount/i);
     });
   });
+
+  // ============================================================
+  // Slice #43: countDistinct + multi-field groupBy
+  // ============================================================
+  describe('countDistinct + multi-field groupBy', () => {
+    it('countDistinct on a string field counts distinct values', async () => {
+      // Demo tenant orders: O2024001 (status=已完成), O2024002 (status=进行中),
+      // AGG-T-001/002 (status=completed), AGG-T-003 (status=pending) → 4 distinct
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          metrics: [
+            { kind: 'count', alias: 'n_rows' },
+            { kind: 'countDistinct', field: 'status', alias: 'n_status' },
+          ],
+        })
+        .expect(201);
+      expect(res.body.groups).toHaveLength(1);
+      expect(Number(res.body.groups[0].metrics.n_status)).toBe(4);
+    });
+
+    it('multi-field groupBy returns composite key objects', async () => {
+      // 3 AGG-T-* rows, each unique on (status, orderNo) → 3 groups
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'contains', value: 'AGG-T-' }],
+          groupBy: ['status', 'orderNo'],
+          metrics: [{ kind: 'count', alias: 'n' }],
+        })
+        .expect(201);
+      expect(res.body.groups).toHaveLength(3);
+      for (const g of res.body.groups) {
+        expect('status' in g.key).toBe(true);
+        expect('orderNo' in g.key).toBe(true);
+        expect(g.metrics.n).toBe(1);
+      }
+    });
+  });
 });

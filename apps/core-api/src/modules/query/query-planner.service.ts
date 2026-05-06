@@ -180,6 +180,16 @@ export class QueryPlannerService {
         selectExprs.push(`count(*)::int AS "${m.alias}"`);
         continue;
       }
+      if (m.kind === 'countDistinct') {
+        if (!m.field) {
+          throw new BadRequestException({
+            error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, hint: `'countDistinct' requires a 'field'.` },
+          });
+        }
+        // No ::numeric cast — count distinct works over any text.
+        selectExprs.push(`count(DISTINCT (properties->>'${m.field}'))::int AS "${m.alias}"`);
+        continue;
+      }
       if (numericKinds.has(m.kind)) {
         if (!m.field) {
           throw new BadRequestException({
