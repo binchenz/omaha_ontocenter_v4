@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "import:film-ai": "tsx import-film-ai.ts"
+    "import:film-ai": "tsx import-film-ai.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@omaha/db": "workspace:*",

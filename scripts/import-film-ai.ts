@@ -8,12 +8,14 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 import { bootstrapTenant } from './lib/tenant-bootstrap';
 import { bootstrapOntology } from './lib/ontology-bootstrap';
 import { importInstances, type InstanceInput } from './lib/object-instance-importer';
-import { FilmAiSourceReader, type NovelRow } from './lib/film-ai-source-reader';
+import { FilmAiSourceReader, type NovelRow, type CharacterRow } from './lib/film-ai-source-reader';
+import { applyFkRelationships, type TargetTableLookup } from './lib/fk-to-relationships';
 import {
   FILM_AI_TENANT_SLUG,
   FILM_AI_TENANT_NAME,
   FILM_AI_ADMIN_EMAIL,
   filmAiOntologySpec,
+  filmAiFkSpec,
 } from './lib/film-ai-ontology-spec';
 
 interface CliFlags {
@@ -51,6 +53,38 @@ function novelToInstance(row: NovelRow): InstanceInput {
   };
 }
 
+function characterToInstance(row: CharacterRow, relationships: Record<string, string>): InstanceInput {
+  return {
+    externalId: row.id,
+    label: row.name || row.id,
+    properties: {
+      name: row.name,
+      aliases: row.aliases ?? [],
+      appearance: row.appearance,
+      personality: row.personality,
+      motivation: row.motivation,
+      secrets: row.secrets,
+      arc_stage: row.arc_stage,
+    },
+    relationships,
+    searchText: [row.name, ...(row.aliases ?? [])].filter(Boolean).join(' '),
+  };
+}
+
+async function loadExternalIdMap(
+  prisma: PrismaClient,
+  tenantId: string,
+  objectTypeName: string,
+): Promise<Record<string, string>> {
+  const rows = await prisma.objectInstance.findMany({
+    where: { tenantId, objectType: objectTypeName },
+    select: { id: true, externalId: true },
+  });
+  const out: Record<string, string> = {};
+  for (const r of rows) out[r.externalId] = r.id;
+  return out;
+}
+
 async function main(): Promise<void> {
   const flags = parseArgs(process.argv.slice(2));
   if (!flags.dryRun && !flags.confirm) {
@@ -79,11 +113,14 @@ async function main(): Promise<void> {
   console.log('[source] connecting and counting...');
   const novelCount = await reader.countTable('novels');
   console.log(`[source] novels rows = ${novelCount}`);
+  const characterCount = await reader.countTable('novel_characters');
+  console.log(`[source] novel_characters rows = ${characterCount}`);
 
   if (flags.dryRun) {
     console.log(`[plan] would upsert tenant slug=${FILM_AI_TENANT_SLUG}`);
     console.log(`[plan] would register ${filmAiOntologySpec.objectTypes.length} ObjectType(s), ${filmAiOntologySpec.relationships.length} Relationship(s)`);
     console.log(`[plan] would upsert ${novelCount} Novel instance(s)`);
+    console.log(`[plan] would upsert ${characterCount} Character instance(s)`);
     console.log('[plan] dry-run complete — no writes.');
     return;
   }
@@ -110,8 +147,17 @@ async function main(): Promise<void> {
     console.log('[ingest] novels');
     const novels = await reader.readNovels();
     const novelInstances = novels.map(novelToInstance);
-    const result = await importInstances(prisma, tenantResult.tenantId, 'Novel', novelInstances);
-    console.log(`[ingest] novels imported=${result.imported} updated=${result.updated} skipped=${result.skipped}`);
+    const novelResult = await importInstances(prisma, tenantResult.tenantId, 'Novel', novelInstances);
+    console.log(`[ingest] novels imported=${novelResult.imported} updated=${novelResult.updated} skipped=${novelResult.skipped}`);
+
+    console.log('[ingest] characters');
+    const novelMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Novel');
+    const lookup: TargetTableLookup = { novels: novelMap };
+    const characters = await reader.readCharacters();
+    const enriched = applyFkRelationships('novel_characters', characters, filmAiFkSpec, lookup);
+    const characterInstances = enriched.map((e) => characterToInstance(e.row, e.relationships));
+    const characterResult = await importInstances(prisma, tenantResult.tenantId, 'Character', characterInstances);
+    console.log(`[ingest] characters imported=${characterResult.imported} updated=${characterResult.updated} skipped=${characterResult.skipped}`);
 
     console.log('[done]');
   } finally {

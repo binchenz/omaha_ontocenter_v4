@@ -1,4 +1,5 @@
 import type { OntologySpec } from './ontology-bootstrap';
+import type { FkSpec } from './fk-to-relationships';
 
 export const FILM_AI_TENANT_SLUG = 'drama_co';
 export const FILM_AI_TENANT_NAME = 'Drama Co (短剧公司)';
@@ -21,6 +22,25 @@ export const filmAiOntologySpec: OntologySpec = {
         { name: 'updated_at', label: '更新时间', type: 'date' },
       ],
     },
+    {
+      name: 'Character',
+      label: '角色',
+      properties: [
+        { name: 'name', label: '姓名', type: 'string' },
+        { name: 'aliases', label: '别名', type: 'json' },
+        { name: 'appearance', label: '外观', type: 'string' },
+        { name: 'personality', label: '性格', type: 'string' },
+        { name: 'motivation', label: '动机', type: 'string' },
+        { name: 'secrets', label: '秘密', type: 'string' },
+        { name: 'arc_stage', label: '人物弧线阶段', type: 'string' },
+      ],
+    },
   ],
-  relationships: [],
+  relationships: [
+    { sourceType: 'Character', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
+  ],
 };
+
+export const filmAiFkSpec: FkSpec = [
+  { sourceTable: 'novel_characters', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
+];
