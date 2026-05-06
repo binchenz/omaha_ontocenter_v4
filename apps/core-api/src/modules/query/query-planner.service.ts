@@ -167,7 +167,8 @@ export class QueryPlannerService {
 
     const groupExprs = groupBy.map((f) => `(properties->>'${f}')`);
 
-    // Metric SELECT clauses — slice #40 only handles 'count'.
+    // Metric SELECT clauses.
+    const numericKinds = new Set(['sum', 'avg', 'min', 'max']);
     const selectExprs: string[] = [];
     // groupBy fields appear in SELECT first so the service layer can read
     // them keyed by the original property name.
@@ -177,9 +178,37 @@ export class QueryPlannerService {
     for (const m of args.metrics) {
       if (m.kind === 'count') {
         selectExprs.push(`count(*)::int AS "${m.alias}"`);
-      } else {
-        throw new Error(`metric kind '${m.kind}' not yet supported in v1`);
+        continue;
       }
+      if (numericKinds.has(m.kind)) {
+        if (!m.field) {
+          throw new BadRequestException({
+            error: {
+              code: 'METRIC_INVALID_FIELD_TYPE',
+              alias: m.alias,
+              hint: `Metric kind '${m.kind}' requires a 'field'.`,
+            },
+          });
+        }
+        if (view && view.numericFields.size > 0 && !view.numericFields.has(m.field)) {
+          const numericList = Array.from(view.numericFields).join(', ') || '(none declared)';
+          throw new BadRequestException({
+            error: {
+              code: 'METRIC_INVALID_FIELD_TYPE',
+              alias: m.alias,
+              field: m.field,
+              kind: m.kind,
+              hint: `Metric '${m.kind}' requires a numeric property. Available numeric fields on '${args.objectType}': ${numericList}.`,
+            },
+          });
+        }
+        const fn = m.kind.toUpperCase();
+        // Cast to numeric matches the bug-#33 sort fix convention.
+        selectExprs.push(`${fn}((properties->>'${m.field}')::numeric) AS "${m.alias}"`);
+        continue;
+      }
+      // countDistinct lands in #43.
+      throw new Error(`metric kind '${m.kind}' not yet supported in v1`);
     }
 
     const where = wherePieces.join(' AND ');

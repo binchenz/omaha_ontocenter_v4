@@ -220,4 +220,63 @@ describe('aggregate_objects (e2e) — count-only tracer', () => {
       expect(JSON.stringify(res.body)).toMatch(/search/i); // hint mentions search fallback
     });
   });
+
+  // ============================================================
+  // Slice #42: sum/avg/min/max + METRIC_INVALID_FIELD_TYPE
+  // ============================================================
+  describe('numeric metrics', () => {
+    it('sum + count + avg + min + max combined, no groupBy', async () => {
+      // demo seed has these pre-existing:
+      //   O2024001 totalAmount=75000
+      //   O2024002 totalAmount=25000
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'contains', value: 'O2024' }],
+          metrics: [
+            { kind: 'count', alias: 'n' },
+            { kind: 'sum', field: 'totalAmount', alias: 'total' },
+            { kind: 'avg', field: 'totalAmount', alias: 'avg' },
+            { kind: 'min', field: 'totalAmount', alias: 'min' },
+            { kind: 'max', field: 'totalAmount', alias: 'max' },
+          ],
+        })
+        .expect(201);
+      expect(res.body.groups).toHaveLength(1);
+      const m = res.body.groups[0].metrics;
+      expect(m.n).toBe(2);
+      expect(Number(m.total)).toBe(100000);
+      expect(Number(m.avg)).toBe(50000);
+      expect(Number(m.min)).toBe(25000);
+      expect(Number(m.max)).toBe(75000);
+    });
+
+    it('avg ignores rows with NULL value (Postgres default)', async () => {
+      // AGG-T-* rows have no totalAmount; result still 50000 from the 2 O2024 rows.
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          metrics: [{ kind: 'avg', field: 'totalAmount', alias: 'avg' }],
+        })
+        .expect(201);
+      expect(Number(res.body.groups[0].metrics.avg)).toBe(50000);
+    });
+
+    it('rejects sum on a non-numeric field with METRIC_INVALID_FIELD_TYPE', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          metrics: [{ kind: 'sum', field: 'status', alias: 'sum_status' }],
+        })
+        .expect(400);
+      expect(res.body.error?.code ?? res.body.code).toBe('METRIC_INVALID_FIELD_TYPE');
+      expect(JSON.stringify(res.body)).toMatch(/totalAmount/i);
+    });
+  });
 });
