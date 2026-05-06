@@ -1,3 +1,16 @@
+/**
+ * Pure helper for translating multiple foreign-key columns on a source row
+ * into an `objectInstance.relationships` jsonb shape.
+ *
+ * Use this from inside an `IngestRecipe.relationships(row, ctx)` callback
+ * (the escape hatch — see ADR-0016) when a row has 2+ FK references and
+ * the simple `parentRef` shape doesn't fit. Examples: a row with both
+ * `novel_id` and `outline_id`; reified relationships with `from_id` /
+ * `to_id`; same-target multi-name relationships like `plantedIn` /
+ * `resolvedIn` both pointing at Episode.
+ *
+ * For the common single-FK case, prefer `IngestRecipe.parentRef` over this.
+ */
 export interface FkSpecEntry {
   sourceTable: string;
   sourceColumn: string;
