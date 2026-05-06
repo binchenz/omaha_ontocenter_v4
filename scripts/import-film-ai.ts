@@ -8,7 +8,7 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 import { bootstrapTenant } from './lib/tenant-bootstrap';
 import { bootstrapOntology } from './lib/ontology-bootstrap';
 import { importInstances, type InstanceInput } from './lib/object-instance-importer';
-import { FilmAiSourceReader, type NovelRow, type CharacterRow } from './lib/film-ai-source-reader';
+import { FilmAiSourceReader, type NovelRow, type CharacterRow, type PlotOutlineRow, type ChapterRow } from './lib/film-ai-source-reader';
 import { applyFkRelationships, type TargetTableLookup } from './lib/fk-to-relationships';
 import {
   FILM_AI_TENANT_SLUG,
@@ -71,6 +71,38 @@ function characterToInstance(row: CharacterRow, relationships: Record<string, st
   };
 }
 
+function plotOutlineToInstance(row: PlotOutlineRow, relationships: Record<string, string>): InstanceInput {
+  return {
+    externalId: row.id,
+    label: row.title || row.id,
+    properties: {
+      seq_order: row.seq_order,
+      title: row.title,
+      goal: row.goal,
+      emotional_beat: row.emotional_beat,
+      checkpoint: row.checkpoint,
+      content: row.content,
+    },
+    relationships,
+    searchText: [row.title, row.goal].filter(Boolean).join(' '),
+  };
+}
+
+function chapterToInstance(row: ChapterRow, relationships: Record<string, string>): InstanceInput {
+  return {
+    externalId: row.id,
+    label: row.title || row.id,
+    properties: {
+      seq_order: row.seq_order,
+      title: row.title,
+      status: row.status,
+      manual_content: row.manual_content,
+    },
+    relationships,
+    searchText: [row.title].filter(Boolean).join(' '),
+  };
+}
+
 async function loadExternalIdMap(
   prisma: PrismaClient,
   tenantId: string,
@@ -115,12 +147,18 @@ async function main(): Promise<void> {
   console.log(`[source] novels rows = ${novelCount}`);
   const characterCount = await reader.countTable('novel_characters');
   console.log(`[source] novel_characters rows = ${characterCount}`);
+  const plotOutlineCount = await reader.countTable('novel_plot_outlines');
+  console.log(`[source] novel_plot_outlines rows = ${plotOutlineCount}`);
+  const chapterCount = await reader.countTable('novel_chapters');
+  console.log(`[source] novel_chapters rows = ${chapterCount}`);
 
   if (flags.dryRun) {
     console.log(`[plan] would upsert tenant slug=${FILM_AI_TENANT_SLUG}`);
     console.log(`[plan] would register ${filmAiOntologySpec.objectTypes.length} ObjectType(s), ${filmAiOntologySpec.relationships.length} Relationship(s)`);
     console.log(`[plan] would upsert ${novelCount} Novel instance(s)`);
     console.log(`[plan] would upsert ${characterCount} Character instance(s)`);
+    console.log(`[plan] would upsert ${plotOutlineCount} PlotOutline instance(s)`);
+    console.log(`[plan] would upsert ${chapterCount} Chapter instance(s)`);
     console.log('[plan] dry-run complete — no writes.');
     return;
   }
@@ -152,12 +190,65 @@ async function main(): Promise<void> {
 
     console.log('[ingest] characters');
     const novelMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Novel');
-    const lookup: TargetTableLookup = { novels: novelMap };
+    const characterLookup: TargetTableLookup = { novels: novelMap };
     const characters = await reader.readCharacters();
-    const enriched = applyFkRelationships('novel_characters', characters, filmAiFkSpec, lookup);
-    const characterInstances = enriched.map((e) => characterToInstance(e.row, e.relationships));
+    const enrichedChars = applyFkRelationships('novel_characters', characters, filmAiFkSpec, characterLookup);
+    const characterInstances = enrichedChars.map((e) => characterToInstance(e.row, e.relationships));
     const characterResult = await importInstances(prisma, tenantResult.tenantId, 'Character', characterInstances);
     console.log(`[ingest] characters imported=${characterResult.imported} updated=${characterResult.updated} skipped=${characterResult.skipped}`);
+
+    console.log('[ingest] plot outlines (pass 1: rows without parent FK)');
+    const plotOutlines = await reader.readPlotOutlines();
+    const passOneSpec = filmAiFkSpec.filter(
+      (s) => !(s.sourceTable === 'novel_plot_outlines' && s.sourceColumn === 'parent_id'),
+    );
+    const enrichedPlotOutlinesPass1 = applyFkRelationships(
+      'novel_plot_outlines',
+      plotOutlines,
+      passOneSpec,
+      { novels: novelMap },
+    );
+    const plotOutlineInstancesPass1 = enrichedPlotOutlinesPass1.map((e) =>
+      plotOutlineToInstance(e.row, e.relationships),
+    );
+    const poPass1Result = await importInstances(
+      prisma,
+      tenantResult.tenantId,
+      'PlotOutline',
+      plotOutlineInstancesPass1,
+    );
+    console.log(
+      `[ingest] plot outlines pass 1 imported=${poPass1Result.imported} updated=${poPass1Result.updated} skipped=${poPass1Result.skipped}`,
+    );
+
+    console.log('[ingest] plot outlines (pass 2: parent FK)');
+    const plotOutlineMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'PlotOutline');
+    const enrichedPlotOutlinesPass2 = applyFkRelationships(
+      'novel_plot_outlines',
+      plotOutlines,
+      filmAiFkSpec,
+      { novels: novelMap, novel_plot_outlines: plotOutlineMap },
+    );
+    const plotOutlineInstancesPass2 = enrichedPlotOutlinesPass2.map((e) =>
+      plotOutlineToInstance(e.row, e.relationships),
+    );
+    const poPass2Result = await importInstances(
+      prisma,
+      tenantResult.tenantId,
+      'PlotOutline',
+      plotOutlineInstancesPass2,
+    );
+    console.log(
+      `[ingest] plot outlines pass 2 imported=${poPass2Result.imported} updated=${poPass2Result.updated} skipped=${poPass2Result.skipped}`,
+    );
+
+    console.log('[ingest] chapters');
+    const chapters = await reader.readChapters();
+    const chapterLookup: TargetTableLookup = { novels: novelMap, novel_plot_outlines: plotOutlineMap };
+    const enrichedChapters = applyFkRelationships('novel_chapters', chapters, filmAiFkSpec, chapterLookup);
+    const chapterInstances = enrichedChapters.map((e) => chapterToInstance(e.row, e.relationships));
+    const chapterResult = await importInstances(prisma, tenantResult.tenantId, 'Chapter', chapterInstances);
+    console.log(`[ingest] chapters imported=${chapterResult.imported} updated=${chapterResult.updated} skipped=${chapterResult.skipped}`);
 
     console.log('[done]');
   } finally {

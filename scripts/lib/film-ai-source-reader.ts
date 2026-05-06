@@ -25,6 +25,28 @@ export interface CharacterRow {
   arc_stage: string | null;
 }
 
+export interface PlotOutlineRow {
+  id: string;
+  novel_id: string;
+  parent_id: string | null;
+  seq_order: number | null;
+  title: string | null;
+  goal: string | null;
+  emotional_beat: string | null;
+  checkpoint: boolean | null;
+  content: string | null;
+}
+
+export interface ChapterRow {
+  id: string;
+  novel_id: string;
+  outline_id: string | null;
+  seq_order: number | null;
+  title: string | null;
+  status: string | null;
+  manual_content: string | null;
+}
+
 export class FilmAiSourceReader {
   constructor(private readonly connectionString: string) {}
 
@@ -55,6 +77,27 @@ export class FilmAiSourceReader {
         `SELECT id, novel_id, name, aliases, appearance, personality,
                 motivation, secrets, arc_stage
          FROM novel_characters`,
+      );
+      return r.rows;
+    });
+  }
+
+  async readPlotOutlines(): Promise<PlotOutlineRow[]> {
+    return this.withClient(async (c) => {
+      const r = await c.query<PlotOutlineRow>(
+        `SELECT id, novel_id, parent_id, seq_order, title, goal,
+                emotional_beat, checkpoint, content
+         FROM novel_plot_outlines`,
+      );
+      return r.rows;
+    });
+  }
+
+  async readChapters(): Promise<ChapterRow[]> {
+    return this.withClient(async (c) => {
+      const r = await c.query<ChapterRow>(
+        `SELECT id, novel_id, outline_id, seq_order, title, status, manual_content
+         FROM novel_chapters`,
       );
       return r.rows;
     });

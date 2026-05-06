@@ -35,12 +35,42 @@ export const filmAiOntologySpec: OntologySpec = {
         { name: 'arc_stage', label: '人物弧线阶段', type: 'string' },
       ],
     },
+    {
+      name: 'PlotOutline',
+      label: '剧情大纲',
+      properties: [
+        { name: 'seq_order', label: '顺序', type: 'number' },
+        { name: 'title', label: '标题', type: 'string' },
+        { name: 'goal', label: '目标', type: 'string' },
+        { name: 'emotional_beat', label: '情感节点', type: 'string' },
+        { name: 'checkpoint', label: '检查点', type: 'boolean' },
+        { name: 'content', label: '内容', type: 'string' },
+      ],
+    },
+    {
+      name: 'Chapter',
+      label: '章节',
+      properties: [
+        { name: 'seq_order', label: '顺序', type: 'number' },
+        { name: 'title', label: '标题', type: 'string' },
+        { name: 'status', label: '状态', type: 'string' },
+        { name: 'manual_content', label: '手工内容', type: 'string' },
+      ],
+    },
   ],
   relationships: [
     { sourceType: 'Character', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'PlotOutline', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'PlotOutline', targetType: 'PlotOutline', name: 'parent', cardinality: 'one-to-many' },
+    { sourceType: 'Chapter', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'Chapter', targetType: 'PlotOutline', name: 'followsOutline', cardinality: 'one-to-many' },
   ],
 };
 
 export const filmAiFkSpec: FkSpec = [
   { sourceTable: 'novel_characters', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
+  { sourceTable: 'novel_plot_outlines', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
+  { sourceTable: 'novel_plot_outlines', sourceColumn: 'parent_id', relationshipName: 'parent', targetTable: 'novel_plot_outlines' },
+  { sourceTable: 'novel_chapters', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
+  { sourceTable: 'novel_chapters', sourceColumn: 'outline_id', relationshipName: 'followsOutline', targetTable: 'novel_plot_outlines' },
 ];
