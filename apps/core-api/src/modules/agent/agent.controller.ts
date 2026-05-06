@@ -5,6 +5,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
 import { AgentService } from './agent.service';
 import { ConversationService } from './conversation/conversation.service';
+import { SseAgentRunner } from './sse/sse-agent-runner.service';
 import { ChatDto } from './dto/chat.dto';
 
 @Controller('agent')
@@ -13,6 +14,7 @@ export class AgentController {
   constructor(
     private readonly agentService: AgentService,
     private readonly conversationService: ConversationService,
+    private readonly sseRunner: SseAgentRunner,
   ) {}
 
   @Get('conversations')
@@ -31,48 +33,16 @@ export class AgentController {
     @Body() body: { conversationId: string; confirmed: boolean; comment?: string },
     @Res() res: Response,
   ) {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
-
-    const toolCalls: unknown[] = [];
-    const toolResults: unknown[] = [];
-    let textContent = '';
-
-    try {
-      for await (const event of this.agentService.resume({
+    await this.sseRunner.stream(
+      res,
+      this.agentService.resume({
         user,
         conversationId: body.conversationId,
         confirmed: body.confirmed,
         comment: body.comment,
-      })) {
-        if (event.type === 'tool_call') {
-          toolCalls.push({ id: event.id, name: event.name, args: event.args });
-        }
-        if (event.type === 'tool_result') {
-          toolResults.push({ id: event.id, name: event.name, data: event.data });
-        }
-        if (event.type === 'text') {
-          textContent = event.content;
-        }
-
-        res.write(`data: ${JSON.stringify(event)}\n\n`);
-      }
-
-      if (textContent || toolCalls.length) {
-        await this.conversationService.addTurn(body.conversationId, {
-          role: 'assistant',
-          content: textContent || null,
-          toolCalls: toolCalls.length ? toolCalls : undefined,
-          toolResults: toolResults.length ? toolResults : undefined,
-        });
-      }
-    } catch (err: any) {
-      res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
-    }
-
-    res.end();
+      }),
+      body.conversationId,
+    );
   }
 
   @Post('chat')
@@ -81,11 +51,6 @@ export class AgentController {
     @Body() dto: ChatDto,
     @Res() res: Response,
   ) {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
-
     const conversation = await this.conversationService.getOrCreate(
       user.id, user.tenantId, dto.conversationId,
     );
@@ -97,44 +62,16 @@ export class AgentController {
       content: dto.message,
     });
 
-    const toolCalls: unknown[] = [];
-    const toolResults: unknown[] = [];
-    let textContent = '';
-
-    try {
-      for await (const event of this.agentService.run({
+    await this.sseRunner.stream(
+      res,
+      this.agentService.run({
         user,
         message: dto.message,
         conversationId: conversation.id,
         history,
         fileId: dto.fileId,
-      })) {
-        if (event.type === 'done') {
-          event.conversationId = conversation.id;
-        }
-        if (event.type === 'tool_call') {
-          toolCalls.push({ id: event.id, name: event.name, args: event.args });
-        }
-        if (event.type === 'tool_result') {
-          toolResults.push({ id: event.id, name: event.name, data: event.data });
-        }
-        if (event.type === 'text') {
-          textContent = event.content;
-        }
-
-        res.write(`data: ${JSON.stringify(event)}\n\n`);
-      }
-
-      await this.conversationService.addTurn(conversation.id, {
-        role: 'assistant',
-        content: textContent || null,
-        toolCalls: toolCalls.length ? toolCalls : undefined,
-        toolResults: toolResults.length ? toolResults : undefined,
-      });
-    } catch (err: any) {
-      res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
-    }
-
-    res.end();
+      }),
+      conversation.id,
+    );
   }
 }

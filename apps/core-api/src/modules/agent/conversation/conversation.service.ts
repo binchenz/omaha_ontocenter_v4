@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@omaha/db';
 import { LlmMessage } from '../llm/llm-client.interface';
+import { formatToolResultForLlm } from '../llm/format-tool-result';
 
 @Injectable()
 export class ConversationService {
@@ -88,7 +89,7 @@ export class ConversationService {
           const matchingResult = rawResults[i];
           messages.push({
             role: 'tool',
-            content: JSON.stringify(matchingResult?.data ?? null),
+            content: formatToolResultForLlm(matchingResult?.data ?? null),
             tool_call_id: callsWithIds[i].id,
           });
         }

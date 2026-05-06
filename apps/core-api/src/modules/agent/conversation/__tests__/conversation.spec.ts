@@ -114,5 +114,23 @@ describe('ConversationService', () => {
       const toolMsg = history.find(m => m.role === 'tool');
       expect(toolMsg?.tool_call_id).toBe(assistantMsg!.tool_calls![0].id);
     });
+
+    it('wraps replayed tool message content in <data> tags (prompt-injection defense)', async () => {
+      mockPrisma.conversationTurn.findMany.mockResolvedValue([
+        { role: 'user', content: '查询客户', toolCalls: null, toolResults: null },
+        {
+          role: 'assistant',
+          content: null,
+          toolCalls: [{ id: 'call-1', name: 'query_objects', args: { objectType: 'customer' } }],
+          toolResults: [{ id: 'call-1', name: 'query_objects', data: { meta: { total: 3 } } }],
+        },
+      ]);
+
+      const history = await service.buildLlmHistory('conv-1');
+      const toolMsg = history.find(m => m.role === 'tool');
+      expect(toolMsg).toBeDefined();
+      expect(toolMsg!.content).toMatch(/^<data>.*<\/data>$/);
+      expect(toolMsg!.content).toContain('"total":3');
+    });
   });
 });

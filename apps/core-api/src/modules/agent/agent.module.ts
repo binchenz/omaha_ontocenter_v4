@@ -8,6 +8,7 @@ import { AgentService } from './agent.service';
 import { ConversationService } from './conversation/conversation.service';
 import { ConfirmationGate } from './confirmation/confirmation-gate.service';
 import { ConnectorClient } from './connector/connector-client.service';
+import { SseAgentRunner } from './sse/sse-agent-runner.service';
 import { OntologySdkService } from './sdk/ontology-sdk.service';
 import { TypeResolver } from './sdk/type-resolver.service';
 import { ImportEngine } from './sdk/import-engine.service';
@@ -46,6 +47,7 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
     OntologySdkService,
     ConfirmationGate,
     ConnectorClient,
+    SseAgentRunner,
     QueryObjectsTool,
     GetOntologySchemaTool,
     ParseFileTool,

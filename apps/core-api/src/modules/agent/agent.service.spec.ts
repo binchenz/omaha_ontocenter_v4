@@ -198,6 +198,8 @@ describe('AgentService', () => {
     });
     const toolMsg = llm.lastMessages.find(m => m.role === 'tool');
     expect(toolMsg?.content).toContain('Connection timeout');
+    // Error payloads are also wrapped in <data> per ADR-0008 prompt-injection defense
+    expect(toolMsg?.content).toMatch(/^<data>.*<\/data>$/);
   });
 
   it('uses skill system prompt when skills are provided', async () => {

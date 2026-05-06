@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmClient, LlmMessage, ToolDefinition } from './llm/llm-client.interface';
+import { formatToolResultForLlm } from './llm/format-tool-result';
 import { AgentTool } from './tools/tool.interface';
 import { AgentSkill } from './skills/skill.interface';
 import { ConfirmationGate } from './confirmation/confirmation-gate.service';
@@ -84,16 +85,16 @@ export class AgentService {
       try {
         const result = await tool.execute(pending.args, { user: input.user });
         yield { type: 'tool_result', id: pending.toolCallId, name: pending.toolName, data: result };
-        messages.push({ role: 'tool', content: `<data>${JSON.stringify(result)}</data>`, tool_call_id: pending.toolCallId });
+        messages.push({ role: 'tool', content: formatToolResultForLlm(result), tool_call_id: pending.toolCallId });
       } catch (err: any) {
         const errorPayload = { error: err.message ?? 'Tool execution failed' };
-        messages.push({ role: 'tool', content: JSON.stringify(errorPayload), tool_call_id: pending.toolCallId });
+        messages.push({ role: 'tool', content: formatToolResultForLlm(errorPayload), tool_call_id: pending.toolCallId });
       }
     } else {
       const rejection = input.comment
         ? `用户拒绝了操作 ${pending.toolName}，原因：${input.comment}`
         : `用户拒绝了操作 ${pending.toolName}`;
-      messages.push({ role: 'tool', content: JSON.stringify({ rejected: true, message: rejection }), tool_call_id: pending.toolCallId });
+      messages.push({ role: 'tool', content: formatToolResultForLlm({ rejected: true, message: rejection }), tool_call_id: pending.toolCallId });
     }
 
     yield* this.executeLoop(messages, { user: input.user, conversationId: input.conversationId });
@@ -135,7 +136,7 @@ export class AgentService {
         const tool = this.tools.find(t => t.name === call.name);
         if (!tool) {
           const errorMsg = `Unknown tool: ${call.name}`;
-          messages.push({ role: 'tool', content: JSON.stringify({ error: errorMsg }), tool_call_id: call.id });
+          messages.push({ role: 'tool', content: formatToolResultForLlm({ error: errorMsg }), tool_call_id: call.id });
           continue;
         }
 
@@ -162,10 +163,10 @@ export class AgentService {
         try {
           const result = await tool.execute(call.arguments, { user: input.user });
           yield { type: 'tool_result', id: call.id, name: call.name, data: result };
-          messages.push({ role: 'tool', content: `<data>${JSON.stringify(result)}</data>`, tool_call_id: call.id });
+          messages.push({ role: 'tool', content: formatToolResultForLlm(result), tool_call_id: call.id });
         } catch (err: any) {
           const errorPayload = { error: err.message ?? 'Tool execution failed' };
-          messages.push({ role: 'tool', content: JSON.stringify(errorPayload), tool_call_id: call.id });
+          messages.push({ role: 'tool', content: formatToolResultForLlm(errorPayload), tool_call_id: call.id });
         }
       }
 

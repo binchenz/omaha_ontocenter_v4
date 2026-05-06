@@ -412,13 +412,10 @@ describe('Agent scenarios (e2e, hits real DeepSeek)', () => {
       if (toolCallCount === 5 && errorEvent) {
         expect(errorEvent.message).toMatch(/最大工具调用次数|max tool iterations/i);
       }
-      // The stream should produce events. If a controller-level error was thrown
-      // (e.g. DeepSeek rejected the message format mid-stream), we get only 'error'.
-      // That's still an acceptable terminal state — the cap is structurally enforced.
+      // SseAgentRunner now guarantees a synthetic done after any error,
+      // so every stream MUST end with 'done' as the last event.
       expect(events.length).toBeGreaterThan(0);
-      const terminalTypes = ['done', 'error'];
-      const lastType = events[events.length - 1].type;
-      expect(terminalTypes).toContain(lastType);
+      expect(events[events.length - 1].type).toBe('done');
     });
   });
 });
