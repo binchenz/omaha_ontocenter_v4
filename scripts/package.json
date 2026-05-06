@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "import:film-ai": "tsx import-film-ai.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:drama-agent": "tsx test-drama-agent.ts"
   },
   "dependencies": {
     "@omaha/db": "workspace:*",
