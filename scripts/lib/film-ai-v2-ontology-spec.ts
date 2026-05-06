@@ -110,6 +110,16 @@ export const filmAiV2OntologySpec: OntologySpec = {
         { name: 'characters_string', label: '角色字符串', type: 'json' },
       ],
     },
+    {
+      name: 'ChapterCharacterMention',
+      label: '章节角色提及',
+      properties: [
+        { name: 'chapter_summary_id', label: '章节ID', type: 'string', filterable: true },
+        { name: 'book_character_id', label: '角色ID', type: 'string', filterable: true },
+        { name: 'character_name_raw', label: '原字符串', type: 'string' },
+        { name: 'resolution_status', label: '解析状态', type: 'string', filterable: true },
+      ],
+    },
   ],
   relationships: [
     { sourceType: 'BookCharacter', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
@@ -118,5 +128,6 @@ export const filmAiV2OntologySpec: OntologySpec = {
     { sourceType: 'EmotionalCurvePoint', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
     { sourceType: 'MarketScore', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
     { sourceType: 'ChapterSummary', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'ChapterCharacterMention', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
   ],
 };

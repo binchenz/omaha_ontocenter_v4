@@ -171,6 +171,28 @@ function chapterSummaryToInstance(cs: ChapterSummaryRow, bookPlatformId: string)
   };
 }
 
+function chapterCharacterMentionToInstance(
+  chapterId: string,
+  bookExternalId: string,
+  bookPlatformId: string,
+  rawName: string,
+  resolvedCharExternalId: string | null,
+  seq: number,
+): InstanceInput {
+  return {
+    externalId: `${chapterId}::ccm::${seq}`,
+    label: `${rawName} @ ${chapterId.slice(0, 8)}`,
+    properties: {
+      chapter_summary_id: chapterId,
+      book_character_id: resolvedCharExternalId,
+      character_name_raw: rawName,
+      resolution_status: resolvedCharExternalId ? 'resolved' : 'unresolved',
+    },
+    relationships: { belongsTo: bookPlatformId },
+    searchText: rawName,
+  };
+}
+
 async function loadExternalIdMap(
   prisma: PrismaClient,
   tenantId: string,
@@ -289,15 +311,31 @@ async function main(): Promise<void> {
     const onto = await bootstrapOntology(prisma, tenantResult.tenantId, filmAiV2OntologySpec);
     console.log(`[bootstrap] objectTypes created=${onto.typesCreated} updated=${onto.typesUpdated} relationships created=${onto.relationshipsCreated}`);
 
-    console.log('[ingest] books (uploaded_books LEFT JOIN book_analyses)');
+    console.log('[source] reading all source data into memory before any local writes...');
     const booksWithAnalysis = await reader.readBooksWithAnalysis();
+    console.log(`[source]   books fetched: ${booksWithAnalysis.length}`);
+    const mainCharRows = await reader.readMainCharacters();
+    console.log(`[source]   mainChars fetched: ${mainCharRows.length}`);
+    const edgeRows = await reader.readCharacterEdges();
+    console.log(`[source]   edges fetched: ${edgeRows.length}`);
+    const plotBeats = await reader.readPlotBeats();
+    console.log(`[source]   plotBeats fetched: ${plotBeats.length}`);
+    const emoPoints = await reader.readEmotionalPoints();
+    console.log(`[source]   emoPoints fetched: ${emoPoints.length}`);
+    const marketScores = await reader.readMarketScores();
+    console.log(`[source]   marketScores fetched: ${marketScores.length}`);
+    const chapterSummaries = await reader.readChapterSummaries();
+    console.log(`[source]   chapter_summaries fetched: ${chapterSummaries.length}`);
+    await reader.disconnect();
+    console.log('[source] disconnected — proceeding with local writes');
+
+    console.log('[ingest] books');
     const bookInstances = booksWithAnalysis.map(bookToInstance);
     const bookResult = await importInstances(prisma, tenantResult.tenantId, 'Book', bookInstances);
     console.log(`[ingest] books imported=${bookResult.imported} updated=${bookResult.updated} skipped=${bookResult.skipped}`);
 
     console.log('[ingest] book characters (mainChars EXPLODE)');
     const bookPlatformMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Book');
-    const mainCharRows = await reader.readMainCharacters();
     const characterInstances: InstanceInput[] = [];
     let charsSkipped = 0;
     for (const mc of mainCharRows) {
@@ -319,7 +357,6 @@ async function main(): Promise<void> {
       list.push({ id: extId, name: mc.name });
       charsByBook.set(mc.book_external_id, list);
     }
-    const edgeRows = await reader.readCharacterEdges();
     const edgeInstances: InstanceInput[] = [];
     let edgesSkipped = 0;
     const resStats = { fully_resolved: 0, partially_resolved: 0, unresolved: 0 };
@@ -342,7 +379,6 @@ async function main(): Promise<void> {
     console.log(`[ingest] edge resolution: fully=${resStats.fully_resolved} partially=${resStats.partially_resolved} unresolved=${resStats.unresolved}`);
 
     console.log('[ingest] plot beats');
-    const plotBeats = await reader.readPlotBeats();
     const beatInstances: InstanceInput[] = [];
     let beatsSkipped = 0;
     for (const b of plotBeats) {
@@ -357,7 +393,6 @@ async function main(): Promise<void> {
     console.log(`[ingest] plot beats imported=${beatResult.imported} updated=${beatResult.updated} skipped=${beatResult.skipped + beatsSkipped}`);
 
     console.log('[ingest] emotional curve points');
-    const emoPoints = await reader.readEmotionalPoints();
     const emoInstances: InstanceInput[] = [];
     let emoSkipped = 0;
     for (const p of emoPoints) {
@@ -372,7 +407,6 @@ async function main(): Promise<void> {
     console.log(`[ingest] emotional curve points imported=${emoResult.imported} updated=${emoResult.updated} skipped=${emoResult.skipped + emoSkipped}`);
 
     console.log('[ingest] market scores');
-    const marketScores = await reader.readMarketScores();
     const msInstances: InstanceInput[] = [];
     let msSkipped = 0;
     for (const m of marketScores) {
@@ -386,9 +420,7 @@ async function main(): Promise<void> {
     const msResult = await importInstances(prisma, tenantResult.tenantId, 'MarketScore', msInstances);
     console.log(`[ingest] market scores imported=${msResult.imported} updated=${msResult.updated} skipped=${msResult.skipped + msSkipped}`);
 
-    console.log('[ingest] chapter summaries (41k+ rows)');
-    const chapterSummaries = await reader.readChapterSummaries();
-    console.log(`[ingest] chapter_summaries fetched: ${chapterSummaries.length}`);
+    console.log('[ingest] chapter summaries');
     const csInstances: InstanceInput[] = [];
     let csSkipped = 0;
     for (const cs of chapterSummaries) {
@@ -404,10 +436,36 @@ async function main(): Promise<void> {
     const csElapsedSec = ((Date.now() - csStart) / 1000).toFixed(1);
     console.log(`[ingest] chapter summaries imported=${csResult.imported} updated=${csResult.updated} skipped=${csResult.skipped + csSkipped} elapsed=${csElapsedSec}s`);
 
+    console.log('[ingest] chapter character mentions (junction)');
+    const ccmInstances: InstanceInput[] = [];
+    let ccmStats = { resolved: 0, unresolved: 0 };
+    for (const cs of chapterSummaries) {
+      const bookPlatformId = bookPlatformMap[cs.source_id];
+      if (!bookPlatformId) continue;
+      const ss = cs.structured_summary ?? {};
+      const charsArr: string[] = Array.isArray(ss.characters) ? ss.characters : [];
+      const candidates = charsByBook.get(cs.source_id) ?? [];
+      let seq = 0;
+      for (const rawName of charsArr) {
+        if (!rawName || typeof rawName !== 'string') continue;
+        const resolved = resolveCharacterName(rawName, candidates);
+        if (resolved) ccmStats.resolved++;
+        else ccmStats.unresolved++;
+        ccmInstances.push(
+          chapterCharacterMentionToInstance(cs.id, cs.source_id, bookPlatformId, rawName, resolved, seq),
+        );
+        seq++;
+      }
+    }
+    const ccmStart = Date.now();
+    const ccmResult = await importInstances(prisma, tenantResult.tenantId, 'ChapterCharacterMention', ccmInstances);
+    const ccmElapsedSec = ((Date.now() - ccmStart) / 1000).toFixed(1);
+    console.log(`[ingest] chapter character mentions imported=${ccmResult.imported} updated=${ccmResult.updated} skipped=${ccmResult.skipped} elapsed=${ccmElapsedSec}s`);
+    console.log(`[ingest] mention resolution: resolved=${ccmStats.resolved} unresolved=${ccmStats.unresolved}`);
+
     console.log('[done]');
   } finally {
     await prisma.$disconnect();
-    await reader.disconnect();
   }
 }
 
