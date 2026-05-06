@@ -3,6 +3,7 @@ import { QueryService } from './query.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { QueryObjectsDto } from './dto/query-objects.dto';
+import { AggregateObjectsDto } from './dto/aggregate-objects.dto';
 import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
 
 @Controller('query')
@@ -16,5 +17,13 @@ export class QueryController {
     @Body() dto: QueryObjectsDto,
   ): Promise<unknown> {
     return this.queryService.queryObjects(user, dto);
+  }
+
+  @Post('aggregate')
+  aggregateObjects(
+    @CurrentUser() user: CurrentUserType,
+    @Body() dto: AggregateObjectsDto,
+  ): Promise<unknown> {
+    return this.queryService.aggregateObjects(user, dto);
   }
 }

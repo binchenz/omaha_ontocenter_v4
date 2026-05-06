@@ -23,6 +23,35 @@ export interface PlanArgs {
   permissionPredicates?: Predicate[];
 }
 
+export interface AggregateMetric {
+  kind: 'count' | 'countDistinct' | 'sum' | 'avg' | 'min' | 'max';
+  field?: string;
+  alias: string;
+}
+
+export interface AggregateOrderBy {
+  kind: 'metric' | 'groupKey';
+  by: string;
+  direction: 'asc' | 'desc';
+}
+
+export interface AggregatePlanArgs {
+  tenantId: string;
+  objectType: string;
+  filters?: QueryFilter[];
+  groupBy?: string[];
+  metrics: AggregateMetric[];
+  orderBy?: AggregateOrderBy[];
+  maxGroups?: number;
+  permissionPredicates?: Predicate[];
+}
+
+export interface PlannedAggregateQuery {
+  sql: string;
+  params: unknown[];
+  effectivePermissionFilter: string | null;
+}
+
 const ALLOWED_SORT_COLUMNS = new Set(['createdAt', 'updatedAt', 'externalId', 'label']);
 
 const FILTER_TO_SQL: Record<FilterOperator, string> = {
@@ -84,6 +113,58 @@ export class QueryPlannerService {
       effectivePermissionFilter,
       sortFallbackReason,
     };
+  }
+
+  /**
+   * Plans an aggregate query. Reuses the same scope / filter / permission
+   * compile pipeline as `plan()`; differs in the SELECT clause and skips
+   * include / sort / pagination.
+   *
+   * v1 (slice #40) supports count-only with no groupBy. The interface is
+   * forward-compatible: groupBy / orderBy / maxGroups are read but treated
+   * as inert here. Subsequent slices (#41–#44) populate the real behavior
+   * by extending the SELECT/GROUP BY/ORDER BY/LIMIT clause builders only.
+   */
+  async planAggregate(args: AggregatePlanArgs): Promise<PlannedAggregateQuery> {
+    const view = await this.viewLoader.load(args.tenantId, args.objectType);
+
+    const scope = parentScope({ tenantId: args.tenantId, objectType: args.objectType });
+    const scopePrefix = emitScope(scope);
+    const params: unknown[] = [...scopePrefix.params];
+    const wherePieces: string[] = [
+      scopePrefix.sql.replace(/^FROM object_instances WHERE /, ''),
+    ];
+
+    for (const f of args.filters ?? []) {
+      wherePieces.push(this.compileFilter(f, view, args.objectType, params));
+    }
+
+    const effectivePermissionFilter = this.appendPermissionPredicates(
+      args.permissionPredicates ?? [],
+      wherePieces,
+      params,
+    );
+
+    // Metric SELECT clauses — slice #40 only handles 'count'.
+    const selectExprs: string[] = [];
+    for (const m of args.metrics) {
+      if (m.kind === 'count') {
+        selectExprs.push(`count(*)::int AS "${m.alias}"`);
+      } else {
+        // Reserved for #42/#43; reaching here in v1 is a contract violation
+        // — the service layer rejects unknown kinds at validation time.
+        throw new Error(`metric kind '${m.kind}' not yet supported in v1`);
+      }
+    }
+
+    const where = wherePieces.join(' AND ');
+    const sql = `
+      SELECT ${selectExprs.join(', ')}
+      FROM object_instances
+      WHERE ${where}
+    `;
+
+    return { sql, params, effectivePermissionFilter };
   }
 
   private compileFilter(

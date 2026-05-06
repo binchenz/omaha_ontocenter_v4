@@ -1,0 +1,164 @@
+/**
+ * Aggregate_objects e2e — slice #40 (count-only, no groupBy).
+ * Subsequent slices (#41–#44) will append more `it` blocks here.
+ */
+import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { PrismaClient } from '@omaha/db';
+import { createTestApp, loginAsAdmin } from './test-helpers';
+
+describe('aggregate_objects (e2e) — count-only tracer', () => {
+  let app: INestApplication;
+  let token: string;
+  let prisma: PrismaClient;
+  let demoTenantId: string;
+
+  // Distinct-prefix externalIds so this suite doesn't collide with other tests.
+  const TEST_EXTERNAL_IDS = ['AGG-T-001', 'AGG-T-002', 'AGG-T-003'];
+
+  beforeAll(async () => {
+    app = await createTestApp();
+    token = await loginAsAdmin(app);
+    prisma = new PrismaClient();
+    demoTenantId = (await prisma.tenant.findUniqueOrThrow({ where: { slug: 'demo' } })).id;
+
+    await prisma.objectInstance.deleteMany({
+      where: { tenantId: demoTenantId, externalId: { in: TEST_EXTERNAL_IDS } },
+    });
+    await prisma.objectInstance.createMany({
+      data: [
+        {
+          tenantId: demoTenantId,
+          objectType: 'order',
+          externalId: 'AGG-T-001',
+          label: 'agg-tracer-1',
+          properties: { orderNo: 'AGG-T-001', status: 'completed' },
+          relationships: {},
+        },
+        {
+          tenantId: demoTenantId,
+          objectType: 'order',
+          externalId: 'AGG-T-002',
+          label: 'agg-tracer-2',
+          properties: { orderNo: 'AGG-T-002', status: 'completed' },
+          relationships: {},
+        },
+        {
+          tenantId: demoTenantId,
+          objectType: 'order',
+          externalId: 'AGG-T-003',
+          label: 'agg-tracer-3',
+          properties: { orderNo: 'AGG-T-003', status: 'pending' },
+          relationships: {},
+        },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await prisma.objectInstance.deleteMany({
+      where: { tenantId: demoTenantId, externalId: { in: TEST_EXTERNAL_IDS } },
+    });
+    await prisma.$disconnect();
+    await app.close();
+  });
+
+  describe('happy path', () => {
+    it('count-only, no groupBy returns one group with count', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'contains', value: 'AGG-T-' }],
+          metrics: [{ kind: 'count', alias: 'n' }],
+        })
+        .expect(201);
+
+      expect(res.body.groups).toHaveLength(1);
+      expect(res.body.groups[0].key).toEqual({});
+      expect(res.body.groups[0].metrics.n).toBe(3);
+      expect(res.body.truncated).toBe(false);
+      expect(res.body.nextPageToken).toBeNull();
+      expect(res.body.totalGroupsEstimate).toBe(1);
+    });
+
+    it('count with filter narrows the result', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [
+            { field: 'orderNo', operator: 'contains', value: 'AGG-T-' },
+            { field: 'status', operator: 'eq', value: 'completed' },
+          ],
+          metrics: [{ kind: 'count', alias: 'n' }],
+        })
+        .expect(201);
+      expect(res.body.groups[0].metrics.n).toBe(2);
+    });
+  });
+
+  describe('validation errors', () => {
+    it('rejects empty metrics with METRICS_REQUIRED', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ objectType: 'order', metrics: [] })
+        .expect(400);
+      expect(res.body.error?.code ?? res.body.code).toBe('METRICS_REQUIRED');
+    });
+
+    it('rejects missing metrics field with METRICS_REQUIRED', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ objectType: 'order' })
+        .expect(400);
+      expect(res.body.error?.code ?? res.body.code).toBe('METRICS_REQUIRED');
+    });
+
+    it('rejects metric with empty alias', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          metrics: [{ kind: 'count', alias: '' }],
+        })
+        .expect(400);
+      // any 400 is fine here — class-validator message
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('audit', () => {
+    it('writes object.aggregate audit entry; result_count reflects groups.length, not metric values', async () => {
+      const before = Date.now();
+      await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'contains', value: 'AGG-T-' }],
+          metrics: [{ kind: 'count', alias: 'n' }],
+        })
+        .expect(201);
+
+      const audit = await prisma.auditLog.findFirst({
+        where: {
+          tenantId: demoTenantId,
+          operation: 'object.aggregate',
+          createdAt: { gte: new Date(before - 1000) },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      expect(audit).toBeTruthy();
+      expect(audit!.operation).toBe('object.aggregate');
+      expect(audit!.objectType).toBe('order');
+      expect(audit!.resultCount).toBe(1); // groups.length, NOT the count of 3
+    });
+  });
+});

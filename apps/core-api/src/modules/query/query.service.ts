@@ -8,9 +8,14 @@ import {
   QueryObjectsRequest,
   QueryObjectsResponse,
 } from '@omaha/shared-types';
-import { QueryPlannerService } from './query-planner.service';
+import {
+  QueryPlannerService,
+  type AggregateMetric,
+  type AggregateOrderBy,
+} from './query-planner.service';
 import { OntologyViewLoader } from '../ontology/ontology-view-loader.service';
 import { filterMaskedFields } from '../../common/filter-masked-fields';
+import type { QueryFilter } from '@omaha/shared-types';
 
 interface RawInstanceRow {
   id: string;
@@ -22,6 +27,29 @@ interface RawInstanceRow {
   relationships: unknown;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface AggregateObjectsRequest {
+  objectType: string;
+  filters?: QueryFilter[];
+  groupBy?: string[];
+  metrics?: AggregateMetric[];
+  orderBy?: AggregateOrderBy[];
+  maxGroups?: number;
+  pageToken?: string;
+}
+
+export interface AggregationGroup {
+  key: Record<string, unknown>;
+  metrics: Record<string, number>;
+}
+
+export interface AggregationResponse {
+  groups: AggregationGroup[];
+  truncated: boolean;
+  nextPageToken: string | null;
+  totalGroupsEstimate: number | null;
+  warnings?: string[];
 }
 
 @Injectable()
@@ -121,6 +149,77 @@ export class QueryService {
         objectType: req.objectType,
         ...(planned.sortFallbackReason && { sortFallbackReason: planned.sortFallbackReason }),
       },
+    };
+  }
+
+  /**
+   * Slice #40: count-only aggregate, no groupBy.
+   * Forward-shape: returns the full Aggregation envelope so subsequent
+   * slices (#41–#44) only enrich metrics/groups/pagination — no consumer
+   * change required.
+   */
+  async aggregateObjects(
+    user: CurrentUserType,
+    req: AggregateObjectsRequest,
+  ): Promise<AggregationResponse> {
+    if (!req.metrics || req.metrics.length === 0) {
+      throw new BadRequestException({
+        error: { code: 'METRICS_REQUIRED', message: 'metrics is required and must be a non-empty array', hint: 'Provide at least one metric, e.g. [{ kind: "count", alias: "n" }].' },
+      });
+    }
+    const metrics = req.metrics;
+
+    const resolution = await this.permissionResolver.resolveOrThrow(
+      user,
+      'object',
+      'read',
+      req.objectType,
+    );
+
+    const planned = await this.planner.planAggregate({
+      tenantId: user.tenantId,
+      objectType: req.objectType,
+      filters: req.filters,
+      groupBy: req.groupBy,
+      metrics,
+      orderBy: req.orderBy,
+      maxGroups: req.maxGroups,
+      permissionPredicates: resolution.predicates,
+    });
+
+    const rows = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(planned.sql, ...planned.params);
+
+    // Slice #40: no groupBy, so always exactly one group with key={}.
+    const groups = rows.map((row) => {
+      const m: Record<string, number> = {};
+      for (const metric of metrics) {
+        const v = row[metric.alias];
+        m[metric.alias] = typeof v === 'bigint' ? Number(v) : (v as number);
+      }
+      return { key: {}, metrics: m };
+    });
+
+    const compiledSqlHash = createHash('sha256').update(planned.sql).digest('hex').slice(0, 32);
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: user.tenantId,
+        actorId: user.id,
+        actorType: 'user',
+        operation: 'object.aggregate',
+        objectType: req.objectType,
+        queryPlan: req as unknown as object,
+        resultCount: groups.length, // groups.length, NOT metric values
+        source: 'api',
+        effectivePermissionFilter: planned.effectivePermissionFilter ?? undefined,
+        compiledSqlHash,
+      },
+    });
+
+    return {
+      groups,
+      truncated: false,
+      nextPageToken: null,
+      totalGroupsEstimate: groups.length,
     };
   }
 
