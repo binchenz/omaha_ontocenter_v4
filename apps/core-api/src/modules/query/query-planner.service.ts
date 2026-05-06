@@ -104,6 +104,10 @@ export class QueryPlannerService {
         params: f.params ?? {},
       });
       const remapped = this.mergeFragment(fragment, params);
+      // eq/neq against null on derived properties: emit IS NULL / IS NOT NULL.
+      if (f.value === null && (f.operator === 'eq' || f.operator === 'neq')) {
+        return `(${remapped}) IS ${f.operator === 'eq' ? '' : 'NOT '}NULL`;
+      }
       const opSql = FILTER_TO_SQL[f.operator];
       params.push(f.value);
       return `(${remapped}) ${opSql} $${params.length}`;
@@ -122,10 +126,33 @@ export class QueryPlannerService {
       });
     }
 
-    const opSql = FILTER_TO_SQL[f.operator];
     const lhs = view?.numericFields.has(f.field)
       ? `(properties->>'${f.field}')::numeric`
       : `properties->>'${f.field}'`;
+
+    // Bug #34: eq/neq against null must compile to IS NULL / IS NOT NULL.
+    // `<expr> = NULL` and `<expr> <> NULL` both evaluate to NULL in SQL's
+    // three-valued logic and silently filter every row out.
+    // For numeric fields we also need to check the raw jsonb extraction,
+    // not the ::numeric cast (which would throw on null or invalid text).
+    if (f.value === null && (f.operator === 'eq' || f.operator === 'neq')) {
+      const nullCheckLhs = `properties->>'${f.field}'`;
+      return `${nullCheckLhs} IS ${f.operator === 'eq' ? '' : 'NOT '}NULL`;
+    }
+
+    // Bug #35: contains must wrap the value in %...% and use ILIKE for
+    // case-insensitive substring matching. The raw value is escaped so that
+    // user-provided % and _ are treated as literal characters.
+    if (f.operator === 'contains') {
+      const escaped = String(f.value).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+      params.push(`%${escaped}%`);
+      // ILIKE on text is fine; on ::numeric it would error, but contains
+      // on numeric properties is ill-defined so we use the raw text LHS.
+      const textLhs = `properties->>'${f.field}'`;
+      return `${textLhs} ILIKE $${params.length}`;
+    }
+
+    const opSql = FILTER_TO_SQL[f.operator];
     params.push(f.value);
     return `${lhs} ${opSql} $${params.length}`;
   }
@@ -164,10 +191,11 @@ export class QueryPlannerService {
   ): { sortClause: string; sortFallbackReason?: string } {
     if (!sort) return { sortClause: 'created_at DESC' };
     if (ALLOWED_SORT_COLUMNS.has(sort.field)) {
-      return { sortClause: buildSort(sort) };
+      return { sortClause: buildSort(sort, false) };
     }
     if (view?.sortableFields.has(sort.field)) {
-      return { sortClause: buildSort(sort) };
+      const isNumeric = view.numericFields.has(sort.field);
+      return { sortClause: buildSort(sort, isNumeric) };
     }
     return {
       sortClause: 'created_at DESC',
@@ -176,7 +204,11 @@ export class QueryPlannerService {
   }
 }
 
-function buildSort(sort: { field: string; direction: 'asc' | 'desc' }): string {
+// Bug #33: numeric properties must be cast to ::numeric before comparing,
+// otherwise Postgres sorts lexicographically ('9' > '50'). Additionally we
+// append NULLS LAST so the agent's "top item" intuition is stable in both
+// directions — null-valued rows never crowd out real values at either end.
+function buildSort(sort: { field: string; direction: 'asc' | 'desc' }, isNumericProperty: boolean): string {
   const dir = sort.direction === 'asc' ? 'ASC' : 'DESC';
   if (ALLOWED_SORT_COLUMNS.has(sort.field)) {
     const col = sort.field === 'createdAt' ? 'created_at'
@@ -185,5 +217,8 @@ function buildSort(sort: { field: string; direction: 'asc' | 'desc' }): string {
           : 'label';
     return `${col} ${dir}`;
   }
-  return `(properties->>'${sort.field}') ${dir}`;
+  const expr = isNumericProperty
+    ? `(properties->>'${sort.field}')::numeric`
+    : `(properties->>'${sort.field}')`;
+  return `${expr} ${dir} NULLS LAST`;
 }
