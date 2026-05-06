@@ -9,7 +9,7 @@ import { bootstrapTenant } from './lib/tenant-bootstrap';
 import { bootstrapOntology } from './lib/ontology-bootstrap';
 import { importInstances, type InstanceInput } from './lib/object-instance-importer';
 import { flattenBookAnalysis } from './lib/book-analysis-flattener';
-import { FilmAiV2SourceReader, type BookWithAnalysis } from './lib/film-ai-v2-source-reader';
+import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded } from './lib/film-ai-v2-source-reader';
 import {
   FILM_AI_TENANT_SLUG,
   FILM_AI_TENANT_NAME,
@@ -47,6 +47,38 @@ function bookToInstance(bwa: BookWithAnalysis): InstanceInput {
       ...(props.tags ?? []),
     ].filter(Boolean).join(' '),
   };
+}
+
+function bookCharacterExternalId(bookId: string, name: string): string {
+  return `${bookId}::${name}`;
+}
+
+function mainCharToInstance(mc: MainCharExpanded, bookPlatformId: string): InstanceInput {
+  return {
+    externalId: bookCharacterExternalId(mc.book_external_id, mc.name),
+    label: mc.name,
+    properties: {
+      name: mc.name,
+      desc: mc.desc,
+      role: mc.role,
+    },
+    relationships: { belongsTo: bookPlatformId },
+    searchText: [mc.name, mc.desc].filter(Boolean).join(' '),
+  };
+}
+
+async function loadExternalIdMap(
+  prisma: PrismaClient,
+  tenantId: string,
+  objectTypeName: string,
+): Promise<Record<string, string>> {
+  const rows = await prisma.objectInstance.findMany({
+    where: { tenantId, objectType: objectTypeName },
+    select: { id: true, externalId: true },
+  });
+  const out: Record<string, string> = {};
+  for (const r of rows) out[r.externalId] = r.id;
+  return out;
 }
 
 async function cleanupV1ObjectTypes(prisma: PrismaClient, tenantId: string): Promise<number> {
@@ -116,12 +148,15 @@ async function main(): Promise<void> {
   console.log(`[source] uploaded_books rows = ${booksCount}`);
   const analysesCount = await reader.countTable('book_analyses');
   console.log(`[source] book_analyses rows = ${analysesCount}`);
+  const mainChars = flags.confirm ? null : await reader.readMainCharacters();
+  if (mainChars) console.log(`[source] mainChars total = ${mainChars.length}`);
 
   if (flags.dryRun) {
     console.log(`[plan] would ensure tenant slug=${FILM_AI_TENANT_SLUG}`);
     console.log(`[plan] would drop any existing v1 ObjectTypes from ${V1_OBJECT_TYPES_TO_CLEANUP.join(', ')}`);
     console.log(`[plan] would register ${filmAiV2OntologySpec.objectTypes.length} v2 ObjectType(s)`);
     console.log(`[plan] would upsert ${booksCount} Book instance(s) (${analysesCount} with analysis joined)`);
+    console.log(`[plan] would upsert ${mainChars?.length ?? 0} BookCharacter instance(s)`);
     console.log('[plan] dry-run complete — no writes.');
     await reader.disconnect();
     return;
@@ -155,6 +190,22 @@ async function main(): Promise<void> {
     const bookInstances = booksWithAnalysis.map(bookToInstance);
     const bookResult = await importInstances(prisma, tenantResult.tenantId, 'Book', bookInstances);
     console.log(`[ingest] books imported=${bookResult.imported} updated=${bookResult.updated} skipped=${bookResult.skipped}`);
+
+    console.log('[ingest] book characters (mainChars EXPLODE)');
+    const bookPlatformMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Book');
+    const mainCharRows = await reader.readMainCharacters();
+    const characterInstances: InstanceInput[] = [];
+    let charsSkipped = 0;
+    for (const mc of mainCharRows) {
+      const bookPlatformId = bookPlatformMap[mc.book_external_id];
+      if (!bookPlatformId) {
+        charsSkipped++;
+        continue;
+      }
+      characterInstances.push(mainCharToInstance(mc, bookPlatformId));
+    }
+    const charResult = await importInstances(prisma, tenantResult.tenantId, 'BookCharacter', characterInstances);
+    console.log(`[ingest] book characters imported=${charResult.imported} updated=${charResult.updated} skipped=${charResult.skipped + charsSkipped}`);
 
     console.log('[done]');
   } finally {

@@ -48,6 +48,17 @@ export const filmAiV2OntologySpec: OntologySpec = {
         { name: 'structure_type', label: '结构类型', type: 'string', filterable: true },
       ],
     },
+    {
+      name: 'BookCharacter',
+      label: '角色',
+      properties: [
+        { name: 'name', label: '姓名', type: 'string', filterable: true },
+        { name: 'desc', label: '描述', type: 'string' },
+        { name: 'role', label: '角色定位', type: 'string', filterable: true },
+      ],
+    },
   ],
-  relationships: [],
+  relationships: [
+    { sourceType: 'BookCharacter', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
+  ],
 };

@@ -6,6 +6,13 @@ export interface BookWithAnalysis {
   analysis: BookAnalysisRow | null;
 }
 
+export interface MainCharExpanded {
+  book_external_id: string;
+  name: string;
+  desc: string | null;
+  role: string | null;
+}
+
 export class FilmAiV2SourceReader {
   private client: Client | null = null;
 
@@ -50,6 +57,25 @@ export class FilmAiV2SourceReader {
       book: b,
       analysis: analysisBySourceId.get(b.id) ?? null,
     }));
+  }
+
+  async readMainCharacters(): Promise<MainCharExpanded[]> {
+    const r = await this.c().query<{ book_external_id: string; mc: any }>(
+      `SELECT ba.source_id AS book_external_id, mc
+       FROM book_analyses ba,
+            jsonb_array_elements(ba.character_network->'mainChars') mc
+       WHERE ba.source_type = 'uploaded'
+         AND ba.character_network->'mainChars' IS NOT NULL
+         AND jsonb_typeof(ba.character_network->'mainChars') = 'array'`,
+    );
+    return r.rows
+      .filter((row) => row.mc && typeof row.mc === 'object' && row.mc.name)
+      .map((row) => ({
+        book_external_id: row.book_external_id,
+        name: String(row.mc.name),
+        desc: row.mc.desc ?? null,
+        role: row.mc.role ?? null,
+      }));
   }
 
   async countTable(table: string): Promise<number> {
