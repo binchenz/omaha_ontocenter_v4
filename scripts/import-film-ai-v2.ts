@@ -9,7 +9,7 @@ import { bootstrapTenant } from './lib/tenant-bootstrap';
 import { bootstrapOntology } from './lib/ontology-bootstrap';
 import { importInstances, type InstanceInput } from './lib/object-instance-importer';
 import { flattenBookAnalysis } from './lib/book-analysis-flattener';
-import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded, type EdgeExpanded } from './lib/film-ai-v2-source-reader';
+import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded, type EdgeExpanded, type PlotBeatExpanded, type EmotionalPointExpanded, type MarketScoreExpanded } from './lib/film-ai-v2-source-reader';
 import { resolveCharacterName, type CandidateCharacter } from './lib/entity-resolver';
 import {
   FILM_AI_TENANT_SLUG,
@@ -97,6 +97,46 @@ function edgeToInstance(
     },
     relationships: { belongsTo: bookPlatformId },
     searchText: [edge.from_name, edge.to_name, edge.label].filter(Boolean).join(' '),
+  };
+}
+
+function plotBeatToInstance(beat: PlotBeatExpanded, bookPlatformId: string): InstanceInput {
+  return {
+    externalId: `${beat.book_external_id}::beat::${beat.seq}`,
+    label: beat.label || `节拍 ${beat.seq + 1}`,
+    properties: {
+      seq: beat.seq,
+      pct: beat.pct,
+      label: beat.label,
+      desc: beat.desc,
+    },
+    relationships: { belongsTo: bookPlatformId },
+    searchText: [beat.label, beat.desc].filter(Boolean).join(' '),
+  };
+}
+
+function emotionalPointToInstance(p: EmotionalPointExpanded, bookPlatformId: string): InstanceInput {
+  return {
+    externalId: `${p.book_external_id}::ep::${p.seq}`,
+    label: `点 ${p.seq + 1} = ${p.value}`,
+    properties: {
+      seq: p.seq,
+      value: p.value,
+    },
+    relationships: { belongsTo: bookPlatformId },
+  };
+}
+
+function marketScoreToInstance(m: MarketScoreExpanded, bookPlatformId: string): InstanceInput {
+  return {
+    externalId: `${m.book_external_id}::ms::${m.label}`,
+    label: `${m.label}: ${m.score ?? '-'}`,
+    properties: {
+      label: m.label,
+      score: m.score,
+    },
+    relationships: { belongsTo: bookPlatformId },
+    searchText: m.label,
   };
 }
 
@@ -269,6 +309,51 @@ async function main(): Promise<void> {
     const edgeResult = await importInstances(prisma, tenantResult.tenantId, 'BookCharacterEdge', edgeInstances);
     console.log(`[ingest] book character edges imported=${edgeResult.imported} updated=${edgeResult.updated} skipped=${edgeResult.skipped + edgesSkipped}`);
     console.log(`[ingest] edge resolution: fully=${resStats.fully_resolved} partially=${resStats.partially_resolved} unresolved=${resStats.unresolved}`);
+
+    console.log('[ingest] plot beats');
+    const plotBeats = await reader.readPlotBeats();
+    const beatInstances: InstanceInput[] = [];
+    let beatsSkipped = 0;
+    for (const b of plotBeats) {
+      const bookPlatformId = bookPlatformMap[b.book_external_id];
+      if (!bookPlatformId) {
+        beatsSkipped++;
+        continue;
+      }
+      beatInstances.push(plotBeatToInstance(b, bookPlatformId));
+    }
+    const beatResult = await importInstances(prisma, tenantResult.tenantId, 'PlotBeat', beatInstances);
+    console.log(`[ingest] plot beats imported=${beatResult.imported} updated=${beatResult.updated} skipped=${beatResult.skipped + beatsSkipped}`);
+
+    console.log('[ingest] emotional curve points');
+    const emoPoints = await reader.readEmotionalPoints();
+    const emoInstances: InstanceInput[] = [];
+    let emoSkipped = 0;
+    for (const p of emoPoints) {
+      const bookPlatformId = bookPlatformMap[p.book_external_id];
+      if (!bookPlatformId) {
+        emoSkipped++;
+        continue;
+      }
+      emoInstances.push(emotionalPointToInstance(p, bookPlatformId));
+    }
+    const emoResult = await importInstances(prisma, tenantResult.tenantId, 'EmotionalCurvePoint', emoInstances);
+    console.log(`[ingest] emotional curve points imported=${emoResult.imported} updated=${emoResult.updated} skipped=${emoResult.skipped + emoSkipped}`);
+
+    console.log('[ingest] market scores');
+    const marketScores = await reader.readMarketScores();
+    const msInstances: InstanceInput[] = [];
+    let msSkipped = 0;
+    for (const m of marketScores) {
+      const bookPlatformId = bookPlatformMap[m.book_external_id];
+      if (!bookPlatformId) {
+        msSkipped++;
+        continue;
+      }
+      msInstances.push(marketScoreToInstance(m, bookPlatformId));
+    }
+    const msResult = await importInstances(prisma, tenantResult.tenantId, 'MarketScore', msInstances);
+    console.log(`[ingest] market scores imported=${msResult.imported} updated=${msResult.updated} skipped=${msResult.skipped + msSkipped}`);
 
     console.log('[done]');
   } finally {

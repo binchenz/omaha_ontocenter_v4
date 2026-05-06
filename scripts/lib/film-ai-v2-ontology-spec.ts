@@ -69,9 +69,38 @@ export const filmAiV2OntologySpec: OntologySpec = {
         { name: 'resolution_status', label: '解析状态', type: 'string', filterable: true },
       ],
     },
+    {
+      name: 'PlotBeat',
+      label: '剧情节拍',
+      properties: [
+        { name: 'seq', label: '顺序', type: 'number', filterable: true, sortable: true },
+        { name: 'pct', label: '位置百分比', type: 'number', filterable: true, sortable: true },
+        { name: 'label', label: '节拍名', type: 'string', filterable: true },
+        { name: 'desc', label: '节拍描述', type: 'string' },
+      ],
+    },
+    {
+      name: 'EmotionalCurvePoint',
+      label: '情感曲线点',
+      properties: [
+        { name: 'seq', label: '顺序', type: 'number', filterable: true, sortable: true },
+        { name: 'value', label: '张力值', type: 'number', filterable: true, sortable: true },
+      ],
+    },
+    {
+      name: 'MarketScore',
+      label: '市场评分',
+      properties: [
+        { name: 'label', label: '维度', type: 'string', filterable: true },
+        { name: 'score', label: '分数', type: 'number', filterable: true, sortable: true },
+      ],
+    },
   ],
   relationships: [
     { sourceType: 'BookCharacter', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
     { sourceType: 'BookCharacterEdge', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'PlotBeat', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'EmotionalCurvePoint', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'MarketScore', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
   ],
 };

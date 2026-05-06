@@ -21,6 +21,26 @@ export interface EdgeExpanded {
   label: string | null;
 }
 
+export interface PlotBeatExpanded {
+  book_external_id: string;
+  seq: number;
+  pct: number | null;
+  label: string | null;
+  desc: string | null;
+}
+
+export interface EmotionalPointExpanded {
+  book_external_id: string;
+  seq: number;
+  value: number;
+}
+
+export interface MarketScoreExpanded {
+  book_external_id: string;
+  label: string;
+  score: number | null;
+}
+
 export class FilmAiV2SourceReader {
   private client: Client | null = null;
 
@@ -105,6 +125,66 @@ export class FilmAiV2SourceReader {
         from_name: String(row.edge.from),
         to_name: String(row.edge.to),
         label: row.edge.label ?? null,
+      }));
+  }
+
+  async readPlotBeats(): Promise<PlotBeatExpanded[]> {
+    const r = await this.c().query<{ book_external_id: string; ord: number; beat: any }>(
+      `SELECT ba.source_id AS book_external_id,
+              (ord - 1)::int AS ord,
+              beat
+       FROM book_analyses ba,
+            jsonb_array_elements(ba.plot_structure->'beats') WITH ORDINALITY AS t(beat, ord)
+       WHERE ba.source_type = 'uploaded'
+         AND ba.plot_structure->'beats' IS NOT NULL
+         AND jsonb_typeof(ba.plot_structure->'beats') = 'array'`,
+    );
+    return r.rows
+      .filter((row) => row.beat && typeof row.beat === 'object')
+      .map((row) => ({
+        book_external_id: row.book_external_id,
+        seq: row.ord,
+        pct: row.beat.pct ?? null,
+        label: row.beat.label ?? null,
+        desc: row.beat.desc ?? null,
+      }));
+  }
+
+  async readEmotionalPoints(): Promise<EmotionalPointExpanded[]> {
+    const r = await this.c().query<{ book_external_id: string; ord: number; v: number | string }>(
+      `SELECT ba.source_id AS book_external_id,
+              (ord - 1)::int AS ord,
+              v::text AS v
+       FROM book_analyses ba,
+            jsonb_array_elements(ba.emotional_curve->'points') WITH ORDINALITY AS t(v, ord)
+       WHERE ba.source_type = 'uploaded'
+         AND ba.emotional_curve->'points' IS NOT NULL
+         AND jsonb_typeof(ba.emotional_curve->'points') = 'array'`,
+    );
+    return r.rows
+      .map((row) => ({
+        book_external_id: row.book_external_id,
+        seq: row.ord,
+        value: Number(row.v),
+      }))
+      .filter((p) => Number.isFinite(p.value));
+  }
+
+  async readMarketScores(): Promise<MarketScoreExpanded[]> {
+    const r = await this.c().query<{ book_external_id: string; score: any }>(
+      `SELECT ba.source_id AS book_external_id, score
+       FROM book_analyses ba,
+            jsonb_array_elements(ba.market_potential->'scores') score
+       WHERE ba.source_type = 'uploaded'
+         AND ba.market_potential->'scores' IS NOT NULL
+         AND jsonb_typeof(ba.market_potential->'scores') = 'array'`,
+    );
+    return r.rows
+      .filter((row) => row.score && typeof row.score === 'object' && row.score.label)
+      .map((row) => ({
+        book_external_id: row.book_external_id,
+        label: String(row.score.label),
+        score: row.score.score !== undefined && row.score.score !== null ? Number(row.score.score) : null,
       }));
   }
 
