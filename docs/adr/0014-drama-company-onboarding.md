@@ -1,5 +1,11 @@
-# Drama-company onboarding: snapshot ingest, narrow scope, no platform changes
+---
+status: superseded by ADR-0015
+---
 
+# Drama-company onboarding: snapshot ingest, narrow scope, no platform changes (SUPERSEDED)
+
+> **Status: Superseded by ADR-0015.** This ADR was written under a misidentification of the customer's business path. It treated the `novels` table family (1 row, AI-writing internal test data) as the engagement target. After looking at the actual data, the business path turned out to be `uploaded_books` + `book_analyses` + `chapter_summaries` — the IP-decomposition pipeline that fuels their drama-adaptation business. ADR-0015 records the corrected design. The scope decisions below are kept as historical record.
+>
 > **Note on scope.** This ADR is an *integration record* for a single customer engagement, not a platform-level decision. Platform decisions extracted from this engagement live in ADR-0012 (relationship reification) and ADR-0013 (`relationships` jsonb is dormant). Read those if you are looking for reusable patterns. Read this one if you are wondering "why did we onboard the drama company *this* particular way."
 
 ## Engagement
