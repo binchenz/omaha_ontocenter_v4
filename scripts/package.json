@@ -1,0 +1,24 @@
+{
+  "name": "@omaha/scripts",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "import:film-ai": "tsx import-film-ai.ts"
+  },
+  "dependencies": {
+    "@omaha/db": "workspace:*",
+    "@omaha/shared-types": "workspace:*",
+    "@prisma/client": "^6.3.0",
+    "bcrypt": "^5.1.1",
+    "dotenv": "^17.4.2",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.20.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}
