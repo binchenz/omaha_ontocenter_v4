@@ -8,7 +8,18 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 import { bootstrapTenant } from './lib/tenant-bootstrap';
 import { bootstrapOntology } from './lib/ontology-bootstrap';
 import { importInstances, type InstanceInput } from './lib/object-instance-importer';
-import { FilmAiSourceReader, type NovelRow, type CharacterRow, type PlotOutlineRow, type ChapterRow, type CharacterRelationRow } from './lib/film-ai-source-reader';
+import {
+  FilmAiSourceReader,
+  type NovelRow,
+  type CharacterRow,
+  type PlotOutlineRow,
+  type ChapterRow,
+  type CharacterRelationRow,
+  type EpisodeRow,
+  type ForeshadowingRow,
+  type TimelineEventRow,
+  type ItemRow,
+} from './lib/film-ai-source-reader';
 import { applyFkRelationships, type TargetTableLookup } from './lib/fk-to-relationships';
 import {
   FILM_AI_TENANT_SLUG,
@@ -116,6 +127,66 @@ function characterRelationToInstance(row: CharacterRelationRow, relationships: R
   };
 }
 
+function episodeToInstance(row: EpisodeRow, relationships: Record<string, string>): InstanceInput {
+  return {
+    externalId: row.id,
+    label: row.summary || `Episode ${row.seq_order ?? ''}`.trim() || row.id,
+    properties: {
+      seq_order: row.seq_order,
+      content: row.content,
+      summary: row.summary,
+      reviewer_notes: row.reviewer_notes,
+      state_delta: row.state_delta,
+      version: row.version,
+    },
+    relationships,
+    searchText: [row.summary, row.content].filter(Boolean).join(' ').slice(0, 500),
+  };
+}
+
+function foreshadowingToInstance(row: ForeshadowingRow, relationships: Record<string, string>): InstanceInput {
+  return {
+    externalId: row.id,
+    label: row.title || row.id,
+    properties: {
+      title: row.title,
+      description: row.description,
+      status: row.status,
+    },
+    relationships,
+    searchText: [row.title, row.description].filter(Boolean).join(' '),
+  };
+}
+
+function timelineEventToInstance(row: TimelineEventRow, relationships: Record<string, string>): InstanceInput {
+  return {
+    externalId: row.id,
+    label: row.label || row.id,
+    properties: {
+      label: row.label,
+      story_time: row.story_time,
+      seq_order: row.seq_order,
+    },
+    relationships,
+    searchText: [row.label, row.story_time].filter(Boolean).join(' '),
+  };
+}
+
+function itemToInstance(row: ItemRow, relationships: Record<string, string>): InstanceInput {
+  return {
+    externalId: row.id,
+    label: row.name || row.id,
+    properties: {
+      name: row.name,
+      description: row.description,
+      location: row.location,
+      status: row.status,
+    },
+    relationships,
+    searchText: [row.name, row.description, row.location].filter(Boolean).join(' '),
+  };
+}
+
 async function loadExternalIdMap(
   prisma: PrismaClient,
   tenantId: string,
@@ -156,6 +227,7 @@ async function main(): Promise<void> {
 
   const reader = new FilmAiSourceReader(sourceUrl);
   console.log('[source] connecting and counting...');
+  await reader.connect();
   const novelCount = await reader.countTable('novels');
   console.log(`[source] novels rows = ${novelCount}`);
   const characterCount = await reader.countTable('novel_characters');
@@ -166,6 +238,14 @@ async function main(): Promise<void> {
   console.log(`[source] novel_chapters rows = ${chapterCount}`);
   const characterRelationCount = await reader.countTable('novel_character_relations');
   console.log(`[source] novel_character_relations rows = ${characterRelationCount}`);
+  const episodeCount = await reader.countTable('novel_episodes');
+  console.log(`[source] novel_episodes rows = ${episodeCount}`);
+  const foreshadowingCount = await reader.countTable('novel_foreshadowing');
+  console.log(`[source] novel_foreshadowing rows = ${foreshadowingCount}`);
+  const timelineEventCount = await reader.countTable('novel_timeline_events');
+  console.log(`[source] novel_timeline_events rows = ${timelineEventCount}`);
+  const itemCount = await reader.countTable('novel_items');
+  console.log(`[source] novel_items rows = ${itemCount}`);
 
   if (flags.dryRun) {
     console.log(`[plan] would upsert tenant slug=${FILM_AI_TENANT_SLUG}`);
@@ -175,7 +255,12 @@ async function main(): Promise<void> {
     console.log(`[plan] would upsert ${plotOutlineCount} PlotOutline instance(s)`);
     console.log(`[plan] would upsert ${chapterCount} Chapter instance(s)`);
     console.log(`[plan] would upsert ${characterRelationCount} CharacterRelation instance(s)`);
+    console.log(`[plan] would upsert ${episodeCount} Episode instance(s)`);
+    console.log(`[plan] would upsert ${foreshadowingCount} Foreshadowing instance(s)`);
+    console.log(`[plan] would upsert ${timelineEventCount} TimelineEvent instance(s)`);
+    console.log(`[plan] would upsert ${itemCount} Item instance(s)`);
     console.log('[plan] dry-run complete — no writes.');
+    await reader.disconnect();
     return;
   }
 
@@ -279,9 +364,60 @@ async function main(): Promise<void> {
     const crResult = await importInstances(prisma, tenantResult.tenantId, 'CharacterRelation', crInstances);
     console.log(`[ingest] character relations imported=${crResult.imported} updated=${crResult.updated} skipped=${crResult.skipped}`);
 
+    console.log('[ingest] episodes');
+    const chapterMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Chapter');
+    const episodes = await reader.readEpisodes();
+    const enrichedEps = applyFkRelationships(
+      'novel_episodes',
+      episodes,
+      filmAiFkSpec,
+      { novels: novelMap, novel_chapters: chapterMap },
+    );
+    const episodeInstances = enrichedEps.map((e) => episodeToInstance(e.row, e.relationships));
+    const episodeResult = await importInstances(prisma, tenantResult.tenantId, 'Episode', episodeInstances);
+    console.log(`[ingest] episodes imported=${episodeResult.imported} updated=${episodeResult.updated} skipped=${episodeResult.skipped}`);
+
+    console.log('[ingest] foreshadowing');
+    const episodeMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Episode');
+    const foreshadowing = await reader.readForeshadowing();
+    const enrichedFs = applyFkRelationships(
+      'novel_foreshadowing',
+      foreshadowing,
+      filmAiFkSpec,
+      { novels: novelMap, novel_episodes: episodeMap },
+    );
+    const fsInstances = enrichedFs.map((e) => foreshadowingToInstance(e.row, e.relationships));
+    const fsResult = await importInstances(prisma, tenantResult.tenantId, 'Foreshadowing', fsInstances);
+    console.log(`[ingest] foreshadowing imported=${fsResult.imported} updated=${fsResult.updated} skipped=${fsResult.skipped}`);
+
+    console.log('[ingest] timeline events');
+    const timelineEvents = await reader.readTimelineEvents();
+    const enrichedTEs = applyFkRelationships(
+      'novel_timeline_events',
+      timelineEvents,
+      filmAiFkSpec,
+      { novels: novelMap, novel_episodes: episodeMap },
+    );
+    const teInstances = enrichedTEs.map((e) => timelineEventToInstance(e.row, e.relationships));
+    const teResult = await importInstances(prisma, tenantResult.tenantId, 'TimelineEvent', teInstances);
+    console.log(`[ingest] timeline events imported=${teResult.imported} updated=${teResult.updated} skipped=${teResult.skipped}`);
+
+    console.log('[ingest] items');
+    const items = await reader.readItems();
+    const enrichedItems = applyFkRelationships(
+      'novel_items',
+      items,
+      filmAiFkSpec,
+      { novels: novelMap, novel_characters: characterMap },
+    );
+    const itemInstances = enrichedItems.map((e) => itemToInstance(e.row, e.relationships));
+    const itemResult = await importInstances(prisma, tenantResult.tenantId, 'Item', itemInstances);
+    console.log(`[ingest] items imported=${itemResult.imported} updated=${itemResult.updated} skipped=${itemResult.skipped}`);
+
     console.log('[done]');
   } finally {
     await prisma.$disconnect();
+    await reader.disconnect();
   }
 }
 

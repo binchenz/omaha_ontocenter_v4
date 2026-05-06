@@ -65,6 +65,46 @@ export const filmAiOntologySpec: OntologySpec = {
         { name: 'knowledge_state', label: '知情状态', type: 'string' },
       ],
     },
+    {
+      name: 'Episode',
+      label: '场景',
+      properties: [
+        { name: 'seq_order', label: '顺序', type: 'number' },
+        { name: 'content', label: '内容', type: 'string' },
+        { name: 'summary', label: '摘要', type: 'string' },
+        { name: 'reviewer_notes', label: '审阅意见', type: 'string' },
+        { name: 'state_delta', label: '状态变化', type: 'json' },
+        { name: 'version', label: '版本', type: 'number' },
+      ],
+    },
+    {
+      name: 'Foreshadowing',
+      label: '伏笔',
+      properties: [
+        { name: 'title', label: '标题', type: 'string' },
+        { name: 'description', label: '描述', type: 'string' },
+        { name: 'status', label: '状态', type: 'string' },
+      ],
+    },
+    {
+      name: 'TimelineEvent',
+      label: '时间线事件',
+      properties: [
+        { name: 'label', label: '标签', type: 'string' },
+        { name: 'story_time', label: '故事时间', type: 'string' },
+        { name: 'seq_order', label: '顺序', type: 'number' },
+      ],
+    },
+    {
+      name: 'Item',
+      label: '物品',
+      properties: [
+        { name: 'name', label: '名称', type: 'string' },
+        { name: 'description', label: '描述', type: 'string' },
+        { name: 'location', label: '位置', type: 'string' },
+        { name: 'status', label: '状态', type: 'string' },
+      ],
+    },
   ],
   relationships: [
     { sourceType: 'Character', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
@@ -75,6 +115,15 @@ export const filmAiOntologySpec: OntologySpec = {
     { sourceType: 'CharacterRelation', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
     { sourceType: 'CharacterRelation', targetType: 'Character', name: 'from', cardinality: 'one-to-many' },
     { sourceType: 'CharacterRelation', targetType: 'Character', name: 'to', cardinality: 'one-to-many' },
+    { sourceType: 'Episode', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'Episode', targetType: 'Chapter', name: 'inChapter', cardinality: 'one-to-many' },
+    { sourceType: 'Foreshadowing', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'Foreshadowing', targetType: 'Episode', name: 'plantedIn', cardinality: 'one-to-many' },
+    { sourceType: 'Foreshadowing', targetType: 'Episode', name: 'resolvedIn', cardinality: 'one-to-many' },
+    { sourceType: 'TimelineEvent', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'TimelineEvent', targetType: 'Episode', name: 'atEpisode', cardinality: 'one-to-many' },
+    { sourceType: 'Item', targetType: 'Novel', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'Item', targetType: 'Character', name: 'owner', cardinality: 'one-to-many' },
   ],
 };
 
@@ -87,4 +136,13 @@ export const filmAiFkSpec: FkSpec = [
   { sourceTable: 'novel_character_relations', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
   { sourceTable: 'novel_character_relations', sourceColumn: 'from_char_id', relationshipName: 'from', targetTable: 'novel_characters' },
   { sourceTable: 'novel_character_relations', sourceColumn: 'to_char_id', relationshipName: 'to', targetTable: 'novel_characters' },
+  { sourceTable: 'novel_episodes', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
+  { sourceTable: 'novel_episodes', sourceColumn: 'chapter_id', relationshipName: 'inChapter', targetTable: 'novel_chapters' },
+  { sourceTable: 'novel_foreshadowing', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
+  { sourceTable: 'novel_foreshadowing', sourceColumn: 'planted_in_episode_id', relationshipName: 'plantedIn', targetTable: 'novel_episodes' },
+  { sourceTable: 'novel_foreshadowing', sourceColumn: 'resolved_in_episode_id', relationshipName: 'resolvedIn', targetTable: 'novel_episodes' },
+  { sourceTable: 'novel_timeline_events', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
+  { sourceTable: 'novel_timeline_events', sourceColumn: 'episode_id', relationshipName: 'atEpisode', targetTable: 'novel_episodes' },
+  { sourceTable: 'novel_items', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
+  { sourceTable: 'novel_items', sourceColumn: 'owner_id', relationshipName: 'owner', targetTable: 'novel_characters' },
 ];

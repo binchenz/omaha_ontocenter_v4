@@ -136,4 +136,48 @@ describe('applyFkRelationships', () => {
       });
     });
   });
+
+  describe('two FKs from same row to same target type with different names (Foreshadowing.plantedIn / resolvedIn → Episode)', () => {
+    const fkSpec: FkSpec = [
+      { sourceTable: 'novel_foreshadowing', sourceColumn: 'novel_id', relationshipName: 'belongsTo', targetTable: 'novels' },
+      { sourceTable: 'novel_foreshadowing', sourceColumn: 'planted_in_episode_id', relationshipName: 'plantedIn', targetTable: 'novel_episodes' },
+      { sourceTable: 'novel_foreshadowing', sourceColumn: 'resolved_in_episode_id', relationshipName: 'resolvedIn', targetTable: 'novel_episodes' },
+    ];
+    const lookup = {
+      novels: { 'n-1': 'platform-n-1' },
+      novel_episodes: {
+        'ep-3': 'platform-ep-3',
+        'ep-7': 'platform-ep-7',
+      },
+    };
+
+    it('produces both relationship entries when both FKs are populated', () => {
+      const row = {
+        id: 'fs-1',
+        novel_id: 'n-1',
+        planted_in_episode_id: 'ep-3',
+        resolved_in_episode_id: 'ep-7',
+      };
+      const [out] = applyFkRelationships('novel_foreshadowing', [row], fkSpec, lookup);
+      expect(out.relationships).toEqual({
+        belongsTo: 'platform-n-1',
+        plantedIn: 'platform-ep-3',
+        resolvedIn: 'platform-ep-7',
+      });
+    });
+
+    it('produces only the populated entry when only one of the same-target FKs is set', () => {
+      const row = {
+        id: 'fs-2',
+        novel_id: 'n-1',
+        planted_in_episode_id: 'ep-3',
+        resolved_in_episode_id: null,
+      };
+      const [out] = applyFkRelationships('novel_foreshadowing', [row], fkSpec, lookup);
+      expect(out.relationships).toEqual({
+        belongsTo: 'platform-n-1',
+        plantedIn: 'platform-ep-3',
+      });
+    });
+  });
 });
