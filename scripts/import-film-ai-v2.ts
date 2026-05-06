@@ -11,7 +11,7 @@ import { importInstances, type InstanceInput } from './lib/object-instance-impor
 import { flattenBookAnalysis } from './lib/book-analysis-flattener';
 import { runRecipe } from './lib/run-recipe';
 import { createIngestCtx } from './lib/ingest-ctx';
-import { bookRecipe, bookCharacterRecipe, plotBeatRecipe, emotionalCurvePointRecipe, marketScoreRecipe } from './lib/film-ai-v2-recipes';
+import { bookRecipe, bookCharacterRecipe, bookCharacterEdgeRecipe, plotBeatRecipe, emotionalCurvePointRecipe, marketScoreRecipe } from './lib/film-ai-v2-recipes';
 import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded, type EdgeExpanded, type PlotBeatExpanded, type EmotionalPointExpanded, type MarketScoreExpanded, type ChapterSummaryRow } from './lib/film-ai-v2-source-reader';
 import { resolveCharacterName, type CandidateCharacter } from './lib/entity-resolver';
 import {
@@ -348,7 +348,12 @@ async function main(): Promise<void> {
     await runRecipe(bookCharacterRecipe, ingestCtx, importInstances);
 
     console.log('[ingest] book character edges (entity resolution)');
-    const bookPlatformMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Book');
+    // Pre-populate Book externalIdMap for the relationships callback in bookCharacterEdgeRecipe.
+    await ingestCtx.loadExternalIdMap('Book');
+    await runRecipe(bookCharacterEdgeRecipe, ingestCtx, importInstances);
+
+    // charsByBook still needed for the imperative ChapterCharacterMention stanza below.
+    // Will be removed in #30 when ChapterCharacterMention becomes a recipe.
     const charsByBook = new Map<string, CandidateCharacter[]>();
     for (const mc of mainCharRows) {
       const extId = bookCharacterExternalId(mc.book_external_id, mc.name);
@@ -356,26 +361,6 @@ async function main(): Promise<void> {
       list.push({ id: extId, name: mc.name });
       charsByBook.set(mc.book_external_id, list);
     }
-    const edgeInstances: InstanceInput[] = [];
-    let edgesSkipped = 0;
-    const resStats = { fully_resolved: 0, partially_resolved: 0, unresolved: 0 };
-    for (const edge of edgeRows) {
-      const bookPlatformId = bookPlatformMap[edge.book_external_id];
-      if (!bookPlatformId) {
-        edgesSkipped++;
-        continue;
-      }
-      const candidates = charsByBook.get(edge.book_external_id) ?? [];
-      const fromId = resolveCharacterName(edge.from_name, candidates);
-      const toId = resolveCharacterName(edge.to_name, candidates);
-      const inst = edgeToInstance(edge, bookPlatformId, fromId, toId);
-      const status = inst.properties.resolution_status as keyof typeof resStats;
-      resStats[status]++;
-      edgeInstances.push(inst);
-    }
-    const edgeResult = await importInstances(prisma, tenantResult.tenantId, 'BookCharacterEdge', edgeInstances);
-    console.log(`[ingest] book character edges imported=${edgeResult.imported} updated=${edgeResult.updated} skipped=${edgeResult.skipped + edgesSkipped}`);
-    console.log(`[ingest] edge resolution: fully=${resStats.fully_resolved} partially=${resStats.partially_resolved} unresolved=${resStats.unresolved}`);
 
     console.log('[ingest] plot beats');
     await runRecipe(plotBeatRecipe, ingestCtx, importInstances);
@@ -385,6 +370,10 @@ async function main(): Promise<void> {
 
     console.log('[ingest] market scores');
     await runRecipe(marketScoreRecipe, ingestCtx, importInstances);
+
+    // bookPlatformMap still needed for the 2 remaining imperative stanzas below.
+    // Removed in #30 when ChapterSummary + ChapterCharacterMention become recipes.
+    const bookPlatformMap = await loadExternalIdMap(prisma, tenantResult.tenantId, 'Book');
 
     console.log('[ingest] chapter summaries');
     const csInstances: InstanceInput[] = [];

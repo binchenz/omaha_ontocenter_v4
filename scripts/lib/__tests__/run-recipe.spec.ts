@@ -192,4 +192,156 @@ describe('runRecipe', () => {
       expect(loadMock).toHaveBeenNthCalledWith(2, 'Parent');
     });
   });
+
+  describe('entityResolution', () => {
+    function makeCtxWithPool(pool: Map<string, Array<{ id: string; name: string }>>) {
+      const loadCandidatePoolMock = vi.fn(async () => pool);
+      const ctx = makeMinimalCtx({ loadCandidatePool: loadCandidatePoolMock });
+      return { ctx, loadCandidatePoolMock };
+    }
+
+    it('injects a resolve(name) closure scoped to the row group; returns matched candidate id', async () => {
+      const importer = makeFakeImporter();
+      const pool = new Map<string, Array<{ id: string; name: string }>>([
+        ['book-1', [{ id: 'cand-1', name: '陆阳' }, { id: 'cand-2', name: '云芝' }]],
+        ['book-2', [{ id: 'cand-3', name: 'Other' }]],
+      ]);
+      const { ctx } = makeCtxWithPool(pool);
+      ctx.sourceData['rows'] = [
+        { id: 'r1', book_external_id: 'book-1', from_name: '陆阳' },
+      ];
+      const recipe: IngestRecipe<any> = {
+        objectType: 'X',
+        read: (c) => (c.sourceData['rows'] ?? []) as any[],
+        entityResolution: {
+          candidatesFromObjectType: 'BookCharacter',
+          groupBy: 'book_external_id',
+          nameField: 'name',
+        },
+        relationships: () => ({}),
+        toInstance: (row, _c, deps) => ({
+          externalId: row.id,
+          label: row.id,
+          properties: { resolved: deps.resolve(row.from_name) },
+        }),
+      };
+      const result = await runRecipe(recipe, ctx, importer.fn);
+      expect(result.imported).toBe(1);
+      expect(importer.calls[0].instances[0].properties.resolved).toBe('cand-1');
+    });
+
+    it('resolve returns null when name does not match any candidate in the row group', async () => {
+      const importer = makeFakeImporter();
+      const pool = new Map<string, Array<{ id: string; name: string }>>([
+        ['book-1', [{ id: 'cand-1', name: '陆阳' }]],
+      ]);
+      const { ctx } = makeCtxWithPool(pool);
+      ctx.sourceData['rows'] = [
+        { id: 'r1', book_external_id: 'book-1', from_name: '不存在的角色' },
+      ];
+      const recipe: IngestRecipe<any> = {
+        objectType: 'X',
+        read: (c) => (c.sourceData['rows'] ?? []) as any[],
+        entityResolution: {
+          candidatesFromObjectType: 'BookCharacter',
+          groupBy: 'book_external_id',
+          nameField: 'name',
+        },
+        relationships: () => ({}),
+        toInstance: (row, _c, deps) => ({
+          externalId: row.id,
+          label: row.id,
+          properties: { resolved: deps.resolve(row.from_name) },
+        }),
+      };
+      await runRecipe(recipe, ctx, importer.fn);
+      expect(importer.calls[0].instances[0].properties.resolved).toBeNull();
+    });
+
+    it('resolve is scoped to the row group: candidate from a different book is not visible', async () => {
+      const importer = makeFakeImporter();
+      const pool = new Map<string, Array<{ id: string; name: string }>>([
+        ['book-1', [{ id: 'a-陆阳', name: '陆阳' }]],
+        ['book-2', [{ id: 'b-陆阳', name: '陆阳' }]],
+      ]);
+      const { ctx } = makeCtxWithPool(pool);
+      ctx.sourceData['rows'] = [
+        { id: 'r1', book_external_id: 'book-2', from_name: '陆阳' },
+      ];
+      const recipe: IngestRecipe<any> = {
+        objectType: 'X',
+        read: (c) => (c.sourceData['rows'] ?? []) as any[],
+        entityResolution: {
+          candidatesFromObjectType: 'BookCharacter',
+          groupBy: 'book_external_id',
+          nameField: 'name',
+        },
+        relationships: () => ({}),
+        toInstance: (row, _c, deps) => ({
+          externalId: row.id,
+          label: row.id,
+          properties: { resolved: deps.resolve(row.from_name) },
+        }),
+      };
+      await runRecipe(recipe, ctx, importer.fn);
+      // Should match only book-2's candidate, not book-1's
+      expect(importer.calls[0].instances[0].properties.resolved).toBe('b-陆阳');
+    });
+  });
+
+  describe('relationships callback', () => {
+    it('merges callback-produced relationships onto the instance', async () => {
+      const importer = makeFakeImporter();
+      const ctx = makeMinimalCtx({
+        sourceData: { rows: [{ id: 'r1', book: 'b1', from: 'c1', to: 'c2' }] },
+      });
+      const recipe: IngestRecipe<any> = {
+        objectType: 'Edge',
+        read: (c) => (c.sourceData['rows'] ?? []) as any[],
+        relationships: (row) => ({ book: row.book, from: row.from, to: row.to }),
+        toInstance: (row) => ({ externalId: row.id, label: row.id, properties: {} }),
+      };
+      await runRecipe(recipe, ctx, importer.fn);
+      expect(importer.calls[0].instances[0].relationships).toEqual({
+        book: 'b1',
+        from: 'c1',
+        to: 'c2',
+      });
+    });
+  });
+
+  describe('error handling at the row level', () => {
+    it('catches a single-row toInstance exception, counts it, continues with remaining rows', async () => {
+      const importer = makeFakeImporter();
+      const ctx = makeMinimalCtx({
+        sourceData: { rows: [{ id: 'r1' }, { id: 'r2', boom: true }, { id: 'r3' }] },
+      });
+      const recipe: IngestRecipe<any> = {
+        objectType: 'X',
+        read: (c) => (c.sourceData['rows'] ?? []) as any[],
+        toInstance: (row) => {
+          if (row.boom) throw new Error('boom!');
+          return { externalId: row.id, label: row.id, properties: {} };
+        },
+      };
+      const result = await runRecipe(recipe, ctx, importer.fn);
+      expect(result.imported).toBe(2);
+      expect(result.errors).toBe(1);
+      expect(importer.calls[0].instances).toHaveLength(2);
+    });
+  });
+
+  describe('mutually exclusive contract validation', () => {
+    it('throws when both parentRef and relationships are set', async () => {
+      const ctx = makeMinimalCtx();
+      const recipe: IngestRecipe<any> = {
+        objectType: 'X',
+        read: () => [],
+        parentRef: { objectType: 'P', sourceField: 'p' },
+        relationships: () => ({}),
+        toInstance: () => ({ externalId: 'x', label: 'x', properties: {} }),
+      };
+      await expect(runRecipe(recipe, ctx, makeFakeImporter().fn)).rejects.toThrow(/mutually exclusive/);
+    });
+  });
 });

@@ -2,6 +2,7 @@ import type { IngestRecipe } from './run-recipe';
 import type {
   BookWithAnalysis,
   MainCharExpanded,
+  EdgeExpanded,
   PlotBeatExpanded,
   EmotionalPointExpanded,
   MarketScoreExpanded,
@@ -89,4 +90,47 @@ export const marketScoreRecipe: IngestRecipe<MarketScoreExpanded> = {
     properties: { label: m.label, score: m.score },
     searchText: m.label,
   }),
+};
+
+export const bookCharacterEdgeRecipe: IngestRecipe<EdgeExpanded> = {
+  objectType: 'BookCharacterEdge',
+  read: (ctx) => (ctx.sourceData['edgeRows'] ?? []) as EdgeExpanded[],
+  entityResolution: {
+    candidatesFromObjectType: 'BookCharacter',
+    groupBy: 'book_external_id',
+    nameField: 'name',
+  },
+  // We need to attach belongsTo to Book for the type-level relationship.
+  // Since parentRef and relationships are mutually exclusive, we encode the
+  // Book relationship inside the relationships callback alongside any other.
+  relationships: (row, ctx) => {
+    const bookMap = ctx.externalIdMaps.get('Book') ?? {};
+    const bookPlatformId = bookMap[row.book_external_id];
+    const out: Record<string, string> = {};
+    if (bookPlatformId) out.belongsTo = bookPlatformId;
+    return out;
+  },
+  toInstance: (edge, _ctx, deps) => {
+    const fromCharExternalId = deps.resolve(edge.from_name);
+    const toCharExternalId = deps.resolve(edge.to_name);
+    const resolutionStatus =
+      fromCharExternalId && toCharExternalId
+        ? 'fully_resolved'
+        : fromCharExternalId || toCharExternalId
+          ? 'partially_resolved'
+          : 'unresolved';
+    return {
+      externalId: `${edge.book_external_id}::edge::${edge.seq}`,
+      label: `${edge.from_name} → ${edge.to_name}${edge.label ? ` (${edge.label})` : ''}`,
+      properties: {
+        from_string: edge.from_name,
+        to_string: edge.to_name,
+        label: edge.label,
+        from_character_id: fromCharExternalId,
+        to_character_id: toCharExternalId,
+        resolution_status: resolutionStatus,
+      },
+      searchText: [edge.from_name, edge.to_name, edge.label].filter(Boolean).join(' '),
+    };
+  },
 };
