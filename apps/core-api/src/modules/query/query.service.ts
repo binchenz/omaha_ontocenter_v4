@@ -184,12 +184,19 @@ export class QueryService {
       metrics,
       orderBy: req.orderBy,
       maxGroups: req.maxGroups,
+      pageToken: req.pageToken,
       permissionPredicates: resolution.predicates,
     });
 
     const rows = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(planned.sql, ...planned.params);
 
-    const groups = rows.map((row) => {
+    // Truncation detection: planner requested LIMIT maxGroups+1; if we got
+    // back maxGroups+1 rows, there's at least one more group. Trim to
+    // maxGroups and emit a pageToken.
+    const truncated = rows.length > planned.maxGroups;
+    const visibleRows = truncated ? rows.slice(0, planned.maxGroups) : rows;
+
+    const groups = visibleRows.map((row) => {
       const key: Record<string, unknown> = {};
       for (const field of planned.groupByFields) {
         key[field] = row[field];
@@ -201,6 +208,18 @@ export class QueryService {
       }
       return { key, metrics: m };
     });
+
+    const nextPageToken = truncated
+      ? Buffer.from(JSON.stringify({ offset: planned.offset + planned.maxGroups })).toString('base64')
+      : null;
+
+    // totalGroupsEstimate: best-effort.
+    // - no groupBy → always exactly 1 group
+    // - truncated → null (would need a separate count query; expensive)
+    // - not truncated → exact (we have all rows)
+    const totalGroupsEstimate = planned.groupByFields.length === 0
+      ? groups.length
+      : (truncated ? null : groups.length);
 
     const compiledSqlHash = createHash('sha256').update(planned.sql).digest('hex').slice(0, 32);
     await this.prisma.auditLog.create({
@@ -218,12 +237,14 @@ export class QueryService {
       },
     });
 
-    return {
+    const response: AggregationResponse = {
       groups,
-      truncated: false,
-      nextPageToken: null,
-      totalGroupsEstimate: groups.length,
+      truncated,
+      nextPageToken,
+      totalGroupsEstimate,
     };
+    if (planned.warnings.length > 0) response.warnings = planned.warnings;
+    return response;
   }
 
   private async resolveIncludes(

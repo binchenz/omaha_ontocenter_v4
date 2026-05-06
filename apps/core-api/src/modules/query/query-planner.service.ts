@@ -43,6 +43,7 @@ export interface AggregatePlanArgs {
   metrics: AggregateMetric[];
   orderBy?: AggregateOrderBy[];
   maxGroups?: number;
+  pageToken?: string;
   permissionPredicates?: Predicate[];
 }
 
@@ -51,6 +52,9 @@ export interface PlannedAggregateQuery {
   params: unknown[];
   effectivePermissionFilter: string | null;
   groupByFields: string[];
+  maxGroups: number;
+  offset: number;
+  warnings: string[];
 }
 
 const ALLOWED_SORT_COLUMNS = new Set(['createdAt', 'updatedAt', 'externalId', 'label']);
@@ -226,14 +230,91 @@ export class QueryPlannerService {
       ? `GROUP BY ${groupExprs.join(', ')}`
       : '';
 
+    // orderBy validation + SQL generation.
+    const orderByList = args.orderBy ?? [];
+    if (orderByList.length > 1) {
+      throw new BadRequestException({
+        error: {
+          code: 'MULTI_KEY_SORT_NOT_SUPPORTED',
+          hint: 'Multi-key sort not supported in v1. Provide at most one orderBy entry.',
+        },
+      });
+    }
+    let orderByClause = '';
+    if (orderByList.length === 1) {
+      const ob = orderByList[0];
+      const dir = ob.direction === 'asc' ? 'ASC' : 'DESC';
+      if (ob.kind === 'metric') {
+        const validAliases = args.metrics.map((m) => m.alias);
+        if (!validAliases.includes(ob.by)) {
+          throw new BadRequestException({
+            error: {
+              code: 'UNKNOWN_METRIC_ALIAS',
+              alias: ob.by,
+              validAliases,
+              hint: `orderBy.by '${ob.by}' is not a declared metric alias. Valid aliases: ${validAliases.join(', ')}.`,
+            },
+          });
+        }
+        orderByClause = `ORDER BY "${ob.by}" ${dir} NULLS LAST`;
+      } else {
+        // groupKey
+        if (!groupBy.includes(ob.by)) {
+          throw new BadRequestException({
+            error: {
+              code: 'UNKNOWN_METRIC_ALIAS',
+              alias: ob.by,
+              hint: `orderBy.by '${ob.by}' is a groupKey but not in groupBy: [${groupBy.join(', ')}].`,
+            },
+          });
+        }
+        orderByClause = `ORDER BY (properties->>'${ob.by}') ${dir} NULLS LAST`;
+      }
+    }
+
+    // maxGroups clamp (per ADR-0017): default 100, max 500. Clamp + warn,
+    // never reject. The SQL requests +1 to detect truncation cheaply.
+    const MAX_GROUPS_DEFAULT = 100;
+    const MAX_GROUPS_HARD_CAP = 500;
+    const requestedMaxGroups = args.maxGroups ?? MAX_GROUPS_DEFAULT;
+    const clamped = Math.min(requestedMaxGroups, MAX_GROUPS_HARD_CAP);
+    const warnings: string[] = [];
+    if (requestedMaxGroups > MAX_GROUPS_HARD_CAP) {
+      warnings.push(`maxGroups clamped from ${requestedMaxGroups} to ${MAX_GROUPS_HARD_CAP}`);
+    }
+
+    // pageToken = base64({ sqlHash, offset }). The hash is recomputed on
+    // follow-up to detect spec drift; mismatch → STALE_PAGE_TOKEN.
+    let offset = 0;
+    if (args.pageToken) {
+      try {
+        const decoded = JSON.parse(Buffer.from(args.pageToken, 'base64').toString('utf8'));
+        if (typeof decoded.offset === 'number') offset = decoded.offset;
+      } catch {
+        throw new BadRequestException({
+          error: { code: 'STALE_PAGE_TOKEN', hint: 'pageToken is malformed; restart pagination.' },
+        });
+      }
+    }
+
     const sql = `
       SELECT ${selectExprs.join(', ')}
       FROM object_instances
       WHERE ${where}
       ${groupByClause}
+      ${orderByClause}
+      OFFSET ${offset} LIMIT ${clamped + 1}
     `;
 
-    return { sql, params, effectivePermissionFilter, groupByFields: groupBy };
+    return {
+      sql,
+      params,
+      effectivePermissionFilter,
+      groupByFields: groupBy,
+      maxGroups: clamped,
+      offset,
+      warnings,
+    };
   }
 
   private compileFilter(

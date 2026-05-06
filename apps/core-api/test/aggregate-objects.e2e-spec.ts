@@ -322,4 +322,152 @@ describe('aggregate_objects (e2e) — count-only tracer', () => {
       }
     });
   });
+
+  // ============================================================
+  // Slice #44: orderBy + maxGroups + truncated/nextPageToken
+  // ============================================================
+  describe('orderBy + pagination', () => {
+    it('orderBy by metric DESC ranks highest count first', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'contains', value: 'AGG-T-' }],
+          groupBy: ['status'],
+          metrics: [{ kind: 'count', alias: 'n' }],
+          orderBy: [{ kind: 'metric', by: 'n', direction: 'desc' }],
+        })
+        .expect(201);
+      // 2 completed + 1 pending → completed first
+      expect(res.body.groups[0].key.status).toBe('completed');
+      expect(res.body.groups[0].metrics.n).toBe(2);
+    });
+
+    it('orderBy by groupKey ASC orders alphabetically', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'contains', value: 'AGG-T-' }],
+          groupBy: ['status'],
+          metrics: [{ kind: 'count', alias: 'n' }],
+          orderBy: [{ kind: 'groupKey', by: 'status', direction: 'asc' }],
+        })
+        .expect(201);
+      // 'completed' < 'pending'
+      expect(res.body.groups[0].key.status).toBe('completed');
+      expect(res.body.groups[1].key.status).toBe('pending');
+    });
+
+    it('rejects orderBy referencing an unknown metric alias', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          metrics: [{ kind: 'count', alias: 'n' }],
+          orderBy: [{ kind: 'metric', by: 'unknown_alias', direction: 'desc' }],
+        })
+        .expect(400);
+      expect(res.body.error?.code ?? res.body.code).toBe('UNKNOWN_METRIC_ALIAS');
+      expect(JSON.stringify(res.body)).toMatch(/\bn\b/); // hint lists valid aliases
+    });
+
+    it('rejects orderBy with length > 1 as MULTI_KEY_SORT_NOT_SUPPORTED', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          metrics: [{ kind: 'count', alias: 'n' }],
+          orderBy: [
+            { kind: 'metric', by: 'n', direction: 'desc' },
+            { kind: 'groupKey', by: 'status', direction: 'asc' },
+          ],
+        })
+        .expect(400);
+      expect(res.body.error?.code ?? res.body.code).toBe('MULTI_KEY_SORT_NOT_SUPPORTED');
+    });
+
+    it('maxGroups > 500 is clamped to 500 and warning is included', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          metrics: [{ kind: 'count', alias: 'n' }],
+          maxGroups: 9999,
+        })
+        .expect(201);
+      expect(Array.isArray(res.body.warnings)).toBe(true);
+      expect(JSON.stringify(res.body.warnings)).toMatch(/clamped/);
+    });
+
+    it('truncation: maxGroups=1 with multiple distinct groups returns truncated:true + nextPageToken', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'contains', value: 'AGG-T-' }],
+          groupBy: ['status'],
+          metrics: [{ kind: 'count', alias: 'n' }],
+          orderBy: [{ kind: 'metric', by: 'n', direction: 'desc' }],
+          maxGroups: 1,
+        })
+        .expect(201);
+      expect(res.body.groups).toHaveLength(1);
+      expect(res.body.truncated).toBe(true);
+      expect(res.body.nextPageToken).toBeTruthy();
+    });
+
+    it('pagination round-trip: pageToken from page 1 retrieves page 2', async () => {
+      const page1 = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'contains', value: 'AGG-T-' }],
+          groupBy: ['status'],
+          metrics: [{ kind: 'count', alias: 'n' }],
+          orderBy: [{ kind: 'metric', by: 'n', direction: 'desc' }],
+          maxGroups: 1,
+        })
+        .expect(201);
+      expect(page1.body.truncated).toBe(true);
+
+      const page2 = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'contains', value: 'AGG-T-' }],
+          groupBy: ['status'],
+          metrics: [{ kind: 'count', alias: 'n' }],
+          orderBy: [{ kind: 'metric', by: 'n', direction: 'desc' }],
+          maxGroups: 1,
+          pageToken: page1.body.nextPageToken,
+        })
+        .expect(201);
+      // Page 2 should contain a different status than page 1
+      expect(page2.body.groups[0].key.status).not.toBe(page1.body.groups[0].key.status);
+    });
+
+    it('empty filter result returns { groups: [] } cleanly', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'order',
+          filters: [{ field: 'orderNo', operator: 'eq', value: 'NONEXISTENT-XYZ-9999' }],
+          groupBy: ['status'],
+          metrics: [{ kind: 'count', alias: 'n' }],
+        })
+        .expect(201);
+      expect(res.body.groups).toEqual([]);
+      expect(res.body.truncated).toBe(false);
+    });
+  });
 });
