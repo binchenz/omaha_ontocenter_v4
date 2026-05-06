@@ -9,7 +9,7 @@ import { bootstrapTenant } from './lib/tenant-bootstrap';
 import { bootstrapOntology } from './lib/ontology-bootstrap';
 import { importInstances, type InstanceInput } from './lib/object-instance-importer';
 import { flattenBookAnalysis } from './lib/book-analysis-flattener';
-import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded, type EdgeExpanded, type PlotBeatExpanded, type EmotionalPointExpanded, type MarketScoreExpanded } from './lib/film-ai-v2-source-reader';
+import { FilmAiV2SourceReader, type BookWithAnalysis, type MainCharExpanded, type EdgeExpanded, type PlotBeatExpanded, type EmotionalPointExpanded, type MarketScoreExpanded, type ChapterSummaryRow } from './lib/film-ai-v2-source-reader';
 import { resolveCharacterName, type CandidateCharacter } from './lib/entity-resolver';
 import {
   FILM_AI_TENANT_SLUG,
@@ -137,6 +137,37 @@ function marketScoreToInstance(m: MarketScoreExpanded, bookPlatformId: string): 
     },
     relationships: { belongsTo: bookPlatformId },
     searchText: m.label,
+  };
+}
+
+function chapterSummaryToInstance(cs: ChapterSummaryRow, bookPlatformId: string): InstanceInput {
+  const ss = cs.structured_summary ?? {};
+  const keyEvents = Array.isArray(ss.keyEvents) ? ss.keyEvents : [];
+  const revelations = Array.isArray(ss.revelations) ? ss.revelations : [];
+  const charactersStr = Array.isArray(ss.characters) ? ss.characters : [];
+  return {
+    externalId: cs.id,
+    label: cs.chapter_title || `第${cs.chapter_seq ?? '?'}章`,
+    properties: {
+      chapter_seq: cs.chapter_seq,
+      chapter_title: cs.chapter_title,
+      location: ss.location ?? null,
+      plotAdvancement: ss.plotAdvancement ?? null,
+      emotionalTone: ss.emotionalTone ?? null,
+      pacingDensity: ss.pacingDensity ?? null,
+      key_events: keyEvents,
+      revelations,
+      characters_string: charactersStr,
+    },
+    relationships: { belongsTo: bookPlatformId },
+    searchText: [
+      cs.chapter_title,
+      ss.location,
+      ss.plotAdvancement,
+      ...keyEvents,
+      ...revelations,
+      ...charactersStr,
+    ].filter(Boolean).join(' ').slice(0, 4000),
   };
 }
 
@@ -354,6 +385,24 @@ async function main(): Promise<void> {
     }
     const msResult = await importInstances(prisma, tenantResult.tenantId, 'MarketScore', msInstances);
     console.log(`[ingest] market scores imported=${msResult.imported} updated=${msResult.updated} skipped=${msResult.skipped + msSkipped}`);
+
+    console.log('[ingest] chapter summaries (41k+ rows)');
+    const chapterSummaries = await reader.readChapterSummaries();
+    console.log(`[ingest] chapter_summaries fetched: ${chapterSummaries.length}`);
+    const csInstances: InstanceInput[] = [];
+    let csSkipped = 0;
+    for (const cs of chapterSummaries) {
+      const bookPlatformId = bookPlatformMap[cs.source_id];
+      if (!bookPlatformId) {
+        csSkipped++;
+        continue;
+      }
+      csInstances.push(chapterSummaryToInstance(cs, bookPlatformId));
+    }
+    const csStart = Date.now();
+    const csResult = await importInstances(prisma, tenantResult.tenantId, 'ChapterSummary', csInstances);
+    const csElapsedSec = ((Date.now() - csStart) / 1000).toFixed(1);
+    console.log(`[ingest] chapter summaries imported=${csResult.imported} updated=${csResult.updated} skipped=${csResult.skipped + csSkipped} elapsed=${csElapsedSec}s`);
 
     console.log('[done]');
   } finally {

@@ -95,6 +95,21 @@ export const filmAiV2OntologySpec: OntologySpec = {
         { name: 'score', label: '分数', type: 'number', filterable: true, sortable: true },
       ],
     },
+    {
+      name: 'ChapterSummary',
+      label: '章节摘要',
+      properties: [
+        { name: 'chapter_seq', label: '章节序号', type: 'number', filterable: true, sortable: true },
+        { name: 'chapter_title', label: '章节标题', type: 'string', filterable: true },
+        { name: 'location', label: '地点', type: 'string', filterable: true },
+        { name: 'plotAdvancement', label: '剧情推进', type: 'string' },
+        { name: 'emotionalTone', label: '情感张力', type: 'number', filterable: true, sortable: true },
+        { name: 'pacingDensity', label: '节奏密度', type: 'number', filterable: true, sortable: true },
+        { name: 'key_events', label: '关键事件', type: 'json' },
+        { name: 'revelations', label: '揭示', type: 'json' },
+        { name: 'characters_string', label: '角色字符串', type: 'json' },
+      ],
+    },
   ],
   relationships: [
     { sourceType: 'BookCharacter', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
@@ -102,5 +117,6 @@ export const filmAiV2OntologySpec: OntologySpec = {
     { sourceType: 'PlotBeat', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
     { sourceType: 'EmotionalCurvePoint', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
     { sourceType: 'MarketScore', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
+    { sourceType: 'ChapterSummary', targetType: 'Book', name: 'belongsTo', cardinality: 'one-to-many' },
   ],
 };

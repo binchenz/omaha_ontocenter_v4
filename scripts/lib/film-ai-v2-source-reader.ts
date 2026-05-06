@@ -41,6 +41,14 @@ export interface MarketScoreExpanded {
   score: number | null;
 }
 
+export interface ChapterSummaryRow {
+  id: string;
+  source_id: string;
+  chapter_seq: number | null;
+  chapter_title: string | null;
+  structured_summary: any;
+}
+
 export class FilmAiV2SourceReader {
   private client: Client | null = null;
 
@@ -51,7 +59,8 @@ export class FilmAiV2SourceReader {
     this.client = new Client({
       connectionString: this.connectionString,
       connectionTimeoutMillis: 15_000,
-      query_timeout: 60_000,
+      query_timeout: 300_000,
+      statement_timeout: 300_000,
     });
     await this.client.connect();
   }
@@ -186,6 +195,15 @@ export class FilmAiV2SourceReader {
         label: String(row.score.label),
         score: row.score.score !== undefined && row.score.score !== null ? Number(row.score.score) : null,
       }));
+  }
+
+  async readChapterSummaries(): Promise<ChapterSummaryRow[]> {
+    const r = await this.c().query<ChapterSummaryRow>(
+      `SELECT cs.id, cs.source_id, cs.chapter_seq, cs.chapter_title, cs.structured_summary
+       FROM chapter_summaries cs
+       WHERE cs.source_type = 'uploaded'`,
+    );
+    return r.rows;
   }
 
   async countTable(table: string): Promise<number> {
