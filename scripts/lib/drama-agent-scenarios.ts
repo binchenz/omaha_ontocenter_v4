@@ -450,4 +450,80 @@ export const scenarios: Scenario[] = [
       expectation: 'Agent should politely redirect to its actual capability (querying the IP library). A non-redirect or actual weather forecast = fail.',
     },
   },
+
+  // ============================================================
+  // C — complex / multi-hop / boundary stress (8 questions)
+  // ============================================================
+  {
+    id: 'C1',
+    tags: ['C', 'complex'],
+    question: '在评分 85 以上的书里，节奏类型包含"高密度爽文型"的有几本？这些书的市场综合分平均下来是多少？',
+    ground: {
+      kind: 'humanReview',
+      expectation: 'Agent must (1) filter Book where overall_score>=85 AND pace_type contains "高密度爽文型", (2) count, (3) compute avg(market_overall) for that subset. Two consecutive queries plus an arithmetic step. Verify the count and avg against SQL after the run.',
+    },
+  },
+  {
+    id: 'C2',
+    tags: ['C', 'complex'],
+    question: '对比《斗破苍穹》和《诡秘之主》——主角数量、章节数、节奏类型各是多少？最后给我一个判断：哪本更适合改 30 集短剧？必须用数据说话。',
+    ground: {
+      kind: 'humanReview',
+      expectation: 'Agent fetches both Books, queries BookCharacter where role=主角 grouped per book, reads chapter_count, reads pace_type, then weighs all 6 data points to recommend one. Hand-waving without naming numbers = fail. Pure data dump without recommendation = fail.',
+    },
+  },
+  {
+    id: 'C3',
+    tags: ['C', 'complex'],
+    question: '在所有章节摘要里，出现频次最高的 5 个角色名（按提及次数算）分别出现在哪些书里？',
+    ground: {
+      kind: 'humanReview',
+      expectation: 'Agent must group ChapterCharacterMention by character_name_raw, take top 5 by count, then for each name list the distinct book(s) it appears in. Two-hop reasoning. The character_name_raw values may be ambiguous (same name in different books) — Agent should acknowledge this.',
+    },
+  },
+  {
+    id: 'C4',
+    tags: ['C', 'complex'],
+    question: '哪些书的"剧情吸引力"分数明显高于"IP 改编潜力"分数？差距 10 分以上的，列出来。这种现象说明什么？',
+    ground: {
+      kind: 'humanReview',
+      expectation: 'Agent queries MarketScore by label, joins back to Book, computes diff per book, filters diff > 10. Must offer an interpretation: "story is strong but not adaptable" or similar. Critical thinking + data citation both required.',
+    },
+  },
+  {
+    id: 'C5',
+    tags: ['C', 'complex'],
+    question: '一本书评分 85 以上、但 market_overall 低于 70 的，库里有几本？如果有，请列出；如果没有，请猜测为什么不会出现这种组合。',
+    ground: {
+      kind: 'humanReview',
+      expectation: 'This is likely a sparse / empty result set. Agent must (1) actually query, (2) report the count truthfully (likely 0), (3) speculate honestly about correlation between the two scores. Refusing to speculate = OK; making up data = fail.',
+    },
+  },
+  {
+    id: 'C6',
+    tags: ['C', 'complex'],
+    question: '"修仙"题材里章节数最少的那本是哪本？给我看一下它的剧情节拍是什么。',
+    ground: {
+      kind: 'humanReview',
+      expectation: 'Three hops: (1) filter Book by tags contains 修仙, (2) sort by chapter_count asc, take 1, (3) query PlotBeat for that Book. Watch the plan unfold cleanly without backtracking.',
+    },
+  },
+  {
+    id: 'C7',
+    tags: ['C', 'complex'],
+    question: '前面你提到适合改甜宠的书 —— 那些书里有没有评分低于 75 的？我想看那些"被你藏起来"的候选。',
+    ground: {
+      kind: 'humanReview',
+      expectation: 'There is NO previous turn — this question references an imaginary past recommendation. Agent has two acceptable responses: (a) recognise it has no prior context and ask "do you mean from a list I gave in another conversation? Let me search now"; (b) interpret the request literally and search 甜宠 books with score < 75, presenting any results. Pretending to remember a previous answer = fail (hallucination).',
+    },
+  },
+  {
+    id: 'C8',
+    tags: ['C', 'complex'],
+    question: '把所有评分大于 90 的书的总字数加起来，告诉我一共多少万字。',
+    ground: {
+      kind: 'humanReview',
+      expectation: 'Agent queries Book where overall_score>90, gets the rows back with total_chars per row, then computes the sum manually (the query DSL has no SUM aggregator). 6 books expected, sum should be in the order of ~3000万 (rough). Sum that is way off (e.g. 100万 because Agent counted books not chars) = fail.',
+    },
+  },
 ];

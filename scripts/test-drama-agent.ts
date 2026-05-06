@@ -37,10 +37,15 @@ import {
 interface CliFlags {
   smoke: boolean;
   full: boolean;
+  complex: boolean;
 }
 
 function parseArgs(argv: string[]): CliFlags {
-  return { smoke: argv.includes('--smoke'), full: argv.includes('--full') };
+  return {
+    smoke: argv.includes('--smoke'),
+    full: argv.includes('--full'),
+    complex: argv.includes('--complex'),
+  };
 }
 
 interface ScenarioResult {
@@ -206,12 +211,13 @@ function buildReport(results: ScenarioResult[], elapsed: number, mode: string): 
 
 async function main(): Promise<void> {
   const flags = parseArgs(process.argv.slice(2));
-  if (!flags.smoke && !flags.full) {
-    console.error('Pass --smoke (10 scenarios, ~8min) or --full (all, ~40min).');
+  const flagsCount = [flags.smoke, flags.full, flags.complex].filter(Boolean).length;
+  if (flagsCount === 0) {
+    console.error('Pass --smoke (10 scenarios, ~8min), --full (all, ~40min), or --complex (8 hard scenarios, ~10min).');
     process.exit(2);
   }
-  if (flags.smoke && flags.full) {
-    console.error('Pass either --smoke or --full, not both.');
+  if (flagsCount > 1) {
+    console.error('Pass exactly one of --smoke / --full / --complex.');
     process.exit(2);
   }
 
@@ -230,8 +236,11 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const mode = flags.smoke ? 'smoke' : 'full';
-  const selected = flags.smoke ? scenarios.filter((s) => s.tags.includes('smoke')) : scenarios;
+  const mode = flags.smoke ? 'smoke' : flags.complex ? 'complex' : 'full';
+  const selected =
+    flags.smoke ? scenarios.filter((s) => s.tags.includes('smoke'))
+      : flags.complex ? scenarios.filter((s) => s.tags.includes('complex'))
+        : scenarios;
   console.log(`[start] mode=${mode} scenarios=${selected.length} api=${apiBase}`);
 
   console.log('[setup] logging in...');
