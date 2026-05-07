@@ -139,7 +139,7 @@ describe('AgentService', () => {
   });
 
   it('terminates with error after max tool iterations', async () => {
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 9; i++) {
       llm.queueResponse({
         type: 'tool_calls',
         calls: [{ id: `call_${i}`, name: 'query_objects', arguments: { objectType: 'customer' } }],
@@ -155,7 +155,7 @@ describe('AgentService', () => {
     }
 
     const toolCalls = events.filter(e => e.type === 'tool_call');
-    expect(toolCalls.length).toBeLessThanOrEqual(5);
+    expect(toolCalls.length).toBeLessThanOrEqual(8);
 
     const errorEvent = events.find(e => e.type === 'error');
     expect(errorEvent).toBeDefined();

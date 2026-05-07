@@ -23,7 +23,7 @@ export interface RunInput {
   fileId?: string;
 }
 
-const MAX_TOOL_ITERATIONS = 5;
+const MAX_TOOL_ITERATIONS = 8;
 
 @Injectable()
 export class AgentService {

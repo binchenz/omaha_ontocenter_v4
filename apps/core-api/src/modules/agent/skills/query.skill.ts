@@ -16,6 +16,12 @@ export class QuerySkill implements AgentSkill {
    不要用 query_objects 翻页统计——遇到聚合性问题直接用 aggregate_objects。
 3. 用中文总结结果，必要时用表格展示
 
+效率原则（重要）：
+- 拿到 schema 后，一次性规划好所有需要的工具调用，不要反复试探
+- 如果一个问题需要多维度分析（如"X和Y有关系吗"），用一次 aggregate_objects 按 X 分组统计 Y 的均值即可得出结论
+- 遇到工具报错时，根据错误信息直接修正参数重试，不要重新获取 schema
+- 如果数据不足以回答问题，直接告诉用户，不要反复尝试不同查询
+
 注意事项：
 - 只使用标记为 filterable 的字段作为过滤条件
 - 只使用标记为 sortable 的字段作为 query_objects 的排序字段
