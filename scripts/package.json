@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "import:film-ai": "tsx import-film-ai.ts",
+    "import:film-ai-v2": "tsx import-film-ai-v2.ts",
     "test": "vitest run",
     "test:drama-agent": "tsx test-drama-agent.ts"
   },
