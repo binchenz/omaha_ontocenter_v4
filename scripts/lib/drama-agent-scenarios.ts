@@ -137,7 +137,7 @@ export const scenarios: Scenario[] = [
     question: '《牧神记》的主角叫什么名字？',
     ground: {
       kind: 'nameVariants',
-      sql: `SELECT label AS v FROM object_instances o JOIN object_instances b ON o.relationships->>'belongsTo' = b.id::text WHERE o.tenant_id=${T} AND o.object_type='BookCharacter' AND o.properties->>'role'='主角' AND b.label LIKE '%牧神记%' LIMIT 1`,
+      sql: `SELECT o.label AS v FROM object_instances o JOIN object_instances b ON o.relationships->>'belongsTo' = b.id::text WHERE o.tenant_id=${T} AND o.object_type='BookCharacter' AND o.properties->>'role'='主角' AND b.label LIKE '%牧神记%' LIMIT 1`,
     },
   },
 

@@ -89,4 +89,32 @@ describe('judgeSetMembership (top-K + no-superset)', () => {
     const j = judgeSetMembership(answer, groundTruth, 3);
     expect(j.kind).toBe('pass');
   });
+
+  it('accepts prefix match when ground-truth has trailing qualifiers (作者：...)', () => {
+    // Real case from drama-co A3.1: agent renders the short form in markdown
+    // tables, but ground truth carries the full label.
+    const groundTruth = ['斗破苍穹之至高真神 作者：落日精灵', '0005005.斗破苍穹', '诡秘之主'];
+    const answer = '前 3：斗破苍穹之至高真神、0005005.斗破苍穹、诡秘之主';
+    const j = judgeSetMembership(answer, groundTruth, 3);
+    expect(j.kind).toBe('pass');
+  });
+
+  it('accepts prefix match when ground-truth has (公众号：...) suffix', () => {
+    const groundTruth = ['谁让他修仙的 (公众号：六点书单)', '万族之劫 (公众号：六点书单)'];
+    const answer = '答案是《谁让他修仙的》和《万族之劫》';
+    const j = judgeSetMembership(answer, groundTruth, 2);
+    expect(j.kind).toBe('pass');
+  });
+});
+
+describe('judgeNameVariants prefix fallback', () => {
+  it('passes when answer drops the (公众号：...) qualifier from variant', () => {
+    const j = judgeNameVariants('Agent says: 谁让他修仙的', ['谁让他修仙的 (公众号：六点书单)']);
+    expect(j.kind).toBe('pass');
+  });
+
+  it('still fails when the prefix itself is absent', () => {
+    const j = judgeNameVariants('completely unrelated', ['谁让他修仙的 (公众号：六点书单)']);
+    expect(j.kind).toBe('fail');
+  });
 });

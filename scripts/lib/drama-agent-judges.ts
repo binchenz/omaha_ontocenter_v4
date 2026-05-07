@@ -19,6 +19,16 @@ export function judgeNumeric(answer: string, expected: number): Judgement {
 export function judgeNameVariants(answer: string, variants: string[]): Judgement {
   for (const v of variants) {
     if (answer.includes(v)) return { kind: 'pass' };
+    // Also accept prefix match when the variant carries a trailing
+    // (公众号：...) / 作者：... qualifier the Agent may drop.
+    const prefix = v
+      .replace(/\s*\(公众号[：:][^)]+\)/g, '')
+      .replace(/\s*（公众号[：:][^）]+）/g, '')
+      .replace(/\s*作者[：:][\s\S]+$/g, '')
+      .trim();
+    if (prefix && prefix !== v && prefix.length >= 3 && answer.includes(prefix)) {
+      return { kind: 'pass' };
+    }
   }
   return { kind: 'fail', reason: `none of [${variants.join(', ')}] found in answer` };
 }
@@ -44,22 +54,29 @@ export function judgeSetMembership(
   groundTruth: string[],
   topK: number,
 ): Judgement {
-  // 1) top-K must all appear.
+  // 1) top-K must appear. We accept either:
+  //    - the full ground-truth string (strict match), or
+  //    - a distinctive prefix (head 5+ chars) when the full string has
+  //      trailing qualifiers like "作者：..." or "(公众号：...)" that
+  //      the Agent may drop when rendering a markdown table.
   for (let i = 0; i < Math.min(topK, groundTruth.length); i++) {
-    if (!answer.includes(groundTruth[i])) {
-      return { kind: 'fail', reason: `missing top-${i + 1} item: ${groundTruth[i]}` };
-    }
+    const full = groundTruth[i];
+    if (answer.includes(full)) continue;
+    // Try a distinctive prefix: strip common trailing qualifiers.
+    const prefix = full
+      .replace(/\s*\(公众号[：:][^)]+\)/g, '')
+      .replace(/\s*（公众号[：:][^）]+）/g, '')
+      .replace(/\s*作者[：:][\s\S]+$/g, '')
+      .trim();
+    if (prefix && prefix !== full && prefix.length >= 3 && answer.includes(prefix)) continue;
+    return { kind: 'fail', reason: `missing top-${i + 1} item: ${full}` };
   }
 
   // 2) no-superset: tokenise answer; any token that is not in groundTruth
-  // and looks like a "name candidate" is a hallucination signal.
-  // Names in this test domain are short alphanum tokens (ASCII for tests;
-  // Chinese book titles handled by checking each ground-truth-not-found
-  // single-uppercase-letter or alphanumeric chunk).
+  // and looks like a single-uppercase-letter name candidate is a hallucination.
   const tokens = answer.split(/[\s,，、。；;:()()「」'"]+/).filter((t) => t.length > 0);
   const groundSet = new Set(groundTruth);
   for (const t of tokens) {
-    // Heuristic: only treat single-uppercase letters and short alphanum as candidate names.
     if (/^[A-Z]$/.test(t) && !groundSet.has(t)) {
       return { kind: 'fail', reason: `superset / hallucinated name: ${t}` };
     }
