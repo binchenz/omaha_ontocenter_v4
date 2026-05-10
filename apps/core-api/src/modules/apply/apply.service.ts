@@ -103,9 +103,13 @@ export class ApplyService {
       }
     });
 
-    // Refresh materialized views for affected objectTypes (synchronous, post-commit)
+    // Refresh materialized views for affected objectTypes post-commit.
+    // Per ADR-0020, refresh is best-effort: the write has already committed,
+    // so refresh failure must not propagate back to the caller. ViewManager
+    // logs failures internally; we use allSettled to isolate one view's
+    // failure from the others.
     if (!ctx.batchMode) {
-      await Promise.all(
+      await Promise.allSettled(
         Array.from(affectedObjectTypes).map(ot => this.viewManager.refresh(ctx.tenantId, ot)),
       );
     }

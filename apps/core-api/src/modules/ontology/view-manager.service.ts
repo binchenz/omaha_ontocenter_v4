@@ -63,10 +63,19 @@ export class ViewManagerService {
 
   async refresh(tenantId: string, objectTypeName: string): Promise<void> {
     const name = viewName(tenantId, objectTypeName);
+    // Skip silently if the view doesn't exist — expected for objectTypes created before
+    // ADR-0020 landed, or during test teardown. If it does exist, any refresh failure
+    // is unexpected and must be surfaced (not silently swallowed — ADR-0020 change).
+    if (!(await this.exists(tenantId, objectTypeName))) return;
     try {
       await this.prisma.$executeRawUnsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY "${name}"`);
-    } catch {
-      // View may not exist yet — silently skip
+    } catch (err) {
+      this.logger.error(
+        { msg: 'view refresh failed', tenantId, objectType: objectTypeName, view: name, error: (err as Error).message },
+      );
+      // Do not re-throw: the source write already committed. Next successful
+      // Apply against this objectType will bring the view back in sync
+      // (REFRESH CONCURRENTLY is idempotent).
     }
   }
 
