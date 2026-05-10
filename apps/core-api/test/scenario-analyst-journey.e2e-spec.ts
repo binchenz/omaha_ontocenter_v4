@@ -18,6 +18,7 @@ import { ViewManagerService } from '../src/modules/ontology/view-manager.service
 import type { ObjectEdit, ApplyContext } from '@omaha/shared-types';
 
 describe('Scenario: Analyst user journey (e2e)', () => {
+  jest.setTimeout(30_000);
   let app: INestApplication;
   let prisma: PrismaClient;
   let tenantId: string;

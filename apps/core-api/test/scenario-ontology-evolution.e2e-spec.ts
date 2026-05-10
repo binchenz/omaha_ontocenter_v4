@@ -222,7 +222,42 @@ describe('Scenario: Ontology evolution + relationship lifecycle (e2e)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('step 6: extend schema — add Product type', async () => {
+  it('step 6: add derived property customer.totalRevenue = sum orders.totalAmount', async () => {
+    const res = await request(app.getHttpServer())
+      .put(`/ontology/types/${customerTypeId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        label: 'Customer',
+        properties: [
+          { name: 'name', type: 'string', label: 'Name', filterable: true, sortable: true },
+          { name: 'tier', type: 'string', label: 'Tier', filterable: true },
+        ],
+        derivedProperties: [
+          { name: 'totalRevenue', label: 'Total Revenue', type: 'number', expression: 'sum orders.totalAmount' },
+        ],
+      })
+      .expect(200);
+
+    expect(res.body.derivedProperties).toHaveLength(1);
+    expect(res.body.derivedProperties[0].name).toBe('totalRevenue');
+
+    // Filter by the derived property: Alpha has 3 orders totalling 50000 → matches >= 20000
+    // Beta has 2 orders totalling 13000 → does not match
+    const filtered = await request(app.getHttpServer())
+      .post('/query/objects')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        objectType: 'evo_customer',
+        filters: [{ derivedProperty: 'totalRevenue', operator: 'gte', value: 20000 }],
+      })
+      .expect(201);
+
+    const names = filtered.body.data.map((d: any) => d.properties.name);
+    expect(names).toContain('Alpha Corp');
+    expect(names).not.toContain('Beta LLC');
+  });
+
+  it('step 7: extend schema — add Product type', async () => {
     const productRes = await request(app.getHttpServer())
       .post('/ontology/types')
       .set('Authorization', `Bearer ${token}`)
@@ -240,7 +275,7 @@ describe('Scenario: Ontology evolution + relationship lifecycle (e2e)', () => {
     expect(await viewManager.exists(tenantId, 'evo_product')).toBe(true);
   });
 
-  it('step 7: seed products + query with filter + sort', async () => {
+  it('step 8: seed products + query with filter + sort', async () => {
     await prisma.objectInstance.createMany({
       data: [
         { tenantId, objectType: 'evo_product', externalId: 'EVO-P-1', properties: { sku: 'WIDGET-001', price: 100 }, relationships: {} },
@@ -265,7 +300,7 @@ describe('Scenario: Ontology evolution + relationship lifecycle (e2e)', () => {
     expect(res.body.data[1].properties.sku).toBe('WIDGET-001');
   });
 
-  it('step 8: delete Customer→Order relationship; listing confirms it is gone', async () => {
+  it('step 9: delete Customer→Order relationship; listing confirms it is gone', async () => {
     const rels = await prisma.objectRelationship.findMany({ where: { tenantId } });
     const orderRel = rels.find(r => r.name === 'orders' && r.sourceTypeId === customerTypeId);
     expect(orderRel).toBeDefined();
@@ -286,7 +321,7 @@ describe('Scenario: Ontology evolution + relationship lifecycle (e2e)', () => {
     expect(stillPresent).toBeUndefined();
   });
 
-  it('step 9: add a new filterable field — view + index reconcile', async () => {
+  it('step 10: add a new filterable field — view + index reconcile', async () => {
     await request(app.getHttpServer())
       .put(`/ontology/types/${customerTypeId}`)
       .set('Authorization', `Bearer ${token}`)
@@ -297,6 +332,8 @@ describe('Scenario: Ontology evolution + relationship lifecycle (e2e)', () => {
           { name: 'tier', type: 'string', label: 'Tier', filterable: true },
           { name: 'industry', type: 'string', label: 'Industry', filterable: true },
         ],
+        // Drop totalRevenue derived property — the orders relationship was deleted in step 9
+        derivedProperties: [],
       })
       .expect(200);
 
@@ -314,7 +351,7 @@ describe('Scenario: Ontology evolution + relationship lifecycle (e2e)', () => {
     expect(res.body.data).toHaveLength(0);
   });
 
-  it('step 10: deleting Order type — view dropped, relationships cleaned up', async () => {
+  it('step 11: deleting Order type — view dropped, relationships cleaned up', async () => {
     await request(app.getHttpServer())
       .delete(`/ontology/types/${orderTypeId}`)
       .set('Authorization', `Bearer ${token}`)
@@ -331,7 +368,7 @@ describe('Scenario: Ontology evolution + relationship lifecycle (e2e)', () => {
     orderTypeId = '';
   });
 
-  it('step 11: Customer type remains healthy after all schema mutations', async () => {
+  it('step 12: Customer type remains healthy after all schema mutations', async () => {
     const res = await request(app.getHttpServer())
       .post('/query/objects')
       .set('Authorization', `Bearer ${token}`)

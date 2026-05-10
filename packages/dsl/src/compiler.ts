@@ -47,8 +47,20 @@ function emit(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scope): s
         `AND ${predicate})`
       );
     }
+    // Value-producing nodes are allowed at the top level so derived property
+    // expressions like `sum orders.totalAmount` (used as a SELECT fragment by
+    // QueryPlanner.compileFilter) can compile standalone. See issue #61.
+    case 'ident':
+    case 'param':
+    case 'number':
+    case 'string':
+    case 'bool':
+    case 'binop':
+    case 'count':
+    case 'aggregate':
+      return emitValue(ast, ctx, params, scope);
     default:
-      throw new Error(`Unexpected top-level node: ${ast.kind}`);
+      throw new Error(`Unexpected top-level node: ${(ast as { kind: string }).kind}`);
   }
 }
 

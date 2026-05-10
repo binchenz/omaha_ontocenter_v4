@@ -70,4 +70,33 @@ describe('DSL compiler', () => {
     expect(out.sql).toBe("(((properties->>'totalAmount')::numeric + $1) > $2)");
     expect(out.params).toEqual([10, 100]);
   });
+
+  // Regression for #61: derived property expressions like `sum orders.totalAmount`
+  // are value-producing (not predicates). QueryPlanner.compileFilter compiles the
+  // raw derived expression standalone and then wraps it in a filter comparison,
+  // so the compiler must emit value nodes at top level, not reject them.
+  it('compiles a bare aggregate expression (top-level value node)', () => {
+    const ast = parse('sum orders.totalAmount');
+    const out = compile(ast, {
+      numericFields: new Set(),
+      relations: { orders: { foreignKey: 'customerId' } },
+    });
+    expect(out.sql).toContain('COALESCE((SELECT SUM');
+    expect(out.sql).toContain("(child.properties->>'totalAmount')::numeric");
+  });
+
+  it('compiles a bare ident expression (top-level value node)', () => {
+    const ast = parse('totalAmount');
+    const out = compile(ast, { numericFields: new Set(['totalAmount']) });
+    expect(out.sql).toBe("(properties->>'totalAmount')::numeric");
+  });
+
+  it('compiles a bare count expression (top-level value node)', () => {
+    const ast = parse('count orders');
+    const out = compile(ast, {
+      numericFields: new Set(),
+      relations: { orders: { foreignKey: 'customerId' } },
+    });
+    expect(out.sql).toContain('SELECT COUNT(*)');
+  });
 });

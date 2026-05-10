@@ -81,8 +81,10 @@ export class QueryPlannerService {
   async plan(args: PlanArgs): Promise<PlannedQuery> {
     const view = await this.viewLoader.load(args.tenantId, args.objectType);
     const useView = await this.viewManager.exists(args.tenantId, args.objectType);
+    // Alias the view AS object_instances so correlated subqueries from DSL
+    // (which reference object_instances.tenant_id and object_instances.id) work.
     const tableName = useView
-      ? `"${this.viewManager.getViewName(args.tenantId, args.objectType)}"`
+      ? `"${this.viewManager.getViewName(args.tenantId, args.objectType)}" AS object_instances`
       : 'object_instances';
 
     const scope = parentScope({ tenantId: args.tenantId, objectType: args.objectType });
