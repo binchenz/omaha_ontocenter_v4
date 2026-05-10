@@ -10,12 +10,14 @@ import {
 import { analyze } from '@omaha/dsl';
 import { assertTenantOwnership } from '../../common/helpers/assert-tenant-ownership';
 import { IndexManagerService } from './index-manager.service';
+import { ViewManagerService } from './view-manager.service';
 
 @Injectable()
 export class OntologyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly indexManager: IndexManagerService,
+    private readonly viewManager: ViewManagerService,
   ) {}
 
   async listObjectTypes(tenantId: string) {
@@ -43,6 +45,7 @@ export class OntologyService {
       },
     });
     await this.indexManager.reconcile(tenantId, created.id);
+    await this.viewManager.createOrReplace(tenantId, dto.name, dto.properties).catch(() => {});
     return created;
   }
 
@@ -64,12 +67,14 @@ export class OntologyService {
       },
     });
     await this.indexManager.reconcile(tenantId, id);
+    await this.viewManager.createOrReplace(tenantId, updated.name, nextProps).catch(() => {});
     return updated;
   }
 
   async deleteObjectType(tenantId: string, id: string) {
-    await this.getObjectType(tenantId, id);
+    const ot = await this.getObjectType(tenantId, id);
     await this.indexManager.dropAllFor(tenantId, id);
+    await this.viewManager.drop(tenantId, ot!.name).catch(() => {});
     return this.prisma.objectType.delete({ where: { id } });
   }
 

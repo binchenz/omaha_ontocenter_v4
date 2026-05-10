@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
 import { OntologySdkService } from '../sdk/ontology-sdk.service';
+import type { ObjectEdit } from '@omaha/shared-types';
 
 @Injectable()
 export class CreateObjectTypeTool implements AgentTool {
@@ -32,7 +33,14 @@ export class CreateObjectTypeTool implements AgentTool {
 
   constructor(private readonly sdk: OntologySdkService) {}
 
-  async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
-    return this.sdk.createObjectType(context.user.tenantId, args as any);
+  async execute(args: Record<string, unknown>, context: ToolContext): Promise<ObjectEdit[]> {
+    await this.sdk.createObjectType(context.user.tenantId, args as any);
+    const edit: ObjectEdit = {
+      op: 'create',
+      objectType: args.name as string,
+      properties: {},
+      label: args.label as string,
+    };
+    return [edit];
   }
 }

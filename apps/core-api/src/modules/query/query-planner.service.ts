@@ -3,6 +3,7 @@ import { compile, parse, emit, emitScope, parentScope } from '@omaha/dsl';
 import type { Predicate, OntologyView } from '@omaha/dsl';
 import type { QueryFilter, FilterOperator } from '@omaha/shared-types';
 import { OntologyViewLoader } from '../ontology/ontology-view-loader.service';
+import { ViewManagerService } from '../ontology/view-manager.service';
 
 export interface PlannedQuery {
   sql: string;
@@ -72,15 +73,23 @@ const FILTER_TO_SQL: Record<FilterOperator, string> = {
 
 @Injectable()
 export class QueryPlannerService {
-  constructor(private readonly viewLoader: OntologyViewLoader) {}
+  constructor(
+    private readonly viewLoader: OntologyViewLoader,
+    private readonly viewManager: ViewManagerService,
+  ) {}
 
   async plan(args: PlanArgs): Promise<PlannedQuery> {
     const view = await this.viewLoader.load(args.tenantId, args.objectType);
+    const useView = await this.viewManager.exists(args.tenantId, args.objectType);
+    const tableName = useView
+      ? `"${this.viewManager.getViewName(args.tenantId, args.objectType)}"`
+      : 'object_instances';
 
     const scope = parentScope({ tenantId: args.tenantId, objectType: args.objectType });
     const scopePrefix = emitScope(scope);
-    const params: unknown[] = [...scopePrefix.params];
-    const wherePieces: string[] = [
+    const params: unknown[] = useView ? [] : [...scopePrefix.params];
+    // When using a materialized view, the tenant/objectType filter is baked in — skip scope WHERE
+    const wherePieces: string[] = useView ? ['1=1'] : [
       scopePrefix.sql.replace(/^FROM object_instances WHERE /, ''),
     ];
 
@@ -105,12 +114,12 @@ export class QueryPlannerService {
       SELECT id, tenant_id AS "tenantId", object_type AS "objectType",
              external_id AS "externalId", label, properties, relationships,
              created_at AS "createdAt", updated_at AS "updatedAt"
-      FROM object_instances
+      FROM ${tableName}
       WHERE ${where}
       ORDER BY ${sortClause}
       OFFSET ${args.skip} LIMIT ${args.take}
     `;
-    const countSql = `SELECT COUNT(*)::int AS count FROM object_instances WHERE ${where}`;
+    const countSql = `SELECT COUNT(*)::int AS count FROM ${tableName} WHERE ${where}`;
     return {
       sql,
       params,

@@ -9,6 +9,7 @@ export interface ApplyContext {
   tenantId: string;
   userId: string;
   dryRun?: boolean;
+  batchMode?: boolean;
 }
 
 export interface ApplyResult {

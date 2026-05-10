@@ -2,10 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@omaha/db';
 import type { ObjectEdit, ApplyContext, ApplyResult } from '@omaha/shared-types';
 import { randomUUID } from 'crypto';
+import { ViewManagerService } from '../ontology/view-manager.service';
 
 @Injectable()
 export class ApplyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly viewManager: ViewManagerService,
+  ) {}
 
   async apply(edits: ObjectEdit[], ctx: ApplyContext): Promise<ApplyResult> {
     const errors: Array<{ index: number; message: string }> = [];
@@ -33,6 +37,7 @@ export class ApplyService {
     }
 
     // Execute in transaction
+    const affectedObjectTypes = new Set<string>();
     await this.prisma.$transaction(async (tx) => {
       for (const edit of edits) {
         switch (edit.op) {
@@ -48,9 +53,11 @@ export class ApplyService {
               },
             });
             created.push(instance.id);
+            affectedObjectTypes.add(edit.objectType);
             break;
           }
           case 'update': {
+            const inst = await tx.objectInstance.findUnique({ where: { id: edit.objectId }, select: { objectType: true } });
             await tx.objectInstance.update({
               where: { id: edit.objectId },
               data: {
@@ -58,13 +65,16 @@ export class ApplyService {
                 ...(edit.label !== undefined && { label: edit.label }),
               },
             });
+            if (inst) affectedObjectTypes.add(inst.objectType);
             break;
           }
           case 'delete': {
+            const inst = await tx.objectInstance.findUnique({ where: { id: edit.objectId }, select: { objectType: true } });
             await tx.objectInstance.update({
               where: { id: edit.objectId },
               data: { deletedAt: new Date() },
             });
+            if (inst) affectedObjectTypes.add(inst.objectType);
             break;
           }
           case 'link': {
@@ -75,6 +85,7 @@ export class ApplyService {
               where: { id: edit.from },
               data: { relationships: relationships as any },
             });
+            if (instance) affectedObjectTypes.add(instance.objectType);
             break;
           }
           case 'unlink': {
@@ -85,11 +96,19 @@ export class ApplyService {
               where: { id: edit.from },
               data: { relationships: relationships as any },
             });
+            if (instance) affectedObjectTypes.add(instance.objectType);
             break;
           }
         }
       }
     });
+
+    // Refresh materialized views for affected objectTypes (synchronous, post-commit)
+    if (!ctx.batchMode) {
+      await Promise.all(
+        Array.from(affectedObjectTypes).map(ot => this.viewManager.refresh(ctx.tenantId, ot)),
+      );
+    }
 
     return { applied: edits.length, created };
   }

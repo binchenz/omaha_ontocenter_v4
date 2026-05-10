@@ -7,6 +7,7 @@ import {
   loginAsTestTenantAdmin,
   cleanupTestTenant,
 } from './test-helpers';
+import { ViewManagerService } from '../src/modules/ontology/view-manager.service';
 
 /**
  * Tests the OntologySdkService behavior through HTTP endpoints.
@@ -18,6 +19,7 @@ describe('OntologySdk behavior (e2e)', () => {
   let prisma: PrismaClient;
   let tenantId: string;
   let token: string;
+  let viewManager: ViewManagerService;
 
   const TEST_TYPE_NAME = 'sdk_test_item';
 
@@ -26,6 +28,7 @@ describe('OntologySdk behavior (e2e)', () => {
     tenantId = await ensureTestTenant(app);
     token = await loginAsTestTenantAdmin(app);
     prisma = new PrismaClient();
+    viewManager = app.get(ViewManagerService);
 
     // Clean up from previous runs
     await prisma.objectInstance.deleteMany({ where: { tenantId, objectType: TEST_TYPE_NAME } });
@@ -128,6 +131,8 @@ describe('OntologySdk behavior (e2e)', () => {
           { tenantId, objectType: TEST_TYPE_NAME, externalId: 'SDK-Q-003', properties: { title: 'Item C', amount: 300, status: 'active' }, relationships: {} },
         ],
       });
+      // Refresh view so seeded instances are visible
+      await viewManager.refresh(tenantId, TEST_TYPE_NAME);
     });
 
     it('returns instances matching filters', async () => {
