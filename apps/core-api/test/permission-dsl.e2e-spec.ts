@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { PrismaClient } from '@omaha/db';
 import { createTestApp } from './test-helpers';
+import { ViewManagerService } from '../src/modules/ontology/view-manager.service';
 
 describe('Permission DSL + audit (e2e)', () => {
   let app: INestApplication;
@@ -13,11 +14,13 @@ describe('Permission DSL + audit (e2e)', () => {
   let tenantId: string;
   let orderTypeId: string;
   let salesRoleId: string;
+  let viewManager: ViewManagerService;
   const seededIds: string[] = [];
 
   beforeAll(async () => {
     app = await createTestApp();
     prisma = new PrismaClient();
+    viewManager = app.get(ViewManagerService);
 
     const adminLogin = await request(app.getHttpServer())
       .post('/auth/login')
@@ -111,6 +114,9 @@ describe('Permission DSL + audit (e2e)', () => {
       });
       seededIds.push(row.id);
     }
+
+    // Refresh view so seeded rows are visible to QueryPlanner (#54 / #62)
+    await viewManager.refresh(tenantId, 'perm_probe_order');
   });
 
   afterAll(async () => {

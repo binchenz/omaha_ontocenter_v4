@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { PrismaClient } from '@omaha/db';
 import { createTestApp, loginAsAdmin } from './test-helpers';
+import { ViewManagerService } from '../src/modules/ontology/view-manager.service';
 
 describe('Query include/select (e2e)', () => {
   let app: INestApplication;
@@ -10,12 +11,14 @@ describe('Query include/select (e2e)', () => {
   let tenantId: string;
   let orderTypeId: string;
   let paymentTypeId: string;
+  let viewManager: ViewManagerService;
   const seededIds: string[] = [];
 
   beforeAll(async () => {
     app = await createTestApp();
     token = await loginAsAdmin(app);
     prisma = new PrismaClient();
+    viewManager = app.get(ViewManagerService);
 
     const me = await request(app.getHttpServer())
       .get('/auth/me')
@@ -104,6 +107,10 @@ describe('Query include/select (e2e)', () => {
       });
       seededIds.push(row.id);
     }
+
+    // Refresh views so seeded rows are visible to QueryPlanner (#54 / #62)
+    await viewManager.refresh(tenantId, 'incl_probe_order');
+    await viewManager.refresh(tenantId, 'incl_probe_payment');
   });
 
   afterAll(async () => {
