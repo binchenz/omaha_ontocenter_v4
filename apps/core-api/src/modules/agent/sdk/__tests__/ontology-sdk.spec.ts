@@ -1,6 +1,6 @@
-import { OntologySdkService } from '../ontology-sdk.service';
+import { CoreSdkService } from '../../../sdk/core-sdk.service';
 
-describe('OntologySdkService (refactored)', () => {
+describe('CoreSdkService', () => {
   const mockTypeResolver = {
     resolve: jest.fn(),
     resolveMany: jest.fn(),
@@ -22,7 +22,7 @@ describe('OntologySdkService (refactored)', () => {
     },
   };
 
-  let sdk: OntologySdkService;
+  let sdk: CoreSdkService;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -31,7 +31,7 @@ describe('OntologySdkService (refactored)', () => {
       ['Source', 'source-id'],
       ['Target', 'target-id'],
     ]));
-    sdk = new OntologySdkService(
+    sdk = new CoreSdkService(
       mockOntologyService as any,
       mockQueryService as any,
       mockPrisma,

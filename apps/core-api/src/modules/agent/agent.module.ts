@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
-import { OntologyModule } from '../ontology/ontology.module';
-import { QueryModule } from '../query/query.module';
+import { CoreSdkModule } from '../sdk/core-sdk.module';
+import { ConversationModule } from '../conversation/conversation.module';
 import { AgentController } from './agent.controller';
 import { FileController } from './file.controller';
 import { AgentService } from './agent.service';
@@ -10,7 +10,6 @@ import { ConfirmationGate } from './confirmation/confirmation-gate.service';
 import { ConnectorClient } from './connector/connector-client.service';
 import { SseAgentRunner } from './sse/sse-agent-runner.service';
 import { OntologySdkService } from './sdk/ontology-sdk.service';
-import { TypeResolver } from './sdk/type-resolver.service';
 import { ImportEngine } from './sdk/import-engine.service';
 import { FileParserService } from './tools/file-parser.service';
 import { QueryObjectsTool } from './tools/query-objects.tool';
@@ -39,12 +38,11 @@ import { AgentBootstrap } from './agent.bootstrap';
 import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
 
 @Module({
-  imports: [OntologyModule, QueryModule, MulterModule.register({ dest: './uploads' })],
+  imports: [CoreSdkModule, ConversationModule, MulterModule.register({ dest: './uploads' })],
   controllers: [AgentController, FileController],
   providers: [
     { provide: LLM_CLIENT, useFactory: () => new ResilientLlmClient(new DeepSeekLlmClient()) },
     FileParserService,
-    TypeResolver,
     ImportEngine,
     OntologySdkService,
     ConfirmationGate,
@@ -84,7 +82,6 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
         new AgentService(llm, tools, skills, gate),
       inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate],
     },
-    ConversationService,
     AgentBootstrap,
   ],
 })

@@ -5,6 +5,10 @@ export class QuerySkill implements AgentSkill {
   description = '查询和聚合数据：根据自然语言查询对象实例，或对它们做计数/求和/平均等聚合。';
   tools = ['query_objects', 'aggregate_objects', 'get_ontology_schema'];
 
+  activationCondition(_context: SkillContext): boolean {
+    return true;
+  }
+
   systemPrompt(_context: SkillContext): string {
     return `你是一个本体数据平台的AI助手。根据用户的自然语言请求，使用可用的工具来查询和聚合数据。
 
