@@ -5,3 +5,4 @@ export * from './connector';
 export * from './mapping';
 export * from './query';
 export * from './permission';
+export * from './object-edit';

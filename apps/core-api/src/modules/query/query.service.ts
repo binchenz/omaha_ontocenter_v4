@@ -61,6 +61,49 @@ export class QueryService {
     private readonly viewLoader: OntologyViewLoader,
   ) {}
 
+  private get queryTimeoutMs(): number {
+    return parseInt(process.env.QUERY_TIMEOUT_MS ?? '5000', 10);
+  }
+
+  /**
+   * Execute a raw SQL query inside a transaction with SET LOCAL statement_timeout.
+   * If PostgreSQL cancels the query (error code 57014), throws a structured BadRequestException.
+   */
+  private async executeWithTimeout<T>(sql: string, params: unknown[]): Promise<T> {
+    try {
+      const timeoutMs = this.queryTimeoutMs;
+      const result = await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '${timeoutMs}ms'`);
+        return tx.$queryRawUnsafe<T>(sql, ...params);
+      });
+      return result;
+    } catch (err: unknown) {
+      if (this.isQueryCanceled(err)) {
+        throw new BadRequestException({
+          error: {
+            code: 'QUERY_TIMEOUT',
+            message: `Query exceeded the ${this.queryTimeoutMs}ms timeout and was canceled.`,
+            hint: 'Simplify filters, reduce result set, or ask your administrator to increase QUERY_TIMEOUT_MS.',
+          },
+        });
+      }
+      throw err;
+    }
+  }
+
+  private isQueryCanceled(err: unknown): boolean {
+    if (err && typeof err === 'object') {
+      // Prisma wraps PG errors; the code may be on the error itself or nested.
+      const code = (err as Record<string, unknown>).code
+        ?? ((err as Record<string, unknown>).meta as Record<string, unknown> | undefined)?.code;
+      if (code === '57014') return true;
+      // Also check the error message for the cancellation signal.
+      const message = String((err as Record<string, unknown>).message ?? '');
+      if (message.includes('canceling statement due to statement timeout')) return true;
+    }
+    return false;
+  }
+
   async queryObjects(
     user: CurrentUserType,
     req: QueryObjectsRequest,
@@ -88,8 +131,8 @@ export class QueryService {
     });
 
     const [rows, countRows] = await Promise.all([
-      this.prisma.$queryRawUnsafe<RawInstanceRow[]>(planned.sql, ...planned.params),
-      this.prisma.$queryRawUnsafe<{ count: number }[]>(planned.countSql, ...planned.params),
+      this.executeWithTimeout<RawInstanceRow[]>(planned.sql, planned.params),
+      this.executeWithTimeout<{ count: number }[]>(planned.countSql, planned.params),
     ]);
     const total = Number(countRows[0]?.count ?? 0);
 
@@ -188,7 +231,7 @@ export class QueryService {
       permissionPredicates: resolution.predicates,
     });
 
-    const rows = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(planned.sql, ...planned.params);
+    const rows = await this.executeWithTimeout<Record<string, unknown>[]>(planned.sql, planned.params);
 
     // Truncation detection: planner requested LIMIT maxGroups+1; if we got
     // back maxGroups+1 rows, there's at least one more group. Trim to

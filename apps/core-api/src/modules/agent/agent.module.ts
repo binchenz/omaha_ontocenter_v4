@@ -29,6 +29,7 @@ import { CreateRelationshipTool } from './tools/create-relationship.tool';
 import { DeleteRelationshipTool } from './tools/delete-relationship.tool';
 import { LLM_CLIENT } from './llm/llm-client.interface';
 import { DeepSeekLlmClient } from './llm/deepseek-llm-client';
+import { ResilientLlmClient } from './llm/resilient-llm-client';
 import { AgentTool } from './tools/tool.interface';
 import { AgentSkill } from './skills/skill.interface';
 import { QuerySkill } from './skills/query.skill';
@@ -41,7 +42,7 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
   imports: [OntologyModule, QueryModule, MulterModule.register({ dest: './uploads' })],
   controllers: [AgentController, FileController],
   providers: [
-    { provide: LLM_CLIENT, useClass: DeepSeekLlmClient },
+    { provide: LLM_CLIENT, useFactory: () => new ResilientLlmClient(new DeepSeekLlmClient()) },
     FileParserService,
     TypeResolver,
     ImportEngine,
@@ -79,7 +80,7 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
     },
     {
       provide: AgentService,
-      useFactory: (llm: DeepSeekLlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate) =>
+      useFactory: (llm: ResilientLlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate) =>
         new AgentService(llm, tools, skills, gate),
       inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate],
     },
