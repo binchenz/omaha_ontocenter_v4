@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { PrismaClient } from '@omaha/db';
 import { createTestApp, loginAsAdmin } from './test-helpers';
+import { ViewManagerService } from '../src/modules/ontology/view-manager.service';
 
 describe('Derived Property v1 — isHighValue (e2e)', () => {
   let app: INestApplication;
@@ -9,12 +10,14 @@ describe('Derived Property v1 — isHighValue (e2e)', () => {
   let prisma: PrismaClient;
   let tenantId: string;
   let objectTypeId: string;
+  let viewManager: ViewManagerService;
   const seededIds: string[] = [];
 
   beforeAll(async () => {
     app = await createTestApp();
     token = await loginAsAdmin(app);
     prisma = new PrismaClient();
+    viewManager = app.get(ViewManagerService);
 
     const me = await request(app.getHttpServer())
       .get('/auth/me')
@@ -61,6 +64,9 @@ describe('Derived Property v1 — isHighValue (e2e)', () => {
       });
       seededIds.push(row.id);
     }
+
+    // Refresh the materialized view so seeded rows are visible to QueryPlanner (#54)
+    await viewManager.refresh(tenantId, 'dsl_probe_order');
   });
 
   afterAll(async () => {

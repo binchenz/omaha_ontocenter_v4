@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { PrismaClient } from '@omaha/db';
 import { createTestApp, loginAsAdmin } from './test-helpers';
+import { ViewManagerService } from '../src/modules/ontology/view-manager.service';
 
 describe('Derived Property v3 — isFullyPaid (e2e)', () => {
   let app: INestApplication;
@@ -10,12 +11,14 @@ describe('Derived Property v3 — isFullyPaid (e2e)', () => {
   let tenantId: string;
   let orderTypeId: string;
   let paymentTypeId: string;
+  let viewManager: ViewManagerService;
   const seededIds: string[] = [];
 
   beforeAll(async () => {
     app = await createTestApp();
     token = await loginAsAdmin(app);
     prisma = new PrismaClient();
+    viewManager = app.get(ViewManagerService);
 
     const me = await request(app.getHttpServer())
       .get('/auth/me')
@@ -103,6 +106,10 @@ describe('Derived Property v3 — isFullyPaid (e2e)', () => {
     await seedPayment('AGG-P-P1', partialId, 50);
     await seedPayment('AGG-P-O1', overpaidId, 60);
     await seedPayment('AGG-P-O2', overpaidId, 60);
+
+    // Refresh views so seeded rows are visible to QueryPlanner (#54 / #62)
+    await viewManager.refresh(tenantId, 'agg_probe_order');
+    await viewManager.refresh(tenantId, 'agg_probe_payment');
   });
 
   async function seedOrder(ext: string, totalAmount: number): Promise<string> {

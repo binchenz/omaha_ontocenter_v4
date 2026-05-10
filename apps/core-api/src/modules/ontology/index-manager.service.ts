@@ -77,7 +77,7 @@ export class IndexManagerService {
         dropped: toDrop.map((c) => c.indexName).sort(),
         kept: kept.map((c) => c.indexName).sort(),
       };
-    });
+    }, { timeout: 30_000 });
   }
 
   async dropAllFor(tenantId: string, objectTypeId: string): Promise<string[]> {
@@ -96,7 +96,7 @@ export class IndexManagerService {
         where: { tenantId, objectTypeId },
       });
       return rows.map((r) => r.indexName).sort();
-    });
+    }, { timeout: 30_000 });
   }
 }
 

@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { PrismaClient } from '@omaha/db';
 import { createTestApp, loginAsAdmin } from './test-helpers';
+import { ViewManagerService } from '../src/modules/ontology/view-manager.service';
 
 describe('Derived Property v2 — isPaidAt (e2e)', () => {
   let app: INestApplication;
@@ -10,12 +11,14 @@ describe('Derived Property v2 — isPaidAt (e2e)', () => {
   let tenantId: string;
   let orderTypeId: string;
   let paymentTypeId: string;
+  let viewManager: ViewManagerService;
   const seededIds: string[] = [];
 
   beforeAll(async () => {
     app = await createTestApp();
     token = await loginAsAdmin(app);
     prisma = new PrismaClient();
+    viewManager = app.get(ViewManagerService);
 
     const me = await request(app.getHttpServer())
       .get('/auth/me')
@@ -98,6 +101,10 @@ describe('Derived Property v2 — isPaidAt (e2e)', () => {
     await seedPayment(tenantId, 'EXISTS-P-A1', orderAId, 'Success', '2026-05-03T08:00:00Z', 100);
     await seedPayment(tenantId, 'EXISTS-P-B1', orderBId, 'Success', '2026-05-04T12:00:00Z', 200);
     await seedPayment(tenantId, 'EXISTS-P-C1', orderCId, 'Failed', '2026-05-03T09:00:00Z', 300);
+
+    // Refresh views so seeded rows are visible to QueryPlanner (#54 / #62)
+    await viewManager.refresh(tenantId, 'exists_probe_order');
+    await viewManager.refresh(tenantId, 'exists_probe_payment');
   });
 
   async function seedOrder(tid: string, ext: string, amount: number): Promise<string> {
