@@ -1,5 +1,5 @@
 import { SseAgentRunner } from '../sse-agent-runner.service';
-import { AgentEvent } from '../../agent.service';
+import { AgentEvent } from '../../../orchestrator/orchestrator.service';
 
 class FakeResponse {
   public headers: Record<string, string> = {};

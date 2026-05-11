@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { OntologySdkService } from '../sdk/ontology-sdk.service';
+import { CoreSdkService } from '../../sdk/core-sdk.service';
 
 @Injectable()
 export class GetOntologySchemaTool implements AgentTool {
@@ -12,7 +12,7 @@ export class GetOntologySchemaTool implements AgentTool {
   };
   requiresConfirmation = false;
 
-  constructor(private readonly sdk: OntologySdkService) {}
+  constructor(private readonly sdk: CoreSdkService) {}
 
   async execute(_args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
     return this.sdk.getSchema(context.user.tenantId);

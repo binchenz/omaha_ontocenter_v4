@@ -2,8 +2,8 @@ import { Test } from '@nestjs/testing';
 import { AgentModule } from './agent.module';
 import { PrismaModule } from '../../common/prisma.module';
 import { PermissionModule } from '../permission/permission.module';
-import { AgentService } from './agent.service';
-import { OntologySdkService } from './sdk/ontology-sdk.service';
+import { OrchestratorService } from '../orchestrator/orchestrator.service';
+import { CoreSdkService } from '../sdk/core-sdk.service';
 import { ConfirmationGate } from './confirmation/confirmation-gate.service';
 import { ConnectorClient } from './connector/connector-client.service';
 import { ImportEngine } from './sdk/import-engine.service';
@@ -28,8 +28,8 @@ describe('AgentModule (boot smoke test)', () => {
       imports: [PrismaModule, PermissionModule, AgentModule],
     }).compile();
 
-    expect(moduleRef.get(AgentService)).toBeDefined();
-    expect(moduleRef.get(OntologySdkService)).toBeDefined();
+    expect(moduleRef.get(OrchestratorService)).toBeDefined();
+    expect(moduleRef.get(CoreSdkService)).toBeDefined();
     expect(moduleRef.get(ConfirmationGate)).toBeDefined();
     expect(moduleRef.get(ConnectorClient)).toBeDefined();
     expect(moduleRef.get(ImportEngine)).toBeDefined();

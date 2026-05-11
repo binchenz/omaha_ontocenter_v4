@@ -3,8 +3,8 @@ import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
-import { AgentService } from './agent.service';
-import { ConversationService } from './conversation/conversation.service';
+import { OrchestratorService } from '../orchestrator/orchestrator.service';
+import { ConversationService } from '../conversation/conversation.service';
 import { SseAgentRunner } from './sse/sse-agent-runner.service';
 import { ChatDto } from './dto/chat.dto';
 
@@ -12,7 +12,7 @@ import { ChatDto } from './dto/chat.dto';
 @UseGuards(JwtAuthGuard)
 export class AgentController {
   constructor(
-    private readonly agentService: AgentService,
+    private readonly orchestrator: OrchestratorService,
     private readonly conversationService: ConversationService,
     private readonly sseRunner: SseAgentRunner,
   ) {}
@@ -35,7 +35,7 @@ export class AgentController {
   ) {
     await this.sseRunner.stream(
       res,
-      this.agentService.resume({
+      this.orchestrator.resume({
         user,
         conversationId: body.conversationId,
         confirmed: body.confirmed,
@@ -64,7 +64,7 @@ export class AgentController {
 
     await this.sseRunner.stream(
       res,
-      this.agentService.run({
+      this.orchestrator.run({
         user,
         message: dto.message,
         conversationId: conversation.id,

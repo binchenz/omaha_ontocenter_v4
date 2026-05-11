@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Response } from 'express';
-import { AgentEvent } from '../agent.service';
-import { ConversationService } from '../conversation/conversation.service';
+import { AgentEvent } from '../../orchestrator/orchestrator.service';
+import { ConversationService } from '../../conversation/conversation.service';
 
 @Injectable()
 export class SseAgentRunner {

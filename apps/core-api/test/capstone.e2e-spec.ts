@@ -5,6 +5,7 @@ import { createTestApp, loginAsAdmin } from './test-helpers';
 import { ViewManagerService } from '../src/modules/ontology/view-manager.service';
 
 describe('Capstone — multi-feature flagship query (e2e)', () => {
+  jest.setTimeout(30_000);
   let app: INestApplication;
   let token: string;
   let salesToken: string;

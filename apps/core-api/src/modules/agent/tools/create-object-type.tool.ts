@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { OntologySdkService } from '../sdk/ontology-sdk.service';
+import { CoreSdkService } from '../../sdk/core-sdk.service';
 import type { ObjectEdit } from '@omaha/shared-types';
 
 @Injectable()
@@ -31,7 +31,7 @@ export class CreateObjectTypeTool implements AgentTool {
   };
   requiresConfirmation = true;
 
-  constructor(private readonly sdk: OntologySdkService) {}
+  constructor(private readonly sdk: CoreSdkService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<ObjectEdit[]> {
     await this.sdk.createObjectType(context.user.tenantId, args as any);

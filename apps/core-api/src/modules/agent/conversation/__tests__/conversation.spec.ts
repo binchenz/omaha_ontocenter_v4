@@ -1,4 +1,4 @@
-import { ConversationService } from '../conversation.service';
+import { ConversationService } from '../../../conversation/conversation.service';
 
 describe('ConversationService', () => {
   const mockPrisma: any = {

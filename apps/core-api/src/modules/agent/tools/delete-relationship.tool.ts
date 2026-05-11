@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { OntologySdkService } from '../sdk/ontology-sdk.service';
+import { CoreSdkService } from '../../sdk/core-sdk.service';
 
 @Injectable()
 export class DeleteRelationshipTool implements AgentTool {
@@ -16,7 +16,7 @@ export class DeleteRelationshipTool implements AgentTool {
   };
   requiresConfirmation = true;
 
-  constructor(private readonly sdk: OntologySdkService) {}
+  constructor(private readonly sdk: CoreSdkService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
     return this.sdk.deleteRelationship(context.user.tenantId, args as any);

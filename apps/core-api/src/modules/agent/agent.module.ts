@@ -2,14 +2,12 @@ import { Module } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
 import { CoreSdkModule } from '../sdk/core-sdk.module';
 import { ConversationModule } from '../conversation/conversation.module';
+import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { AgentController } from './agent.controller';
 import { FileController } from './file.controller';
-import { AgentService } from './agent.service';
-import { ConversationService } from './conversation/conversation.service';
 import { ConfirmationGate } from './confirmation/confirmation-gate.service';
 import { ConnectorClient } from './connector/connector-client.service';
 import { SseAgentRunner } from './sse/sse-agent-runner.service';
-import { OntologySdkService } from './sdk/ontology-sdk.service';
 import { ImportEngine } from './sdk/import-engine.service';
 import { FileParserService } from './tools/file-parser.service';
 import { QueryObjectsTool } from './tools/query-objects.tool';
@@ -26,7 +24,7 @@ import { ListDbTablesTool } from './tools/list-db-tables.tool';
 import { PreviewDbTableTool } from './tools/preview-db-table.tool';
 import { CreateRelationshipTool } from './tools/create-relationship.tool';
 import { DeleteRelationshipTool } from './tools/delete-relationship.tool';
-import { LLM_CLIENT } from './llm/llm-client.interface';
+import { LLM_CLIENT, LlmClient } from './llm/llm-client.interface';
 import { DeepSeekLlmClient } from './llm/deepseek-llm-client';
 import { ResilientLlmClient } from './llm/resilient-llm-client';
 import { AgentTool } from './tools/tool.interface';
@@ -44,7 +42,6 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
     { provide: LLM_CLIENT, useFactory: () => new ResilientLlmClient(new DeepSeekLlmClient()) },
     FileParserService,
     ImportEngine,
-    OntologySdkService,
     ConfirmationGate,
     ConnectorClient,
     SseAgentRunner,
@@ -77,9 +74,9 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
       useFactory: (): AgentSkill[] => [new QuerySkill(), new DataIngestionSkill(), new OntologyDesignSkill()],
     },
     {
-      provide: AgentService,
-      useFactory: (llm: ResilientLlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate) =>
-        new AgentService(llm, tools, skills, gate),
+      provide: OrchestratorService,
+      useFactory: (llm: LlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate) =>
+        new OrchestratorService(llm, tools, skills, gate),
       inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate],
     },
     AgentBootstrap,

@@ -1,4 +1,4 @@
-import { AgentService, AgentEvent } from './agent.service';
+import { OrchestratorService, AgentEvent } from '../orchestrator/orchestrator.service';
 import { LlmClient, LlmMessage, LlmOptions, LlmResponse, ToolDefinition } from './llm/llm-client.interface';
 import { AgentTool, ToolContext } from './tools/tool.interface';
 import { AgentSkill, SkillContext } from './skills/skill.interface';
@@ -49,15 +49,15 @@ class MockQueryTool implements AgentTool {
   }
 }
 
-describe('AgentService', () => {
-  let service: AgentService;
+describe('OrchestratorService', () => {
+  let service: OrchestratorService;
   let llm: MockLlmClient;
   let queryTool: MockQueryTool;
 
   beforeEach(() => {
     llm = new MockLlmClient();
     queryTool = new MockQueryTool();
-    service = new AgentService(llm, [queryTool]);
+    service = new OrchestratorService(llm, [queryTool]);
   });
 
   it('executes a single tool call and returns text response', async () => {
@@ -173,7 +173,7 @@ describe('AgentService', () => {
       execute: async () => { throw new Error('Connection timeout'); },
     };
 
-    const serviceWithFailingTool = new AgentService(llm, [failingTool]);
+    const serviceWithFailingTool = new OrchestratorService(llm, [failingTool]);
 
     llm.queueResponse({
       type: 'tool_calls',
@@ -210,7 +210,7 @@ describe('AgentService', () => {
       systemPrompt: () => '你是测试助手。只回答测试相关问题。',
     };
 
-    const serviceWithSkill = new AgentService(llm, [queryTool], [skill]);
+    const serviceWithSkill = new OrchestratorService(llm, [queryTool], [skill]);
     llm.queueResponse({ type: 'text', content: 'ok' });
 
     const events: AgentEvent[] = [];
@@ -231,7 +231,7 @@ describe('AgentService', () => {
       execute: async () => ({ success: true }),
     };
 
-    const serviceWithWriteTool = new AgentService(llm, [writeTool]);
+    const serviceWithWriteTool = new OrchestratorService(llm, [writeTool]);
 
     llm.queueResponse({
       type: 'tool_calls',
@@ -278,7 +278,7 @@ describe('AgentService', () => {
       systemPrompt: () => 'Query only.',
     };
 
-    const scopedService = new AgentService(llm, [readTool, writeTool], [skill]);
+    const scopedService = new OrchestratorService(llm, [readTool, writeTool], [skill]);
     llm.queueResponse({ type: 'text', content: 'done' });
 
     for await (const _event of scopedService.run({ user: TEST_USER, message: 'test' })) {}
@@ -308,7 +308,7 @@ describe('AgentService', () => {
         tools: [],
         systemPrompt: () => 'x'.repeat(6500),
       };
-      const fatService = new AgentService(llm, [], [fatSkill]);
+      const fatService = new OrchestratorService(llm, [], [fatSkill]);
       llm.queueResponse({ type: 'text', content: 'ok' });
       for await (const _ of fatService.run({ user: TEST_USER, message: 'hi', conversationId: 'conv-1' })) {}
 
@@ -326,7 +326,7 @@ describe('AgentService', () => {
         tools: [],
         systemPrompt: () => 'x'.repeat(8000),
       };
-      const hugeService = new AgentService(llm, [], [hugeSkill]);
+      const hugeService = new OrchestratorService(llm, [], [hugeSkill]);
       llm.queueResponse({ type: 'text', content: 'ok' });
       for await (const _ of hugeService.run({ user: TEST_USER, message: 'hi', conversationId: 'conv-2' })) {}
 

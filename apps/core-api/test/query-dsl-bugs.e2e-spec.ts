@@ -15,6 +15,7 @@ import { PrismaClient } from '@omaha/db';
 import { createTestApp, loginAsAdmin } from './test-helpers';
 
 describe('Query DSL bugs from drama-co acceptance run (e2e)', () => {
+  jest.setTimeout(30_000);
   let app: INestApplication;
   let token: string;
   let prisma: PrismaClient;

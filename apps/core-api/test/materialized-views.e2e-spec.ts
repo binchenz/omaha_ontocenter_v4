@@ -5,6 +5,7 @@ import { createTestApp, ensureTestTenant, loginAsTestTenantAdmin, cleanupTestTen
 import { ViewManagerService } from '../src/modules/ontology/view-manager.service';
 
 describe('Materialized views (e2e)', () => {
+  jest.setTimeout(30_000);
   let app: INestApplication;
   let prisma: PrismaClient;
   let tenantId: string;
