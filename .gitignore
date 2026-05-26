@@ -5,3 +5,6 @@ dist/
 .turbo/
 .superpowers/
 uploads/
+.DS_Store
+.claude/
+scripts/test-results/
