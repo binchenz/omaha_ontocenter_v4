@@ -76,6 +76,28 @@ export class CoreSdkService {
     };
   }
 
+  async getSchemaSummary(tenantId: string): Promise<{ summary: string; typeNames: string[] }> {
+    const schema = await this.getSchema(tenantId);
+    const typeNames = schema.types.map(t => t.name);
+    const lines: string[] = ['数据模型：'];
+    const maxTypes = 15;
+    for (const t of schema.types.slice(0, maxTypes)) {
+      const props = t.properties
+        .filter(p => p.filterable || p.sortable)
+        .map(p => `${p.name}:${p.type}${p.filterable ? '✓' : ''}${p.sortable ? '↕' : ''}`)
+        .join(', ');
+      lines.push(`- ${t.name}(${props})`);
+    }
+    if (schema.relationships.length > 0) {
+      const rels = schema.relationships.map(r => `${r.sourceType}→${r.targetType}(${r.name})`).join(', ');
+      lines.push(`关系：${rels}`);
+    }
+    if (schema.types.length > maxTypes) {
+      lines.push(`（共${schema.types.length}个类型，更多请调用 get_ontology_schema）`);
+    }
+    return { summary: lines.join('\n'), typeNames };
+  }
+
   // --- Query ---
 
   async queryObjects(user: CurrentUserType, args: {

@@ -5,6 +5,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { ConversationService } from '../conversation/conversation.service';
+import { CoreSdkService } from '../sdk/core-sdk.service';
 import { SseAgentRunner } from './sse/sse-agent-runner.service';
 import { ChatDto } from './dto/chat.dto';
 
@@ -15,6 +16,7 @@ export class AgentController {
     private readonly orchestrator: OrchestratorService,
     private readonly conversationService: ConversationService,
     private readonly sseRunner: SseAgentRunner,
+    private readonly sdk: CoreSdkService,
   ) {}
 
   @Get('conversations')
@@ -62,6 +64,8 @@ export class AgentController {
       content: dto.message,
     });
 
+    const { summary, typeNames } = await this.sdk.getSchemaSummary(user.tenantId);
+
     await this.sseRunner.stream(
       res,
       this.orchestrator.run({
@@ -70,6 +74,8 @@ export class AgentController {
         conversationId: conversation.id,
         history,
         fileId: dto.fileId,
+        schemaSummary: summary,
+        objectTypeNames: typeNames,
       }),
       conversation.id,
     );

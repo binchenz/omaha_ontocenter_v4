@@ -31,6 +31,13 @@ export class QuerySkill implements AgentSkill {
 - 只使用标记为 sortable 的字段作为 query_objects 的排序字段
 - query_objects 的 contains 当前对 json/array 字段（如 tags）不工作；遇到 PROPERTY_NOT_FILTERABLE 时改用 search 参数做全文搜索
 - aggregate_objects 的 groupBy 同样不支持 json/array 字段（PROPERTY_NOT_GROUPABLE），改用 search 后由 Agent 自己整理
-- 当用户说"大于 X"、"高于 X"、"超过 X"时，倾向用 gte 操作符（含 X），除非明确说"严格大于"或"不含 X"`;
+- 当用户说"大于 X"、"高于 X"、"超过 X"时，倾向用 gte 操作符（含 X），除非明确说"严格大于"或"不含 X"
+
+示例：
+用户："距离超过5公里的接力订单平均耗时多少？"
+→ aggregate_objects({ objectType: "delivery_order", filters: [{ field: "totalDistance", operator: "gte", value: 5 }, { field: "deliveryMode", operator: "eq", value: "relay" }], metrics: [{ kind: "avg", field: "totalTime", alias: "avgTime" }] })
+
+用户："各中转站处理了多少无人机配送？按数量降序排前5"
+→ aggregate_objects({ objectType: "delivery_leg", filters: [{ field: "legType", operator: "eq", value: "drone" }], groupBy: ["stationName"], metrics: [{ kind: "count", alias: "n" }], orderBy: [{ kind: "metric", by: "n", direction: "desc" }], maxGroups: 5 })`;
   }
 }
