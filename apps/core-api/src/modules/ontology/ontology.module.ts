@@ -4,10 +4,11 @@ import { OntologyService } from './ontology.service';
 import { IndexManagerService } from './index-manager.service';
 import { OntologyViewLoader } from './ontology-view-loader.service';
 import { ViewManagerService } from './view-manager.service';
+import { ArtifactManagerService } from './artifact-manager.service';
 
 @Module({
   controllers: [OntologyController],
-  providers: [OntologyService, IndexManagerService, OntologyViewLoader, ViewManagerService],
-  exports: [OntologyService, IndexManagerService, OntologyViewLoader, ViewManagerService],
+  providers: [OntologyService, IndexManagerService, OntologyViewLoader, ViewManagerService, ArtifactManagerService],
+  exports: [OntologyService, IndexManagerService, OntologyViewLoader, ViewManagerService, ArtifactManagerService],
 })
 export class OntologyModule {}

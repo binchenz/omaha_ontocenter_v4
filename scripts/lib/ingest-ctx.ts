@@ -1,14 +1,13 @@
 import { PrismaClient } from '@omaha/db';
 import type { IngestCtx } from './run-recipe';
-import type { FilmAiV2SourceReader } from './film-ai-v2-source-reader';
 import type { CandidateCharacter } from './entity-resolver';
 
-export function createIngestCtx(
+export function createIngestCtx<TReader = unknown>(
   prisma: PrismaClient,
   tenantId: string,
-  reader: FilmAiV2SourceReader,
+  reader: TReader,
   sourceData: Record<string, unknown[]> = {},
-): IngestCtx {
+): IngestCtx<TReader> {
   const externalIdMaps = new Map<string, Record<string, string>>();
   const candidatePools = new Map<string, Map<string, CandidateCharacter[]>>();
 

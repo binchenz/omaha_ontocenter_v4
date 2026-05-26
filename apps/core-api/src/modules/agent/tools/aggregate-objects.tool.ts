@@ -76,8 +76,8 @@ export class AggregateObjectsTool implements AgentTool {
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
     return this.sdk.aggregateObjects(context.user as any, {
       objectType: args.objectType as string,
-      filters: (args.filters as any[]) ?? [],
-      groupBy: (args.groupBy as string[]) ?? [],
+      filters: args.filters as any[],
+      groupBy: args.groupBy as string[],
       metrics: args.metrics as any[],
       orderBy: args.orderBy as any[],
       maxGroups: args.maxGroups as number | undefined,

@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { ImportEngine, UPLOAD_DIR } from '../sdk/import-engine.service';
-import * as path from 'path';
+import { CoreSdkService } from '../../sdk/core-sdk.service';
 
 @Injectable()
 export class ImportDataTool implements AgentTool {
@@ -19,14 +18,9 @@ export class ImportDataTool implements AgentTool {
   };
   requiresConfirmation = true;
 
-  constructor(private readonly importEngine: ImportEngine) {}
+  constructor(private readonly sdk: CoreSdkService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
-    return this.importEngine.importFile(context.user.tenantId, {
-      filePath: path.join(UPLOAD_DIR, args.fileId as string),
-      objectType: args.objectType as string,
-      externalIdColumn: args.externalIdColumn as string,
-      labelColumn: args.labelColumn as string,
-    });
+    return this.sdk.importData(context.user.tenantId, args as any);
   }
 }

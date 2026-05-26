@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { OntologyService } from './ontology.service';
-import { IndexManagerService } from './index-manager.service';
-import { ViewManagerService } from './view-manager.service';
+import { ArtifactManagerService } from './artifact-manager.service';
 import { PrismaService } from '@omaha/db';
 import { NotFoundException } from '@nestjs/common';
 
@@ -43,8 +42,7 @@ describe('OntologyService', () => {
       providers: [
         OntologyService,
         { provide: PrismaService, useValue: prisma },
-        { provide: IndexManagerService, useValue: { reconcile: jest.fn().mockResolvedValue({ created: [], dropped: [], kept: [] }), dropAllFor: jest.fn().mockResolvedValue([]) } },
-        { provide: ViewManagerService, useValue: { createOrReplace: jest.fn().mockResolvedValue('mv_name'), drop: jest.fn().mockResolvedValue(undefined) } },
+        { provide: ArtifactManagerService, useValue: { reconcile: jest.fn().mockResolvedValue({ indexes: { created: [], dropped: [], kept: [] }, viewName: 'mv_name' }), dropAll: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
     service = module.get<OntologyService>(OntologyService);

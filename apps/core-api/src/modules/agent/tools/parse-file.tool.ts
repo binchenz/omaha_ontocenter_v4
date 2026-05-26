@@ -1,8 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { AgentTool, ToolContext } from './tool.interface';
-import { FileParserService } from './file-parser.service';
-import { UPLOAD_DIR } from '../sdk/import-engine.service';
-import * as path from 'path';
+import { AgentTool } from './tool.interface';
+import { CoreSdkService } from '../../sdk/core-sdk.service';
 
 @Injectable()
 export class ParseFileTool implements AgentTool {
@@ -17,11 +15,9 @@ export class ParseFileTool implements AgentTool {
   };
   requiresConfirmation = false;
 
-  constructor(private readonly parser: FileParserService) {}
+  constructor(private readonly sdk: CoreSdkService) {}
 
   async execute(args: Record<string, unknown>): Promise<unknown> {
-    const fileId = args.fileId as string;
-    const filePath = path.join(UPLOAD_DIR, fileId);
-    return this.parser.parse(filePath);
+    return this.sdk.parseFile(args.fileId as string);
   }
 }

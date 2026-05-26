@@ -9,15 +9,13 @@ import {
 } from '@omaha/shared-types';
 import { analyze } from '@omaha/dsl';
 import { assertTenantOwnership } from '../../common/helpers/assert-tenant-ownership';
-import { IndexManagerService } from './index-manager.service';
-import { ViewManagerService } from './view-manager.service';
+import { ArtifactManagerService } from './artifact-manager.service';
 
 @Injectable()
 export class OntologyService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly indexManager: IndexManagerService,
-    private readonly viewManager: ViewManagerService,
+    private readonly artifactManager: ArtifactManagerService,
   ) {}
 
   async listObjectTypes(tenantId: string) {
@@ -44,8 +42,7 @@ export class OntologyService {
         derivedProperties: (dto.derivedProperties ?? []) as unknown as Prisma.InputJsonValue,
       },
     });
-    await this.indexManager.reconcile(tenantId, created.id);
-    await this.viewManager.createOrReplace(tenantId, dto.name, dto.properties).catch(() => {});
+    await this.artifactManager.reconcile(tenantId, created.id, dto.name, dto.properties);
     return created;
   }
 
@@ -66,15 +63,13 @@ export class OntologyService {
         version: { increment: 1 },
       },
     });
-    await this.indexManager.reconcile(tenantId, id);
-    await this.viewManager.createOrReplace(tenantId, updated.name, nextProps).catch(() => {});
+    await this.artifactManager.reconcile(tenantId, id, updated.name, nextProps);
     return updated;
   }
 
   async deleteObjectType(tenantId: string, id: string) {
     const ot = await this.getObjectType(tenantId, id);
-    await this.indexManager.dropAllFor(tenantId, id);
-    await this.viewManager.drop(tenantId, ot!.name).catch(() => {});
+    await this.artifactManager.dropAll(tenantId, id, ot!.name);
     return this.prisma.objectType.delete({ where: { id } });
   }
 

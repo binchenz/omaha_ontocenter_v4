@@ -36,6 +36,9 @@ describe('CoreSdkService', () => {
       mockQueryService as any,
       mockPrisma,
       mockTypeResolver as any,
+      {} as any,
+      {} as any,
+      {} as any,
     );
   });
 

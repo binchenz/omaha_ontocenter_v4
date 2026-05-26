@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { ConnectorClient } from '../connector/connector-client.service';
+import { CoreSdkService } from '../../sdk/core-sdk.service';
 
 @Injectable()
 export class PreviewDbTableTool implements AgentTool {
@@ -16,45 +16,9 @@ export class PreviewDbTableTool implements AgentTool {
   };
   requiresConfirmation = false;
 
-  constructor(private readonly connectorClient: ConnectorClient) {}
+  constructor(private readonly sdk: CoreSdkService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
-    const tableName = args.tableName as string;
-
-    try {
-      const connector = await this.connectorClient.getConnection(args.connectorId as string, context.user.tenantId);
-
-      if (connector.type === 'postgresql') {
-        const cols = await this.connectorClient.query(
-          connector,
-          "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position",
-          [tableName],
-        );
-        const sampleRows = await this.connectorClient.query(connector, `SELECT * FROM "${tableName}" LIMIT 5`);
-        return {
-          columns: cols.map((r: any) => ({ name: r.column_name, dbType: r.data_type })),
-          sampleRows,
-          totalEstimate: null,
-        };
-      }
-
-      if (connector.type === 'mysql') {
-        const cols = await this.connectorClient.query(
-          connector,
-          'SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position',
-          [connector.config.database, tableName],
-        );
-        const sampleRows = await this.connectorClient.query(connector, `SELECT * FROM \`${tableName}\` LIMIT 5`);
-        return {
-          columns: cols.map((r: any) => ({ name: r.COLUMN_NAME || r.column_name, dbType: r.DATA_TYPE || r.data_type })),
-          sampleRows,
-          totalEstimate: null,
-        };
-      }
-
-      return { error: `不支持的数据库类型: ${connector.type}` };
-    } catch (err: any) {
-      return { error: `预览失败: ${err.message}` };
-    }
+    return this.sdk.previewDbTable(context.user.tenantId, args.connectorId as string, args.tableName as string);
   }
 }

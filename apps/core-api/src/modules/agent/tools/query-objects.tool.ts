@@ -42,11 +42,11 @@ export class QueryObjectsTool implements AgentTool {
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
     return this.sdk.queryObjects(context.user as any, {
       objectType: args.objectType as string,
-      filters: (args.filters as any[]) ?? [],
+      filters: args.filters as any[],
       sort: args.sort as any,
-      include: (args.include as string[]) ?? [],
-      page: (args.page as number) ?? 1,
-      pageSize: (args.pageSize as number) ?? 20,
+      include: args.include as string[],
+      page: args.page as number,
+      pageSize: args.pageSize as number,
     });
   }
 }

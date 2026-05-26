@@ -6,10 +6,7 @@ import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { AgentController } from './agent.controller';
 import { FileController } from './file.controller';
 import { ConfirmationGate } from './confirmation/confirmation-gate.service';
-import { ConnectorClient } from './connector/connector-client.service';
 import { SseAgentRunner } from './sse/sse-agent-runner.service';
-import { ImportEngine } from './sdk/import-engine.service';
-import { FileParserService } from './tools/file-parser.service';
 import { QueryObjectsTool } from './tools/query-objects.tool';
 import { AggregateObjectsTool } from './tools/aggregate-objects.tool';
 import { GetOntologySchemaTool } from './tools/get-ontology-schema.tool';
@@ -40,10 +37,7 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
   controllers: [AgentController, FileController],
   providers: [
     { provide: LLM_CLIENT, useFactory: () => new ResilientLlmClient(new DeepSeekLlmClient()) },
-    FileParserService,
-    ImportEngine,
     ConfirmationGate,
-    ConnectorClient,
     SseAgentRunner,
     QueryObjectsTool,
     AggregateObjectsTool,

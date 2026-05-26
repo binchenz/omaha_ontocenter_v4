@@ -1,5 +1,4 @@
 import { PrismaClient } from '@omaha/db';
-import type { FilmAiV2SourceReader } from './film-ai-v2-source-reader';
 import type { InstanceInput, ImportResult } from './object-instance-importer';
 import type { CandidateCharacter } from './entity-resolver';
 import { resolveCharacterName } from './entity-resolver';
@@ -8,10 +7,10 @@ import { resolveCharacterName } from './entity-resolver';
 // Ctx — flat shape passed through every recipe run.
 // ============================================================================
 
-export interface IngestCtx {
+export interface IngestCtx<TReader = unknown> {
   prisma: PrismaClient;
   tenantId: string;
-  reader: FilmAiV2SourceReader;
+  reader: TReader;
 
   /**
    * Pre-loaded source data, keyed arbitrarily (typically the recipe's objectType
