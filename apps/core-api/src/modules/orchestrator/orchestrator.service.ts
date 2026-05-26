@@ -81,14 +81,8 @@ export class OrchestratorService {
         yield { type: 'done', conversationId: input.conversationId };
         return;
       }
-      try {
-        const result = await tool.execute(pending.args, { user: input.user });
-        yield { type: 'tool_result', id: pending.toolCallId, name: pending.toolName, data: result };
-        messages.push({ role: 'tool', content: formatToolResultForLlm(result), tool_call_id: pending.toolCallId });
-      } catch (err: any) {
-        const errorPayload = { error: err.message ?? 'Tool execution failed' };
-        messages.push({ role: 'tool', content: formatToolResultForLlm(errorPayload), tool_call_id: pending.toolCallId });
-      }
+      const event = await this.executeTool(tool, pending.args, pending.toolCallId, { user: input.user }, messages);
+      if (event) yield event;
     } else {
       const rejection = input.comment
         ? `用户拒绝了操作 ${pending.toolName}，原因：${input.comment}`
@@ -104,6 +98,7 @@ export class OrchestratorService {
     const toolDefs: ToolDefinition[] = this.tools
       .filter(t => allowedToolNames.has(t.name))
       .map(t => ({ name: t.name, description: t.description, parameters: t.parameters }));
+    const context: ToolContext = { user: input.user };
 
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
       const response = await this.llm.chatWithTools(messages, toolDefs);
@@ -122,8 +117,6 @@ export class OrchestratorService {
           function: { name: c.name, arguments: JSON.stringify(c.arguments) },
         })),
       });
-
-      let pendingConfirmation = false;
 
       for (const call of response.calls) {
         yield { type: 'tool_call', id: call.id, name: call.name, args: call.arguments };
@@ -150,21 +143,13 @@ export class OrchestratorService {
             args: call.arguments,
             message: `即将执行 ${call.name}，参数：${JSON.stringify(call.arguments)}`,
           };
-          pendingConfirmation = true;
-          break;
+          yield { type: 'done', conversationId: input.conversationId ?? 'new' };
+          return;
         }
 
-        try {
-          const result = await tool.execute(call.arguments, { user: input.user });
-          yield { type: 'tool_result', id: call.id, name: call.name, data: result };
-          messages.push({ role: 'tool', content: formatToolResultForLlm(result), tool_call_id: call.id });
-        } catch (err: any) {
-          const errorPayload = { error: err.message ?? 'Tool execution failed' };
-          messages.push({ role: 'tool', content: formatToolResultForLlm(errorPayload), tool_call_id: call.id });
-        }
+        const event = await this.executeTool(tool, call.arguments, call.id, context, messages);
+        if (event) yield event;
       }
-
-      if (pendingConfirmation) break;
 
       if (i === MAX_TOOL_ITERATIONS - 1) {
         yield { type: 'error', message: 'Agent 达到最大工具调用次数限制，请简化你的请求。' };
@@ -191,6 +176,23 @@ export class OrchestratorService {
     if (this.skills.length === 0) return base;
     const skillPrompts = this.skills.map(s => s.systemPrompt({ tenantId: '' })).join('\n\n');
     return `${base}\n\n${skillPrompts}`;
+  }
+
+  private async executeTool(
+    tool: AgentTool,
+    args: Record<string, unknown>,
+    callId: string,
+    context: ToolContext,
+    messages: LlmMessage[],
+  ): Promise<AgentEvent | null> {
+    try {
+      const result = await tool.execute(args, context);
+      messages.push({ role: 'tool', content: formatToolResultForLlm(result), tool_call_id: callId });
+      return { type: 'tool_result', id: callId, name: tool.name, data: result };
+    } catch (err: any) {
+      messages.push({ role: 'tool', content: formatToolResultForLlm({ error: err.message ?? 'Tool execution failed' }), tool_call_id: callId });
+      return null;
+    }
   }
 
   private checkPromptBudget(prompt: string, conversationId?: string): void {

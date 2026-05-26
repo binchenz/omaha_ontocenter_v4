@@ -60,12 +60,7 @@ export class TestScenarioBuilder {
     const viewManager = app.get(ViewManagerService);
     const typeIds = new Map<string, string>();
 
-    for (const spec of this.types) {
-      await prisma.objectInstance.deleteMany({ where: { tenantId, objectType: spec.name } });
-      const existing = await prisma.objectType.findFirst({ where: { tenantId, name: spec.name } });
-      if (existing) await prisma.objectType.delete({ where: { id: existing.id } });
-      await viewManager.drop(tenantId, spec.name).catch(() => {});
-    }
+    await this.cleanupTypes(prisma, viewManager, tenantId);
 
     for (const spec of this.types) {
       const res = await request(app.getHttpServer())
@@ -92,23 +87,24 @@ export class TestScenarioBuilder {
     }
 
     if (this.refreshViews) {
-      for (const spec of this.types) {
-        await viewManager.refresh(tenantId, spec.name);
-      }
+      await Promise.all(this.types.map(spec => viewManager.refresh(tenantId, spec.name)));
     }
 
     const teardown = async () => {
-      for (const spec of this.types) {
-        await prisma.objectInstance.deleteMany({ where: { tenantId, objectType: spec.name } });
-        const existing = await prisma.objectType.findFirst({ where: { tenantId, name: spec.name } });
-        if (existing) await prisma.objectType.delete({ where: { id: existing.id } });
-        await viewManager.drop(tenantId, spec.name).catch(() => {});
-      }
+      await this.cleanupTypes(prisma, viewManager, tenantId);
       await cleanupTestTenant(app);
       await prisma.$disconnect();
       await app.close();
     };
 
     return { app, prisma, tenantId, token, viewManager, typeIds, teardown };
+  }
+
+  private async cleanupTypes(prisma: PrismaClient, viewManager: ViewManagerService, tenantId: string): Promise<void> {
+    await Promise.all(this.types.map(async spec => {
+      await prisma.objectInstance.deleteMany({ where: { tenantId, objectType: spec.name } });
+      await prisma.objectType.deleteMany({ where: { tenantId, name: spec.name } });
+      await viewManager.drop(tenantId, spec.name).catch(() => {});
+    }));
   }
 }

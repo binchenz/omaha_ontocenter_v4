@@ -24,6 +24,18 @@ export interface OntologySchema {
   }>;
 }
 
+type PropertyType = 'string' | 'number' | 'boolean' | 'date' | 'json';
+
+function mapPropertyDto(p: { name: string; type: string; label: string; filterable?: boolean; sortable?: boolean }) {
+  return {
+    name: p.name,
+    type: p.type as PropertyType,
+    label: p.label,
+    filterable: p.filterable,
+    sortable: p.sortable,
+  };
+}
+
 @Injectable()
 export class CoreSdkService {
   constructor(
@@ -74,14 +86,7 @@ export class CoreSdkService {
     page?: number;
     pageSize?: number;
   }) {
-    return this.queryService.queryObjects(user, {
-      objectType: args.objectType,
-      filters: args.filters ?? [],
-      sort: args.sort,
-      include: args.include ?? [],
-      page: args.page ?? 1,
-      pageSize: args.pageSize ?? 20,
-    });
+    return this.queryService.queryObjects(user, args);
   }
 
   async aggregateObjects(user: CurrentUserType, args: {
@@ -93,15 +98,7 @@ export class CoreSdkService {
     maxGroups?: number;
     pageToken?: string;
   }) {
-    return this.queryService.aggregateObjects(user, {
-      objectType: args.objectType,
-      filters: args.filters ?? [],
-      groupBy: args.groupBy ?? [],
-      metrics: args.metrics,
-      orderBy: args.orderBy,
-      maxGroups: args.maxGroups,
-      pageToken: args.pageToken,
-    });
+    return this.queryService.aggregateObjects(user, args);
   }
 
   // --- Ontology ---
@@ -114,13 +111,7 @@ export class CoreSdkService {
     const result = await this.ontologyService.createObjectType(tenantId, {
       name: dto.name,
       label: dto.label,
-      properties: dto.properties.map(p => ({
-        name: p.name,
-        type: p.type as 'string' | 'number' | 'boolean' | 'date' | 'json',
-        label: p.label,
-        filterable: p.filterable,
-        sortable: p.sortable,
-      })),
+      properties: dto.properties.map(mapPropertyDto),
       derivedProperties: [],
     });
     this.typeResolver.invalidate(tenantId);
@@ -135,13 +126,7 @@ export class CoreSdkService {
     const typeId = await this.typeResolver.resolve(tenantId, params.objectTypeName);
     return this.ontologyService.updateObjectType(tenantId, typeId, {
       ...(params.label ? { label: params.label } : {}),
-      properties: params.properties.map(p => ({
-        name: p.name,
-        type: p.type as 'string' | 'number' | 'boolean' | 'date' | 'json',
-        label: p.label,
-        filterable: p.filterable,
-        sortable: p.sortable,
-      })),
+      properties: params.properties.map(mapPropertyDto),
     });
   }
 
