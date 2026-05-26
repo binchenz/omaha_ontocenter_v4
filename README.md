@@ -79,8 +79,36 @@ pnpm tsx demo-ecommerce/seed-signal.ts
 | [数据接入](docs/guide/data-ingestion.md) | [Data Ingestion](docs/guide/data-ingestion.en.md) |
 | [演示指南](docs/guide/demo.md) | [Demo Guide](docs/guide/demo.en.md) |
 | [生产部署](docs/guide/deployment.md) | [Deployment](docs/guide/deployment.en.md) |
+| [外部 Agent 集成](docs/integrations/ontocenter-skill/SKILL.md) | [Agent Integration](docs/adr/0021-mcp-server-external-agent-integration.md) |
 | [领域词汇表](CONTEXT.md) | [Domain Glossary](CONTEXT.md) |
 | [架构决策记录](docs/adr/) | [Architecture Decision Records](docs/adr/) |
+
+---
+
+## 外部 Agent 集成 / Agent Integration
+
+支持 Claude Code、Cursor、Codex 等外部 AI Agent 接入 OntoCenter 查询和管理数据。
+
+External AI agents (Claude Code, Cursor, Codex) can integrate with OntoCenter to query and manage data.
+
+### Claude Code Skill（即刻可用 / Ready to use）
+
+```bash
+cp -r docs/integrations/ontocenter-skill ~/.claude/skills/ontocenter
+```
+
+配置环境变量后即可在 Claude Code 中直接查询业务数据：
+
+```bash
+export ONTOCENTER_URL=http://localhost:3001
+export ONTOCENTER_EMAIL=admin@demo.com
+export ONTOCENTER_PASSWORD=admin123
+export ONTOCENTER_TENANT=demo
+```
+
+### MCP Server（规划中 / Planned for v0.2.0）
+
+标准 MCP 协议集成，支持 tool 自动发现和权限分层。详见 [ADR-0021](docs/adr/0021-mcp-server-external-agent-integration.md)。
 
 ---
 
