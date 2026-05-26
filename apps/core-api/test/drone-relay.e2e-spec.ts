@@ -291,6 +291,231 @@ describe('Drone-Rider Relay (e2e)', () => {
     });
   });
 
+  describe('query accuracy: multi-condition filters', () => {
+    const sql = (query: string) => prisma.$queryRawUnsafe(query) as Promise<any[]>;
+
+    it('relay + distance>5 + delivered: API matches raw SQL count', async () => {
+      const rows = await sql(`
+        SELECT count(*) as count FROM object_instances
+        WHERE tenant_id = '${tenantId}' AND object_type = 'delivery_order' AND deleted_at IS NULL
+          AND (properties->>'deliveryMode') = 'relay'
+          AND (properties->>'totalDistance')::numeric > 5
+          AND (properties->>'status') = 'delivered'`);
+      const expected = Number(rows[0].count);
+
+      const res = await request(app.getHttpServer())
+        .post('/query/objects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'delivery_order',
+          filters: [
+            { field: 'deliveryMode', operator: 'eq', value: 'relay' },
+            { field: 'totalDistance', operator: 'gt', value: 5 },
+            { field: 'status', operator: 'eq', value: 'delivered' },
+          ],
+          pageSize: 1,
+        })
+        .expect(201);
+      expect(res.body.meta.total).toBe(expected);
+    });
+
+    it('rider_only + distance<3 + pending: API matches raw SQL count', async () => {
+      const rows = await sql(`
+        SELECT count(*) as count FROM object_instances
+        WHERE tenant_id = '${tenantId}' AND object_type = 'delivery_order' AND deleted_at IS NULL
+          AND (properties->>'deliveryMode') = 'rider_only'
+          AND (properties->>'totalDistance')::numeric < 3
+          AND (properties->>'status') = 'pending'`);
+      const expected = Number(rows[0].count);
+
+      const res = await request(app.getHttpServer())
+        .post('/query/objects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'delivery_order',
+          filters: [
+            { field: 'deliveryMode', operator: 'eq', value: 'rider_only' },
+            { field: 'totalDistance', operator: 'lt', value: 3 },
+            { field: 'status', operator: 'eq', value: 'pending' },
+          ],
+          pageSize: 1,
+        })
+        .expect(201);
+      expect(res.body.meta.total).toBe(expected);
+    });
+
+    it('drone legs at station-05 with waitTime > 5: count matches', async () => {
+      const rows = await sql(`
+        SELECT count(*) as count FROM object_instances
+        WHERE tenant_id = '${tenantId}' AND object_type = 'delivery_leg' AND deleted_at IS NULL
+          AND (properties->>'legType') = 'drone'
+          AND (properties->>'stationName') = 'station-05'
+          AND (properties->>'waitTime')::numeric > 5`);
+      const expected = Number(rows[0].count);
+
+      const res = await request(app.getHttpServer())
+        .post('/query/objects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'delivery_leg',
+          filters: [
+            { field: 'legType', operator: 'eq', value: 'drone' },
+            { field: 'stationName', operator: 'eq', value: 'station-05' },
+            { field: 'waitTime', operator: 'gt', value: 5 },
+          ],
+          pageSize: 1,
+        })
+        .expect(201);
+      expect(res.body.meta.total).toBe(expected);
+    });
+  });
+
+  describe('query accuracy: aggregate + filter + orderBy', () => {
+    const sql = (query: string) => prisma.$queryRawUnsafe(query) as Promise<any[]>;
+
+    it('avg totalTime by mode with distance>5: matches raw SQL', async () => {
+      const rows = await sql(`
+        SELECT (properties->>'deliveryMode') as mode, avg((properties->>'totalTime')::numeric) as avg_time
+        FROM object_instances
+        WHERE tenant_id = '${tenantId}' AND object_type = 'delivery_order' AND deleted_at IS NULL
+          AND (properties->>'totalDistance')::numeric > 5
+        GROUP BY (properties->>'deliveryMode')`);
+      const expectedByMode = Object.fromEntries(rows.map((r: any) => [r.mode, Number(Number(r.avg_time).toFixed(4))]));
+
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'delivery_order',
+          filters: [{ field: 'totalDistance', operator: 'gt', value: 5 }],
+          groupBy: ['deliveryMode'],
+          metrics: [{ kind: 'avg', field: 'totalTime', alias: 'avgTime' }],
+        })
+        .expect(201);
+
+      for (const group of res.body.groups) {
+        const apiVal = Number(Number(group.metrics.avgTime).toFixed(4));
+        expect(apiVal).toBe(expectedByMode[group.key.deliveryMode]);
+      }
+    });
+
+    it('sum + count per station ordered by sum desc: matches raw SQL', async () => {
+      const rows = await sql(`
+        SELECT (properties->>'stationName') as station, sum((properties->>'waitTime')::numeric) as total_wait, count(*) as n
+        FROM object_instances
+        WHERE tenant_id = '${tenantId}' AND object_type = 'delivery_leg' AND deleted_at IS NULL
+          AND (properties->>'legType') = 'drone'
+        GROUP BY (properties->>'stationName')
+        ORDER BY total_wait DESC LIMIT 5`);
+
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'delivery_leg',
+          filters: [{ field: 'legType', operator: 'eq', value: 'drone' }],
+          groupBy: ['stationName'],
+          metrics: [
+            { kind: 'sum', field: 'waitTime', alias: 'totalWait' },
+            { kind: 'count', alias: 'n' },
+          ],
+          orderBy: [{ kind: 'metric', by: 'totalWait', direction: 'desc' }],
+          maxGroups: 5,
+        })
+        .expect(201);
+
+      expect(res.body.groups).toHaveLength(5);
+      for (let i = 0; i < 5; i++) {
+        expect(res.body.groups[i].key.stationName).toBe(rows[i].station);
+        expect(Number(res.body.groups[i].metrics.totalWait)).toBeCloseTo(Number(rows[i].total_wait), 2);
+        expect(Number(res.body.groups[i].metrics.n)).toBe(Number(rows[i].n));
+      }
+    });
+
+    it('countDistinct carriers per station: values match raw SQL', async () => {
+      const rows = await sql(`
+        SELECT (properties->>'stationName') as station, count(DISTINCT (properties->>'carrier')) as n_carriers
+        FROM object_instances
+        WHERE tenant_id = '${tenantId}' AND object_type = 'delivery_leg' AND deleted_at IS NULL
+          AND (properties->>'legType') = 'drone'
+        GROUP BY (properties->>'stationName')
+        ORDER BY n_carriers DESC LIMIT 3`);
+
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'delivery_leg',
+          filters: [{ field: 'legType', operator: 'eq', value: 'drone' }],
+          groupBy: ['stationName'],
+          metrics: [{ kind: 'countDistinct', field: 'carrier', alias: 'nCarriers' }],
+          orderBy: [{ kind: 'metric', by: 'nCarriers', direction: 'desc' }],
+          maxGroups: 3,
+        })
+        .expect(201);
+
+      const apiMap = Object.fromEntries(
+        res.body.groups.map((g: any) => [g.key.stationName, Number(g.metrics.nCarriers)]),
+      );
+      for (const row of rows) {
+        expect(apiMap[row.station]).toBe(Number(row.n_carriers));
+      }
+    });
+  });
+
+  describe('query accuracy: cross-object queries', () => {
+    const sql = (query: string) => prisma.$queryRawUnsafe(query) as Promise<any[]>;
+
+    it('orders from a specific merchant: count matches raw SQL', async () => {
+      const merchant = await prisma.objectInstance.findFirst({
+        where: { tenantId, objectType: 'merchant' },
+        select: { properties: true },
+      });
+      const merchantName = (merchant!.properties as any).name;
+
+      const rows = await sql(`
+        SELECT count(*) as count FROM object_instances
+        WHERE tenant_id = '${tenantId}' AND object_type = 'delivery_order' AND deleted_at IS NULL
+          AND (properties->>'merchantName') = '${merchantName}'`);
+      const expected = Number(rows[0].count);
+
+      const res = await request(app.getHttpServer())
+        .post('/query/objects')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'delivery_order',
+          filters: [{ field: 'merchantName', operator: 'eq', value: merchantName }],
+          pageSize: 1,
+        })
+        .expect(201);
+      expect(res.body.meta.total).toBe(expected);
+    });
+
+    it('avg duration of drone legs vs rider legs: matches raw SQL', async () => {
+      const rows = await sql(`
+        SELECT (properties->>'legType') as leg_type, avg((properties->>'duration')::numeric) as avg_dur
+        FROM object_instances
+        WHERE tenant_id = '${tenantId}' AND object_type = 'delivery_leg' AND deleted_at IS NULL
+        GROUP BY (properties->>'legType')`);
+      const expectedByType = Object.fromEntries(rows.map((r: any) => [r.leg_type, Number(Number(r.avg_dur).toFixed(4))]));
+
+      const res = await request(app.getHttpServer())
+        .post('/query/aggregate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          objectType: 'delivery_leg',
+          groupBy: ['legType'],
+          metrics: [{ kind: 'avg', field: 'duration', alias: 'avgDur' }],
+        })
+        .expect(201);
+
+      for (const group of res.body.groups) {
+        const apiVal = Number(Number(group.metrics.avgDur).toFixed(4));
+        expect(apiVal).toBe(expectedByType[group.key.legType]);
+      }
+    });
+  });
+
   describe('Agent natural language queries', () => {
     const askAgent = async (message: string): Promise<SseEvent[]> => {
       return runWithRetry(message, () =>
