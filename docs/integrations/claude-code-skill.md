@@ -1,118 +1,82 @@
-# OntoCenter Query Skill
+---
+name: ontocenter
+description: Query and manage business data in the OntoCenter ontology platform. Use when the user wants to look up, filter, aggregate, or analyze structured business data, or when they want to create/modify object types.
+allowed-tools: Bash(curl *)
+---
 
-Use this skill when the user wants to query or analyze business data stored in an OntoCenter instance.
+## Connection
 
-## Prerequisites
+Base URL: `${ONTOCENTER_URL:-http://localhost:3001}`
 
-The OntoCenter API must be running. Default: `http://localhost:3001`.
-
-## Authentication
-
-Before making any API call, get a JWT token:
+Authenticate once per session:
 
 ```bash
-TOKEN=$(curl -s -X POST http://localhost:3001/auth/login \
+ONTOCENTER_TOKEN=$(curl -s -X POST ${ONTOCENTER_URL:-http://localhost:3001}/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@demo.com","password":"admin123","tenantSlug":"demo"}' \
+  -d "{\"email\":\"${ONTOCENTER_EMAIL:-admin@demo.com}\",\"password\":\"${ONTOCENTER_PASSWORD:-admin123}\",\"tenantSlug\":\"${ONTOCENTER_TENANT:-demo}\"}" \
   | jq -r '.accessToken')
 ```
 
-Use this token in all subsequent requests as `Authorization: Bearer $TOKEN`.
+All subsequent calls use: `-H "Authorization: Bearer $ONTOCENTER_TOKEN"`
 
-## Scenarios
+## Instructions
 
-### Scenario 1: "What object types exist?"
+When the user asks about business data:
 
-Fetch the ontology schema to understand what data is available:
+1. **Discover schema first** — call GET /ontology/types to learn available object types and their filterable properties.
+2. **Choose the right endpoint**:
+   - Single/list lookup → POST /query/objects
+   - Counts, averages, rankings → POST /query/aggregate
+   - Schema changes → POST /ontology/types
+3. **Construct filters** using operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`, `in`.
+4. **Present results** in a table or summary — don't dump raw JSON.
 
-```bash
-curl -s http://localhost:3001/ontology/types \
-  -H "Authorization: Bearer $TOKEN" | jq '.[].name'
+## Endpoints
+
+### GET /ontology/types
+Returns all object types with properties. Use to discover the data model.
+
+### POST /query/objects
+```json
+{
+  "objectType": "delivery_order",
+  "filters": [{"field": "status", "operator": "eq", "value": "delivered"}],
+  "sort": {"field": "totalTime", "direction": "desc"},
+  "page": 1, "pageSize": 20
+}
 ```
+Returns `{ data: [...], meta: { total, page, pageSize, totalPages } }`.
 
-This returns all object types with their properties. Use this first to understand the data model before querying.
-
-### Scenario 2: "Query specific objects with filters"
-
-Use POST /query/objects. Example: find all delivered orders over 5km:
-
-```bash
-curl -s -X POST http://localhost:3001/query/objects \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "objectType": "delivery_order",
-    "filters": [
-      {"field": "status", "operator": "eq", "value": "delivered"},
-      {"field": "totalDistance", "operator": "gt", "value": 5}
-    ],
-    "sort": {"field": "totalTime", "direction": "desc"},
-    "page": 1,
-    "pageSize": 20
-  }'
+### POST /query/aggregate
+```json
+{
+  "objectType": "delivery_order",
+  "filters": [{"field": "totalDistance", "operator": "gt", "value": 5}],
+  "groupBy": ["deliveryMode"],
+  "metrics": [{"kind": "avg", "field": "totalTime", "alias": "avgTime"}, {"kind": "count", "alias": "n"}],
+  "orderBy": [{"kind": "metric", "by": "avgTime", "direction": "desc"}],
+  "maxGroups": 10
+}
 ```
-
-Filter operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`, `in`.
-
-### Scenario 3: "Aggregate and analyze data"
-
-Use POST /query/aggregate. Example: average delivery time by mode:
-
-```bash
-curl -s -X POST http://localhost:3001/query/aggregate \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "objectType": "delivery_order",
-    "groupBy": ["deliveryMode"],
-    "metrics": [
-      {"kind": "avg", "field": "totalTime", "alias": "avgTime"},
-      {"kind": "count", "alias": "n"}
-    ],
-    "orderBy": [{"kind": "metric", "by": "avgTime", "direction": "desc"}]
-  }'
-```
-
 Metric kinds: `count`, `countDistinct`, `sum`, `avg`, `min`, `max`.
+Returns `{ groups: [{ key: {...}, metrics: {...} }], truncated, nextPageToken }`.
 
-### Scenario 4: "Create a new object type"
-
-Use POST /ontology/types. Example: create a "warehouse" type:
-
-```bash
-curl -s -X POST http://localhost:3001/ontology/types \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "warehouse",
-    "label": "仓库",
-    "properties": [
-      {"name": "name", "type": "string", "label": "名称", "filterable": true},
-      {"name": "capacity", "type": "number", "label": "容量", "filterable": true, "sortable": true},
-      {"name": "city", "type": "string", "label": "城市", "filterable": true}
-    ]
-  }'
+### POST /ontology/types
+```json
+{
+  "name": "warehouse",
+  "label": "仓库",
+  "properties": [
+    {"name": "city", "type": "string", "label": "城市", "filterable": true}
+  ]
+}
 ```
-
 Property types: `string`, `number`, `boolean`, `date`, `json`.
 
-### Scenario 5: "Ask a natural language question"
+## Constraints
 
-Use POST /agent/chat (returns SSE stream). Example:
-
-```bash
-curl -s -N -X POST http://localhost:3001/agent/chat \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "哪个中转站等待时间最长？"}'
-```
-
-The response is a Server-Sent Events stream. Each line starts with `data: ` followed by a JSON event.
-
-## Tips
-
-- Always fetch the schema first (Scenario 1) to know what objectTypes and properties are available.
-- Use `contains` operator for fuzzy text matching.
-- Aggregation supports `maxGroups` for pagination and `pageToken` for fetching next pages.
-- All numeric properties support `gt`, `gte`, `lt`, `lte` operators.
-- The `in` operator accepts an array value for matching multiple values.
+- Always include `"Content-Type: application/json"` on POST requests.
+- Filter values must match the property type (number for numeric fields, string for text).
+- `pageSize` max is 100. Use pagination for large result sets.
+- `maxGroups` max is 500 for aggregation.
+- The `in` operator takes an array: `{"field": "status", "operator": "in", "value": ["pending", "delivered"]}`.
