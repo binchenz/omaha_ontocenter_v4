@@ -576,4 +576,72 @@ describe('Drone-Rider Relay (e2e)', () => {
       expectValidAgentResponse(events);
     }, 60_000);
   });
+
+  describe('Semantic layer: ambiguous queries requiring description/unit context', () => {
+    const askAgent = async (message: string): Promise<SseEvent[]> => {
+      return runWithRetry(message, () =>
+        postSse(app, '/agent/chat', { message }, token, 60_000),
+      );
+    };
+
+    const findQueryToolCall = (events: SseEvent[]) => {
+      return events.find(e =>
+        e.type === 'tool_call' && (e.name === 'query_objects' || e.name === 'aggregate_objects'),
+      );
+    };
+
+    it('S1: "慢的订单" → uses totalTime (semantic: 总配送时间, unit=min)', async () => {
+      const events = await askAgent('有哪些配送比较慢的订单？耗时超过半小时的');
+      const toolCall = findQueryToolCall(events);
+      expect(toolCall).toBeTruthy();
+      const args = toolCall?.args as any;
+      if (args?.filters) {
+        const timeFilter = args.filters.find((f: any) => f.field === 'totalTime');
+        expect(timeFilter).toBeTruthy();
+      }
+    }, 60_000);
+
+    it('S2: "远的订单" → uses totalDistance (semantic: 配送总路程, unit=km)', async () => {
+      const events = await askAgent('哪些订单配送距离特别远？超过10公里的');
+      const toolCall = findQueryToolCall(events);
+      expect(toolCall).toBeTruthy();
+      const args = toolCall?.args as any;
+      if (args?.filters) {
+        const distFilter = args.filters.find((f: any) => f.field === 'totalDistance');
+        expect(distFilter).toBeTruthy();
+      }
+    }, 60_000);
+
+    it('S3: "飞得快的无人机" → uses drone.speed (semantic: 巡航飞行速度, unit=km/h)', async () => {
+      const events = await askAgent('哪些无人机飞得比较快？速度超过60的');
+      const toolCall = findQueryToolCall(events);
+      expect(toolCall).toBeTruthy();
+      const args = toolCall?.args as any;
+      expect(args?.objectType).toBe('drone');
+    }, 60_000);
+
+    it('S4: "能装多少" → uses drone.payload (semantic: 最大载货重量, unit=kg)', async () => {
+      const events = await askAgent('无人机最多能装多重的货物？载重超过4公斤的有哪些？');
+      const toolCall = findQueryToolCall(events);
+      expect(toolCall).toBeTruthy();
+      const args = toolCall?.args as any;
+      expect(args?.objectType).toBe('drone');
+    }, 60_000);
+
+    it('S5: "等太久" → uses delivery_leg.waitTime (semantic: 中转站等待交接时间)', async () => {
+      const events = await askAgent('哪些配送段在中转站等了太久？等待超过5分钟的');
+      const toolCall = findQueryToolCall(events);
+      expect(toolCall).toBeTruthy();
+      const args = toolCall?.args as any;
+      expect(args?.objectType).toBe('delivery_leg');
+    }, 60_000);
+
+    it('S6: "忙碌的交接点" → aggregates by stationName (semantic: 交接点)', async () => {
+      const events = await askAgent('哪个交接点最忙？处理量最大的是哪个？');
+      const toolCall = findQueryToolCall(events);
+      expect(toolCall).toBeTruthy();
+      const types = events.map(e => e.type);
+      expect(types).toContain('tool_result');
+    }, 60_000);
+  });
 });
