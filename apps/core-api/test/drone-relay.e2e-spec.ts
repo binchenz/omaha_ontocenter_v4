@@ -643,5 +643,51 @@ describe('Drone-Rider Relay (e2e)', () => {
       const types = events.map(e => e.type);
       expect(types).toContain('tool_result');
     }, 60_000);
+
+    it('S7: "效率最低" → needs totalTime/totalDistance ratio (cross-field reasoning)', async () => {
+      const events = await askAgent('哪种配送方式效率最低？我想看平均每公里花多少分钟');
+      const toolCall = findQueryToolCall(events);
+      expect(toolCall).toBeTruthy();
+      const args = toolCall?.args as any;
+      // LLM should query delivery_order with groupBy deliveryMode and avg on totalTime or both fields
+      expect(args?.objectType).toBe('delivery_order');
+      const types = events.map(e => e.type);
+      expect(types).toContain('tool_result');
+    }, 60_000);
+
+    it('S8: "服务质量最差的区域" → implicit metric (avg totalTime by district)', async () => {
+      const events = await askAgent('哪个区域的配送服务质量最差？');
+      const toolCall = findQueryToolCall(events);
+      expect(toolCall).toBeTruthy();
+      const args = toolCall?.args as any;
+      expect(args?.objectType).toBe('delivery_order');
+      // Should group by customerDistrict (semantic: 收货客户所在区域)
+      if (args?.groupBy) {
+        expect(args.groupBy).toContain('customerDistrict');
+      }
+    }, 60_000);
+
+    it('S9: "最后一公里" → rider legs only (semantic: 骑手段=最后一公里)', async () => {
+      const events = await askAgent('最后一公里的平均配送时间是多少？');
+      const toolCall = findQueryToolCall(events);
+      expect(toolCall).toBeTruthy();
+      const args = toolCall?.args as any;
+      expect(args?.objectType).toBe('delivery_leg');
+      // Should filter legType=rider (semantic: 骑手骑行段 = 最后一公里)
+      if (args?.filters) {
+        const riderFilter = args.filters.find((f: any) => f.field === 'legType' && f.value === 'rider');
+        expect(riderFilter).toBeTruthy();
+      }
+    }, 60_000);
+
+    it('S10: "该退役的无人机" → low maxRange or maintenance status (implicit reasoning)', async () => {
+      const events = await askAgent('哪些无人机性能比较差，可能需要退役？');
+      const toolCall = findQueryToolCall(events);
+      expect(toolCall).toBeTruthy();
+      const args = toolCall?.args as any;
+      expect(args?.objectType).toBe('drone');
+      const types = events.map(e => e.type);
+      expect(types).toContain('tool_result');
+    }, 60_000);
   });
 });
