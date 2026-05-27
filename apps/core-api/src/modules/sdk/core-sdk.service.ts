@@ -28,13 +28,15 @@ export interface OntologySchema {
 
 type PropertyType = 'string' | 'number' | 'boolean' | 'date' | 'json';
 
-function mapPropertyDto(p: { name: string; type: string; label: string; filterable?: boolean; sortable?: boolean }) {
+function mapPropertyDto(p: { name: string; type: string; label: string; filterable?: boolean; sortable?: boolean; description?: string; unit?: string }) {
   return {
     name: p.name,
     type: p.type as PropertyType,
     label: p.label,
     filterable: p.filterable,
     sortable: p.sortable,
+    description: p.description,
+    unit: p.unit,
   };
 }
 
@@ -143,11 +145,13 @@ export class CoreSdkService {
   async createObjectType(tenantId: string, dto: {
     name: string;
     label: string;
-    properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean }>;
+    description?: string;
+    properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean; description?: string; unit?: string }>;
   }): Promise<unknown> {
     const result = await this.ontologyService.createObjectType(tenantId, {
       name: dto.name,
       label: dto.label,
+      description: dto.description,
       properties: dto.properties.map(mapPropertyDto),
       derivedProperties: [],
     });
@@ -158,7 +162,8 @@ export class CoreSdkService {
   async updateObjectType(tenantId: string, params: {
     objectTypeName: string;
     label?: string;
-    properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean }>;
+    description?: string;
+    properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean; description?: string; unit?: string }>;
   }): Promise<unknown> {
     const typeId = await this.typeResolver.resolve(tenantId, params.objectTypeName);
     return this.ontologyService.updateObjectType(tenantId, typeId, {

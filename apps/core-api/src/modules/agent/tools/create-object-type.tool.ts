@@ -12,6 +12,7 @@ export class CreateObjectTypeTool implements AgentTool {
     properties: {
       name: { type: 'string', description: '对象类型英文名（如 customer, order）' },
       label: { type: 'string', description: '对象类型中文标签（如 客户, 订单）' },
+      description: { type: 'string', description: '对象类型的业务含义（如"配送订单，记录从商家到客户的完整配送过程"）' },
       properties: {
         type: 'array',
         items: {
@@ -22,6 +23,8 @@ export class CreateObjectTypeTool implements AgentTool {
             label: { type: 'string' },
             filterable: { type: 'boolean' },
             sortable: { type: 'boolean' },
+            description: { type: 'string', description: '字段的业务含义' },
+            unit: { type: 'string', description: '度量单位（如 km, min, 元, 个）' },
           },
           required: ['name', 'type', 'label'],
         },

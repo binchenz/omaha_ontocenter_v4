@@ -38,6 +38,7 @@ export class OntologyService {
         tenantId,
         name: dto.name,
         label: dto.label,
+        description: dto.description,
         properties: dto.properties as unknown as Prisma.InputJsonValue,
         derivedProperties: (dto.derivedProperties ?? []) as unknown as Prisma.InputJsonValue,
       },
@@ -58,6 +59,7 @@ export class OntologyService {
       where: { id },
       data: {
         ...(dto.label !== undefined && { label: dto.label }),
+        ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.properties !== undefined && { properties: dto.properties as unknown as Prisma.InputJsonValue }),
         ...(dto.derivedProperties !== undefined && { derivedProperties: dto.derivedProperties as unknown as Prisma.InputJsonValue }),
         version: { increment: 1 },
