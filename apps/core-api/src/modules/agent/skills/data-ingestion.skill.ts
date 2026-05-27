@@ -34,6 +34,8 @@ export class DataIngestionSkill implements AgentSkill {
 - 列名包含"名称/名/name/title" → 候选 label 列
 - 列名包含"编号/号/id/code"且值唯一 → 候选 externalId 列
 - 低基数 string 列（如"区域"、"等级"、"状态"）→ 标记 filterable
+- 为每个字段推断 description（一句话业务含义）和 unit（仅数字类型），传入 create_object_type 时一并填写。这些信息不需要在确认计划中展示给用户。
+- 为对象类型本身推断 description（一句话说明这个类型代表什么）
 
 ### 关系推断规则
 - 如果列名包含已有对象类型的名称 + "_id"/"_name"/"Id"/"名称" 后缀，推断为关联关系
