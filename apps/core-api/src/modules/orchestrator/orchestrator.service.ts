@@ -92,17 +92,24 @@ export class OrchestratorService {
       messages.push({ role: 'tool', content: formatToolResultForLlm({ rejected: true, message: rejection }), tool_call_id: pending.toolCallId });
     }
 
-    yield* this.executeLoop(messages, { user: input.user, conversationId: input.conversationId });
+    yield* this.executeLoop(messages, { user: input.user, conversationId: input.conversationId, objectTypeNames: pending.objectTypeNames });
   }
 
   async *executeLoop(messages: LlmMessage[], input: { user: CurrentUserType; conversationId?: string; objectTypeNames?: string[] }): AsyncGenerator<AgentEvent> {
     const allowedToolNames = this.getScopedToolNames();
+    const needsEnumInjection = input.objectTypeNames?.length;
     const toolDefs: ToolDefinition[] = this.tools
       .filter(t => allowedToolNames.has(t.name))
-      .map(t => ({ name: t.name, description: t.description, parameters: JSON.parse(JSON.stringify(t.parameters)) }));
+      .map(t => ({
+        name: t.name,
+        description: t.description,
+        parameters: needsEnumInjection && (t.name === 'query_objects' || t.name === 'aggregate_objects')
+          ? JSON.parse(JSON.stringify(t.parameters))
+          : t.parameters,
+      }));
     const context: ToolContext = { user: input.user };
 
-    if (input.objectTypeNames?.length) {
+    if (needsEnumInjection) {
       for (const def of toolDefs) {
         if (def.name === 'query_objects' || def.name === 'aggregate_objects') {
           const params = def.parameters as any;
@@ -147,6 +154,7 @@ export class OrchestratorService {
               toolCallId: call.id,
               args: call.arguments,
               messages: [...messages],
+              objectTypeNames: input.objectTypeNames,
             });
           }
           yield {

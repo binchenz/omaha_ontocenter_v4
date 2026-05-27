@@ -6,6 +6,7 @@ export interface PendingConfirmation {
   toolCallId: string;
   args: Record<string, unknown>;
   messages: LlmMessage[];
+  objectTypeNames?: string[];
 }
 
 @Injectable()

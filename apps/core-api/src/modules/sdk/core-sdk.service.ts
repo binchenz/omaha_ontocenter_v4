@@ -83,20 +83,29 @@ export class CoreSdkService {
     };
   }
 
+  private schemaSummaryCache = new Map<string, { summary: string; typeNames: string[] }>();
+
+  invalidateSchemaSummary(tenantId: string): void {
+    this.schemaSummaryCache.delete(tenantId);
+  }
+
   async getSchemaSummary(tenantId: string): Promise<{ summary: string; typeNames: string[] }> {
+    const cached = this.schemaSummaryCache.get(tenantId);
+    if (cached) return cached;
+
     const schema = await this.getSchema(tenantId);
     const typeNames = schema.types.map(t => t.name);
     const lines: string[] = ['数据模型：'];
     const maxTypes = 15;
     for (const t of schema.types.slice(0, maxTypes)) {
-      const typeDesc = (t as any).description ? ` — ${(t as any).description}` : '';
+      const typeDesc = t.description ? ` — ${t.description}` : '';
       const props = t.properties
         .filter(p => p.filterable || p.sortable)
         .map(p => {
           let s = `${p.name}:${p.type}`;
           if (p.filterable) s += '✓';
           if (p.sortable) s += '↕';
-          if ((p as any).unit) s += `[${(p as any).unit}]`;
+          if (p.unit) s += `[${p.unit}]`;
           return s;
         })
         .join(', ');
@@ -104,7 +113,7 @@ export class CoreSdkService {
     }
     if (schema.relationships.length > 0) {
       const rels = schema.relationships.map(r => {
-        const desc = (r as any).description ? `(${(r as any).description})` : '';
+        const desc = r.description ? `(${r.description})` : '';
         return `${r.sourceType}→${r.targetType}(${r.name})${desc}`;
       }).join(', ');
       lines.push(`关系：${rels}`);
@@ -112,7 +121,9 @@ export class CoreSdkService {
     if (schema.types.length > maxTypes) {
       lines.push(`（共${schema.types.length}个类型，更多请调用 get_ontology_schema）`);
     }
-    return { summary: lines.join('\n'), typeNames };
+    const result = { summary: lines.join('\n'), typeNames };
+    this.schemaSummaryCache.set(tenantId, result);
+    return result;
   }
 
   // --- Query ---
@@ -156,6 +167,7 @@ export class CoreSdkService {
       derivedProperties: [],
     });
     this.typeResolver.invalidate(tenantId);
+    this.invalidateSchemaSummary(tenantId);
     return result;
   }
 
@@ -182,6 +194,7 @@ export class CoreSdkService {
       await this.ontologyService.deleteObjectType(tenantId, typeId);
     });
     this.typeResolver.invalidate(tenantId);
+    this.invalidateSchemaSummary(tenantId);
     return { message: `对象类型 "${objectTypeName}" 已删除，关联数据已软删除。` };
   }
 
