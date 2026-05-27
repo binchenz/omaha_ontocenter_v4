@@ -10,6 +10,7 @@ An ontology-driven data platform where business users query, manage, and integra
 
 - **自然语言查询** — 用对话方式查询业务数据，无需 SQL。Ask questions in plain language, no SQL required.
 - **动态本体建模** — 运行时定义对象类型、属性和关系，无需改表结构。Define object types, properties, and relationships at runtime without schema migrations.
+- **语义层** — 自动推断字段的业务含义和度量单位，让 AI 理解"慢的订单"指的是耗时而非距离。Semantic annotations (description + unit) auto-inferred during modeling, enabling the AI to disambiguate natural language.
 - **权限即代码** — 行级 + 字段级权限用 DSL 表达式声明，与查询共享同一编译器。Row-level and field-level permissions declared as DSL expressions, compiled alongside queries.
 - **Agent 工具扩展** — 14 个内置工具，可扩展的 Skill 体系，LLM 自动选择调用。14 built-in tools with an extensible Skill system; the LLM selects tools automatically.
 

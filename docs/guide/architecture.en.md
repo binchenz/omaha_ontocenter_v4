@@ -62,6 +62,36 @@ OntologyService.createObjectType()
 
 Full architecture decision records: [docs/adr/](../adr/)
 
+## Semantic Layer
+
+Object Types and Properties support semantic annotations that provide business context to the LLM:
+
+- **ObjectType.description** — business meaning of the type (e.g., "A delivery order tracking the full journey from merchant to customer")
+- **Property.description** — business meaning of the field (e.g., "Total delivery time from pickup to dropoff")
+- **Property.unit** — measurement unit (e.g., km, min, USD, kg)
+
+Semantic information is used in two stages:
+1. **Auto-inferred during modeling**: When the Agent creates a type, the LLM automatically fills description and unit based on field names and context — transparent to the user.
+2. **Injected into prompt during queries**: `getSchemaSummary()` compresses semantic info into a compact format in the system prompt, helping the LLM pick the right field for ambiguous queries.
+
+Example: User asks "slow orders" → LLM sees `totalTime:number✓↕[min] — Total delivery time from pickup to dropoff` → selects totalTime (not totalDistance).
+
+## LLM Prompt Design
+
+The system prompt is assembled from:
+
+```
+[Base Prompt] — role definition + security rules
+[Schema Summary] — tenant's data model (types, fields, units, relationships)
+[Skill Prompts] — workflow rules + few-shot examples for query/design/ingestion
+[Tool Definitions] — 14 tools as JSON Schema (query/aggregate get dynamic objectType enum)
+```
+
+Optimizations:
+- Schema summary cached per tenant, invalidated on ontology mutations
+- Only query_objects and aggregate_objects parameters are deep-cloned for enum injection
+- Few-shot examples teach the LLM correct filter + groupBy + orderBy construction
+
 ## Multi-tenancy
 
 All tables include a `tenant_id` column. The query layer injects tenant filters on every request automatically.

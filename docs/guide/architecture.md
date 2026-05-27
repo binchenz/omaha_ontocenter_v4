@@ -62,6 +62,36 @@ OntologyService.createObjectType()
 
 完整的架构决策记录见 [docs/adr/](../adr/)。
 
+## 语义层
+
+Object Type 和 Property 支持语义标注，为 LLM 提供业务上下文：
+
+- **ObjectType.description** — 类型的业务含义（如"配送订单，记录从商家到客户的完整配送过程"）
+- **Property.description** — 字段的业务含义（如"从取餐到送达的总配送时间"）
+- **Property.unit** — 度量单位（如 km、min、元、kg）
+
+语义信息在两个环节发挥作用：
+1. **建模时自动推断**：Agent 创建类型时，LLM 根据字段名和上下文自动填写 description 和 unit，用户无感
+2. **查询时注入 prompt**：`getSchemaSummary()` 将语义信息压缩为紧凑格式注入 system prompt，帮助 LLM 在模糊查询中选对字段
+
+示例：用户问"慢的订单"，LLM 看到 `totalTime:number✓↕[min] — 从取餐到送达的总配送时间`，直接选择 totalTime 而非 totalDistance。
+
+## LLM Prompt 设计
+
+系统提示由以下部分拼接：
+
+```
+[Base Prompt] — 角色定义 + 安全规则
+[Schema Summary] — 当前租户的数据模型摘要（类型、字段、单位、关系）
+[Skill Prompts] — 查询/建模/导入技能的工作流规则 + few-shot 示例
+[Tool Definitions] — 14 个工具的 JSON Schema（query/aggregate 动态注入 objectType enum）
+```
+
+优化策略：
+- Schema 摘要按租户缓存，ontology 变更时自动失效
+- 只对 query_objects 和 aggregate_objects 的参数做 deep-clone 注入 enum
+- Few-shot 示例教 LLM 正确构造 filters + groupBy + orderBy 组合
+
 ## 多租户
 
 所有数据表均含 `tenant_id` 字段。查询层在每次请求时自动注入租户过滤，无需业务代码手动处理。

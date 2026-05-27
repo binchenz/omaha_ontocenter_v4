@@ -66,12 +66,16 @@ Returns `{ groups: [{ key: {...}, metrics: {...} }], truncated, nextPageToken }`
 {
   "name": "warehouse",
   "label": "仓库",
+  "description": "存储和分发商品的仓库设施",
   "properties": [
-    {"name": "city", "type": "string", "label": "城市", "filterable": true}
+    {"name": "city", "type": "string", "label": "城市", "filterable": true, "description": "仓库所在城市"},
+    {"name": "capacity", "type": "number", "label": "容量", "filterable": true, "description": "最大存储量", "unit": "吨"}
   ]
 }
 ```
 Property types: `string`, `number`, `boolean`, `date`, `json`.
+Optional semantic fields: `description` (business meaning), `unit` (measurement unit for numbers).
+The LLM uses these to understand ambiguous queries (e.g., "大的仓库" → filters by capacity).
 
 ## Constraints
 
