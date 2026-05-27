@@ -7,6 +7,8 @@ export interface PropertyDefinition {
   sortable?: boolean;
   precision?: number;
   scale?: number;
+  description?: string;
+  unit?: string;
 }
 
 export interface DerivedPropertyDefinition extends PropertyDefinition {
@@ -17,12 +19,14 @@ export interface DerivedPropertyDefinition extends PropertyDefinition {
 export interface CreateObjectTypeRequest {
   name: string;
   label: string;
+  description?: string;
   properties: PropertyDefinition[];
   derivedProperties?: DerivedPropertyDefinition[];
 }
 
 export interface UpdateObjectTypeRequest {
   label?: string;
+  description?: string;
   properties?: PropertyDefinition[];
   derivedProperties?: DerivedPropertyDefinition[];
 }
@@ -32,6 +36,7 @@ export interface ObjectTypeResponse {
   tenantId: string;
   name: string;
   label: string;
+  description?: string;
   properties: PropertyDefinition[];
   derivedProperties: DerivedPropertyDefinition[];
   version: number;
@@ -46,6 +51,7 @@ export interface CreateRelationshipRequest {
   targetTypeId: string;
   name: string;
   cardinality: Cardinality;
+  description?: string;
 }
 
 export interface RelationshipResponse {
@@ -55,5 +61,6 @@ export interface RelationshipResponse {
   targetTypeId: string;
   name: string;
   cardinality: Cardinality;
+  description?: string;
   createdAt: string;
 }

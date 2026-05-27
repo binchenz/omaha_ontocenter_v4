@@ -73,6 +73,7 @@ model ObjectType {
   tenantId          String   @map("tenant_id") @db.Uuid
   name              String
   label             String
+  description       String?
   properties        Json     @default("[]")
   derivedProperties Json     @default("[]") @map("derived_properties")
   version           Int      @default(1)
@@ -112,6 +113,7 @@ model ObjectRelationship {
   targetTypeId String   @map("target_type_id") @db.Uuid
   name         String
   cardinality  String
+  description  String?
   createdAt    DateTime @default(now()) @map("created_at")
 
   tenant     Tenant     @relation(fields: [tenantId], references: [id])

@@ -13,7 +13,8 @@ export interface OntologySchema {
   types: Array<{
     name: string;
     label: string;
-    properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean }>;
+    description?: string;
+    properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean; description?: string; unit?: string }>;
     derivedProperties: Array<{ name: string; type: string; label: string }>;
   }>;
   relationships: Array<{
@@ -21,6 +22,7 @@ export interface OntologySchema {
     sourceType: string;
     targetType: string;
     cardinality: string;
+    description?: string;
   }>;
 }
 
@@ -60,8 +62,10 @@ export class CoreSdkService {
       types: types.map((t: any) => ({
         name: t.name,
         label: t.label,
+        description: t.description ?? undefined,
         properties: (t.properties ?? []).map((p: any) => ({
           name: p.name, type: p.type, label: p.label, filterable: p.filterable, sortable: p.sortable,
+          description: p.description, unit: p.unit,
         })),
         derivedProperties: (t.derivedProperties ?? []).map((d: any) => ({
           name: d.name, type: d.type, label: d.label,
@@ -72,6 +76,7 @@ export class CoreSdkService {
         sourceType: r.sourceType.name,
         targetType: r.targetType.name,
         cardinality: r.cardinality,
+        description: r.description ?? undefined,
       })),
     };
   }
@@ -82,14 +87,24 @@ export class CoreSdkService {
     const lines: string[] = ['数据模型：'];
     const maxTypes = 15;
     for (const t of schema.types.slice(0, maxTypes)) {
+      const typeDesc = (t as any).description ? ` — ${(t as any).description}` : '';
       const props = t.properties
         .filter(p => p.filterable || p.sortable)
-        .map(p => `${p.name}:${p.type}${p.filterable ? '✓' : ''}${p.sortable ? '↕' : ''}`)
+        .map(p => {
+          let s = `${p.name}:${p.type}`;
+          if (p.filterable) s += '✓';
+          if (p.sortable) s += '↕';
+          if ((p as any).unit) s += `[${(p as any).unit}]`;
+          return s;
+        })
         .join(', ');
-      lines.push(`- ${t.name}(${props})`);
+      lines.push(`- ${t.name}(${props})${typeDesc}`);
     }
     if (schema.relationships.length > 0) {
-      const rels = schema.relationships.map(r => `${r.sourceType}→${r.targetType}(${r.name})`).join(', ');
+      const rels = schema.relationships.map(r => {
+        const desc = (r as any).description ? `(${(r as any).description})` : '';
+        return `${r.sourceType}→${r.targetType}(${r.name})${desc}`;
+      }).join(', ');
       lines.push(`关系：${rels}`);
     }
     if (schema.types.length > maxTypes) {
