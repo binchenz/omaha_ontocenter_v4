@@ -97,6 +97,7 @@ export class CoreSdkService {
     const typeNames = schema.types.map(t => t.name);
     const lines: string[] = ['数据模型：'];
     const maxTypes = 15;
+    const MAX_DESC = 50; // soft-truncate field descriptions to keep prompt budget bounded
     for (const t of schema.types.slice(0, maxTypes)) {
       const typeDesc = t.description ? ` — ${t.description}` : '';
       const props = t.properties
@@ -106,6 +107,10 @@ export class CoreSdkService {
           if (p.filterable) s += '✓';
           if (p.sortable) s += '↕';
           if (p.unit) s += `[${p.unit}]`;
+          if (p.description) {
+            const d = p.description.length > MAX_DESC ? `${p.description.slice(0, MAX_DESC)}…` : p.description;
+            s += `{${d}}`;
+          }
           return s;
         })
         .join(', ');
