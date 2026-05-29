@@ -7,7 +7,7 @@ import { ConversationSidebar } from '@/components/chat/ConversationSidebar';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 
 interface AgentEvent {
-  type: 'text' | 'tool_call' | 'tool_result' | 'confirmation_request' | 'error' | 'done';
+  type: 'text' | 'tool_call' | 'tool_result' | 'confirmation_request' | 'system_prompt' | 'error' | 'done';
   content?: string;
   name?: string;
   args?: Record<string, unknown>;
@@ -44,6 +44,8 @@ export default function ChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [currentToolCall, setCurrentToolCall] = useState<string | null>(null);
   const [resultPanel, setResultPanel] = useState<unknown>(null);
+  const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
+  const [panelTab, setPanelTab] = useState<'result' | 'prompt'>('result');
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [attachedFile, setAttachedFile] = useState<{ fileId: string; name: string; size: number } | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -170,8 +172,9 @@ export default function ChatPage() {
   const handleEvent = (event: AgentEvent, setContent: (s: string) => void) => {
     switch (event.type) {
       case 'tool_call': setCurrentToolCall(`正在调用 ${event.name}...`); break;
-      case 'tool_result': setCurrentToolCall(null); setResultPanel(event.data); break;
+      case 'tool_result': setCurrentToolCall(null); setResultPanel(event.data); setPanelTab('result'); break;
       case 'text': setContent(event.content ?? ''); break;
+      case 'system_prompt': setSystemPrompt(event.content ?? ''); break;
       case 'confirmation_request':
         setMessages(prev => [...prev, {
           role: 'confirmation', content: event.message ?? '',
@@ -259,16 +262,36 @@ export default function ChatPage() {
       </div>
 
       <div className="w-[480px] border-l border-gray-200 overflow-y-auto bg-gray-50 hidden lg:block">
-        <div className="px-4 py-3 border-b border-gray-100">
-          <h2 className="text-xs font-medium text-gray-500">查询结果</h2>
+        <div className="px-4 py-2 border-b border-gray-100 flex gap-1">
+          <TabButton active={panelTab === 'result'} onClick={() => setPanelTab('result')}>查询结果</TabButton>
+          <TabButton active={panelTab === 'prompt'} onClick={() => setPanelTab('prompt')}>提示词{systemPrompt ? '' : ' ·'}</TabButton>
         </div>
         <div className="p-4">
-          {resultPanel ? <ResultTable data={resultPanel} /> : (
-            <p className="text-sm text-gray-400 text-center mt-10">查询结果将显示在这里</p>
+          {panelTab === 'result' ? (
+            resultPanel ? <ResultTable data={resultPanel} /> : (
+              <p className="text-sm text-gray-400 text-center mt-10">查询结果将显示在这里</p>
+            )
+          ) : (
+            systemPrompt ? (
+              <pre className="text-xs text-gray-700 whitespace-pre-wrap break-words font-mono leading-relaxed">{systemPrompt}</pre>
+            ) : (
+              <p className="text-sm text-gray-400 text-center mt-10">发送消息后，这里显示喂给模型的系统提示词（含语义层 schema）</p>
+            )
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`text-xs font-medium px-2 py-1 rounded ${active ? 'bg-gray-200 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+    >
+      {children}
+    </button>
   );
 }
 
