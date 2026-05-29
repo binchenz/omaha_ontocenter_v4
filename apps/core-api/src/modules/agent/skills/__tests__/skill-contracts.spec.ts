@@ -23,7 +23,6 @@ describe('Skill contract tests', () => {
         expect(typeof prompt).toBe('string');
         expect(prompt.length).toBeGreaterThan(0);
       });
-
     });
   }
 
