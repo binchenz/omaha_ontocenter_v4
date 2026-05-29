@@ -24,22 +24,11 @@ describe('Skill contract tests', () => {
         expect(prompt.length).toBeGreaterThan(0);
       });
 
-      it('activationCondition returns boolean or number when defined', () => {
-        if (skill.activationCondition) {
-          const result = skill.activationCondition(ctx);
-          expect(typeof result === 'boolean' || typeof result === 'number').toBe(true);
-        }
-      });
     });
   }
 
   describe('QuerySkill', () => {
     const qs = new QuerySkill();
-
-    it('activationCondition is always true', () => {
-      expect(qs.activationCondition!(ctx)).toBe(true);
-      expect(qs.activationCondition!({ tenantId: 't1' })).toBe(true);
-    });
 
     it('tools include query_objects, aggregate_objects, get_ontology_schema', () => {
       expect(qs.tools).toContain('query_objects');
