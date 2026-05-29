@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmClient, LlmMessage, LlmOptions, LlmResponse, ToolDefinition } from './llm-client.interface';
+import { dumpLlmCall } from './llm-debug';
 
 @Injectable()
 export class DeepSeekLlmClient implements LlmClient {
@@ -51,17 +52,28 @@ export class DeepSeekLlmClient implements LlmClient {
     if (options?.temperature !== undefined) body.temperature = options.temperature;
     if (options?.jsonMode) body.response_format = { type: 'json_object' };
 
-    const res = await fetch(this.apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
-      },
-      body: JSON.stringify(body),
-    });
+    const start = Date.now();
+    const debugRequest = { model: this.model, messages: body.messages, tools: body.tools };
+    let res: Response;
+    try {
+      res = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      // Network-level failure (fetch failed / abort): capture the request that
+      // was about to go out so prompt debugging survives connection errors.
+      dumpLlmCall({ request: debugRequest, error: (err as Error).message, durationMs: Date.now() - start });
+      throw err;
+    }
 
     if (!res.ok) {
       const err = await res.text();
+      dumpLlmCall({ request: debugRequest, error: `DeepSeek API error ${res.status}: ${err}`, durationMs: Date.now() - start });
       throw new Error(`DeepSeek API error ${res.status}: ${err}`);
     }
 
@@ -70,6 +82,12 @@ export class DeepSeekLlmClient implements LlmClient {
     if (typeof promptTokens === 'number') {
       this.logger.log(`DeepSeek call: prompt_tokens=${promptTokens}`);
     }
+    dumpLlmCall({
+      request: debugRequest,
+      response: json,
+      durationMs: Date.now() - start,
+      promptTokens: typeof promptTokens === 'number' ? promptTokens : undefined,
+    });
     return json;
   }
 }

@@ -12,6 +12,7 @@ export type AgentEvent =
   | { type: 'tool_result'; id: string; name: string; data: unknown }
   | { type: 'text'; content: string }
   | { type: 'confirmation_request'; id: string; toolName: string; args: Record<string, unknown>; message: string }
+  | { type: 'system_prompt'; content: string }
   | { type: 'error'; message: string }
   | { type: 'done'; conversationId: string };
 
@@ -45,6 +46,10 @@ export class OrchestratorService {
 
     const systemPrompt = this.buildSystemPrompt(input.schemaSummary);
     this.checkPromptBudget(systemPrompt, input.conversationId);
+
+    // Surface the assembled system prompt (incl. schema summary / semantic-layer
+    // info) to the client for debugging. See ADR-0024.
+    yield { type: 'system_prompt', content: systemPrompt };
 
     const messages: LlmMessage[] = [
       { role: 'system', content: systemPrompt },

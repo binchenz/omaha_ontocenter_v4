@@ -1,5 +1,7 @@
 # Production Deployment — Aliyun
 
+> ⚠️ **Superseded.** The `drama_co` customer engagement this runbook describes has been retired. The ingest code was removed in `c5d2e84`. The `demo-drama` tenant replaces it for demo purposes — see `scripts/demo-drama/` and ADR-0022. This document is kept for historical reference only.
+
 This is the runbook for deploying Omaha OntoCenter to Aliyun for the drama-co engagement (and any future single-customer engagement on the same shape). It assumes the customer's source database is already on Aliyun RDS and accessible via VPC.
 
 > **Audience:** the integration engineer running the deployment. Read top to bottom; commands are copy-pastable. Items marked **★ MUST CHANGE** are values you cannot reuse from dev.

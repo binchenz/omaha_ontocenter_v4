@@ -24,7 +24,6 @@ const mockSkill: AgentSkill = {
   description: 'test',
   tools: ['test_tool'],
   systemPrompt: () => 'skill prompt',
-  activationCondition: () => true,
 };
 
 const user: any = { id: 'u1', tenantId: 't1', email: 'a@b.com', name: 'A', roleId: 'r1', roleName: 'admin', permissions: ['*'], permissionRules: [] };
