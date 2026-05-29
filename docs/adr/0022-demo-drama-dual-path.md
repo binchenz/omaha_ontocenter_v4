@@ -17,3 +17,5 @@ We resolve this by running two separate paths over the same source data:
 ## Relationship to drama-co
 
 `demo-drama` nominally supersedes the `drama_co` customer engagement. The drama-co ingest code was removed in the open-source cleanup commit (`c5d2e84`). `docs/deployment.md` and the `test:drama-agent` script reference in `scripts/package.json` are stale and should be cleaned up. The HTTP source (`http://142.202.71.28:5080`) is a one-shot demo data feed, not a production data path; real customer ingestion continues to use RDS + IngestRecipe (ADR-0016).
+
+**Update (2026-05-29):** the drama-co *novel ontology* was partially revived as a semantic-annotation reference — rebuilt in `scripts/drama-co/ontology.ts` with full `description`/`unit` annotations. This does **not** revive the full engagement: ingest stays a runbook (the source data is no longer complete), and deployment.md remains historical. See ADR-0023.
