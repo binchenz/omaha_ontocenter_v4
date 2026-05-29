@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmClient, LlmMessage, ToolDefinition } from '../agent/llm/llm-client.interface';
-import { formatToolResultForLlm } from '../agent/llm/format-tool-result';
+import { toAssistantToolCallMsg, toToolResultMsg } from '../agent/llm/llm-message-mapping';
 import { AgentTool, ToolContext } from '../agent/tools/tool.interface';
 import { AgentSkill, SkillContext } from '../agent/skills/skill.interface';
 import { ConfirmationGate } from '../agent/confirmation/confirmation-gate.service';
@@ -94,7 +94,7 @@ export class OrchestratorService {
       const rejection = input.comment
         ? `用户拒绝了操作 ${pending.toolName}，原因：${input.comment}`
         : `用户拒绝了操作 ${pending.toolName}`;
-      messages.push({ role: 'tool', content: formatToolResultForLlm({ rejected: true, message: rejection }), tool_call_id: pending.toolCallId });
+      messages.push(toToolResultMsg(pending.toolCallId, { rejected: true, message: rejection }));
     }
 
     yield* this.executeLoop(messages, { user: input.user, conversationId: input.conversationId, objectTypeNames: pending.objectTypeNames });
@@ -133,22 +133,16 @@ export class OrchestratorService {
         break;
       }
 
-      messages.push({
-        role: 'assistant',
-        content: null,
-        tool_calls: response.calls.map(c => ({
-          id: c.id,
-          type: 'function' as const,
-          function: { name: c.name, arguments: JSON.stringify(c.arguments) },
-        })),
-      });
+      messages.push(toAssistantToolCallMsg(
+        response.calls.map(c => ({ id: c.id, name: c.name, args: c.arguments })),
+      ));
 
       for (const call of response.calls) {
         yield { type: 'tool_call', id: call.id, name: call.name, args: call.arguments };
 
         const tool = this.tools.find(t => t.name === call.name);
         if (!tool) {
-          messages.push({ role: 'tool', content: formatToolResultForLlm({ error: `Unknown tool: ${call.name}` }), tool_call_id: call.id });
+          messages.push(toToolResultMsg(call.id, { error: `Unknown tool: ${call.name}` }));
           continue;
         }
 
@@ -219,10 +213,10 @@ export class OrchestratorService {
   ): Promise<AgentEvent | null> {
     try {
       const result = await tool.execute(args, context);
-      messages.push({ role: 'tool', content: formatToolResultForLlm(result), tool_call_id: callId });
+      messages.push(toToolResultMsg(callId, result));
       return { type: 'tool_result', id: callId, name: tool.name, data: result };
     } catch (err: any) {
-      messages.push({ role: 'tool', content: formatToolResultForLlm({ error: err.message ?? 'Tool execution failed' }), tool_call_id: callId });
+      messages.push(toToolResultMsg(callId, { error: err.message ?? 'Tool execution failed' }));
       return null;
     }
   }

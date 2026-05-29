@@ -1,7 +1,8 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '@omaha/db';
-import { emitScope, parentScope } from '@omaha/dsl';
+import { parentScope } from '@omaha/dsl';
+import { ScopedWhere } from './scoped-where';
 import { PermissionResolver } from '../permission/permission-resolver.service';
 import {
   CurrentUser as CurrentUserType,
@@ -322,16 +323,14 @@ export class QueryService {
 
     for (const inc of includes) {
       const scope = parentScope({ tenantId, objectType: inc.targetType });
-      const { sql: scopeSql, params: scopeParams } = emitScope(scope);
-      const fkParamIdx = scopeParams.length + 1;
-      const idsParamIdx = scopeParams.length + 2;
-      const params: unknown[] = [...scopeParams, inc.foreignKey, parentIds];
+      const scoped = new ScopedWhere(scope, { keepFrom: true })
+        .raw('(relationships->>?) = ANY(?::text[])', inc.foreignKey, parentIds);
+      const { fromWhere, params } = scoped.build();
       const sql =
         `SELECT id, tenant_id AS "tenantId", object_type AS "objectType", ` +
         `external_id AS "externalId", label, properties, relationships, ` +
         `created_at AS "createdAt", updated_at AS "updatedAt" ` +
-        scopeSql +
-        ` AND (relationships->>$${fkParamIdx}) = ANY($${idsParamIdx}::text[])`;
+        fromWhere;
       const children = await this.prisma.$queryRawUnsafe<RawInstanceRow[]>(sql, ...params);
       for (const c of children) {
         const parentId = (c.relationships as Record<string, unknown> | null)?.[inc.foreignKey] as string | undefined;

@@ -6,7 +6,6 @@ export interface Predicate {
   ast: Ast;
   view: OntologyView;
   params: Record<string, unknown>;
-  scope: 'parent' | 'child';
 }
 
 export interface EmittedPredicate {
