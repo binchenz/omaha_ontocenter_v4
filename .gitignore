@@ -8,3 +8,4 @@ uploads/
 .DS_Store
 .claude/
 scripts/test-results/
+.llm-debug/
