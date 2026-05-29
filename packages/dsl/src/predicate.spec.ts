@@ -23,7 +23,6 @@ describe('Predicate emit', () => {
       ast: parse('totalAmount >= 1000'),
       view: fixtureView(),
       params: {},
-      scope: 'parent',
     };
     const { sql, params } = emit(predicate);
     expect(sql).toBe(`((properties->>'totalAmount')::numeric >= $1)`);
@@ -35,7 +34,6 @@ describe('Predicate emit', () => {
       ast: parse('city = :city'),
       view: fixtureView(),
       params: { city: 'Hangzhou' },
-      scope: 'parent',
     };
     const { sql, params } = emit(predicate);
     expect(sql).toBe(`((properties->>'city') = $1)`);
@@ -47,7 +45,6 @@ describe('Predicate emit', () => {
       ast: parse('city = :city'),
       view: fixtureView(),
       params: {},
-      scope: 'parent',
     };
     expect(() => emit(predicate)).toThrow(/missing parameter.*city/i);
   });

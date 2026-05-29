@@ -98,7 +98,6 @@ export class PermissionResolver {
       ast: parse(source),
       view,
       params: templateBindings,
-      scope: 'parent',
     };
   }
 }

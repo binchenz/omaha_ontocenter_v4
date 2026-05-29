@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { compile, parse, emit, emitScope, parentScope } from '@omaha/dsl';
+import { parentScope } from '@omaha/dsl';
 import type { Predicate, OntologyView } from '@omaha/dsl';
-import type { QueryFilter, FilterOperator } from '@omaha/shared-types';
+import type { QueryFilter } from '@omaha/shared-types';
+import { ScopedWhere } from './scoped-where';
 import { OntologyViewLoader } from '../ontology/ontology-view-loader.service';
 import { ViewManagerService } from '../ontology/view-manager.service';
 
@@ -60,17 +61,6 @@ export interface PlannedAggregateQuery {
 
 const ALLOWED_SORT_COLUMNS = new Set(['createdAt', 'updatedAt', 'externalId', 'label']);
 
-const FILTER_TO_SQL: Record<FilterOperator, string> = {
-  eq: '=',
-  neq: '<>',
-  gt: '>',
-  gte: '>=',
-  lt: '<',
-  lte: '<=',
-  contains: 'LIKE',
-  in: 'IN',
-};
-
 @Injectable()
 export class QueryPlannerService {
   constructor(
@@ -88,30 +78,14 @@ export class QueryPlannerService {
       : 'object_instances';
 
     const scope = parentScope({ tenantId: args.tenantId, objectType: args.objectType });
-    const scopePrefix = emitScope(scope);
-    const params: unknown[] = useView ? [] : [...scopePrefix.params];
-    // When using a materialized view, the tenant/objectType filter is baked in — skip scope WHERE
-    const wherePieces: string[] = useView ? ['1=1'] : [
-      scopePrefix.sql.replace(/^FROM object_instances WHERE /, ''),
-    ];
-
-    if (args.search) {
-      wherePieces.push(`search_text ILIKE $${params.push('%' + args.search + '%')}`);
-    }
-
-    for (const f of args.filters ?? []) {
-      wherePieces.push(this.compileFilter(f, view, args.objectType, params));
-    }
-
-    const effectivePermissionFilter = this.appendPermissionPredicates(
-      args.permissionPredicates ?? [],
-      wherePieces,
-      params,
-    );
+    const scoped = new ScopedWhere(scope, { useView })
+      .search(args.search)
+      .filters(args.filters, view, args.objectType)
+      .predicates(args.permissionPredicates);
+    const { where, params, effectivePermissionFilter } = scoped.build();
 
     const { sortClause, sortFallbackReason } = this.resolveSort(args.sort, view);
 
-    const where = wherePieces.join(' AND ');
     const sql = `
       SELECT id, tenant_id AS "tenantId", object_type AS "objectType",
              external_id AS "externalId", label, properties, relationships,
@@ -145,21 +119,10 @@ export class QueryPlannerService {
     const view = await this.viewLoader.load(args.tenantId, args.objectType);
 
     const scope = parentScope({ tenantId: args.tenantId, objectType: args.objectType });
-    const scopePrefix = emitScope(scope);
-    const params: unknown[] = [...scopePrefix.params];
-    const wherePieces: string[] = [
-      scopePrefix.sql.replace(/^FROM object_instances WHERE /, ''),
-    ];
-
-    for (const f of args.filters ?? []) {
-      wherePieces.push(this.compileFilter(f, view, args.objectType, params));
-    }
-
-    const effectivePermissionFilter = this.appendPermissionPredicates(
-      args.permissionPredicates ?? [],
-      wherePieces,
-      params,
-    );
+    const scoped = new ScopedWhere(scope)
+      .filters(args.filters, view, args.objectType)
+      .predicates(args.permissionPredicates);
+    const { where, params, effectivePermissionFilter } = scoped.build();
 
     // groupBy validation: each field must be filterable on the view.
     // Non-filterable / json-typed fields (e.g. tags) cannot be grouped on;
@@ -236,7 +199,6 @@ export class QueryPlannerService {
       throw new Error(`metric kind '${m.kind}' not yet supported in v1`);
     }
 
-    const where = wherePieces.join(' AND ');
     const groupByClause = groupBy.length > 0
       ? `GROUP BY ${groupExprs.join(', ')}`
       : '';
@@ -326,105 +288,6 @@ export class QueryPlannerService {
       offset,
       warnings,
     };
-  }
-
-  private compileFilter(
-    f: QueryFilter,
-    view: OntologyView | null,
-    objectTypeName: string,
-    params: unknown[],
-  ): string {
-    if (f.derivedProperty) {
-      if (!view) throw new BadRequestException(`Unknown derived property: ${f.derivedProperty}`);
-      const def = view.derivedProperties.get(f.derivedProperty);
-      if (!def) throw new BadRequestException(`Unknown derived property: ${f.derivedProperty}`);
-      const fragment = compile(parse(def.expression), {
-        numericFields: view.numericFields,
-        booleanFields: view.booleanFields,
-        stringFields: view.stringFields,
-        relations: view.relations,
-        params: f.params ?? {},
-      });
-      const remapped = this.mergeFragment(fragment, params);
-      // eq/neq against null on derived properties: emit IS NULL / IS NOT NULL.
-      if (f.value === null && (f.operator === 'eq' || f.operator === 'neq')) {
-        return `(${remapped}) IS ${f.operator === 'eq' ? '' : 'NOT '}NULL`;
-      }
-      const opSql = FILTER_TO_SQL[f.operator];
-      params.push(f.value);
-      return `(${remapped}) ${opSql} $${params.length}`;
-    }
-
-    if (!f.field) {
-      throw new BadRequestException('Filter must have either field or derivedProperty');
-    }
-
-    if (view && view.filterableFields.size > 0 && !view.filterableFields.has(f.field)) {
-      throw new BadRequestException({
-        code: 'PROPERTY_NOT_FILTERABLE',
-        property: f.field,
-        objectType: objectTypeName,
-        hint: `Ask the admin to flag '${f.field}' as filterable on '${objectTypeName}'.`,
-      });
-    }
-
-    const lhs = view?.numericFields.has(f.field)
-      ? `(properties->>'${f.field}')::numeric`
-      : `properties->>'${f.field}'`;
-
-    // Bug #34: eq/neq against null must compile to IS NULL / IS NOT NULL.
-    // `<expr> = NULL` and `<expr> <> NULL` both evaluate to NULL in SQL's
-    // three-valued logic and silently filter every row out.
-    // For numeric fields we also need to check the raw jsonb extraction,
-    // not the ::numeric cast (which would throw on null or invalid text).
-    if (f.value === null && (f.operator === 'eq' || f.operator === 'neq')) {
-      const nullCheckLhs = `properties->>'${f.field}'`;
-      return `${nullCheckLhs} IS ${f.operator === 'eq' ? '' : 'NOT '}NULL`;
-    }
-
-    // Bug #35: contains must wrap the value in %...% and use ILIKE for
-    // case-insensitive substring matching. The raw value is escaped so that
-    // user-provided % and _ are treated as literal characters.
-    if (f.operator === 'contains') {
-      const escaped = String(f.value).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
-      params.push(`%${escaped}%`);
-      // ILIKE on text is fine; on ::numeric it would error, but contains
-      // on numeric properties is ill-defined so we use the raw text LHS.
-      const textLhs = `properties->>'${f.field}'`;
-      return `${textLhs} ILIKE $${params.length}`;
-    }
-
-    const opSql = FILTER_TO_SQL[f.operator];
-    params.push(f.value);
-    return `${lhs} ${opSql} $${params.length}`;
-  }
-
-  private appendPermissionPredicates(
-    predicates: Predicate[],
-    wherePieces: string[],
-    params: unknown[],
-  ): string | null {
-    if (!predicates.length) return null;
-    const effectiveForAudit: string[] = [];
-    for (const predicate of predicates) {
-      const fragment = emit(predicate);
-      wherePieces.push(this.mergeFragment(fragment, params));
-      effectiveForAudit.push(JSON.stringify({
-        ast: predicate.ast,
-        params: predicate.params,
-      }));
-    }
-    return effectiveForAudit.join(' AND ');
-  }
-
-  private mergeFragment(
-    fragment: { sql: string; params: unknown[] },
-    params: unknown[],
-  ): string {
-    const offset = params.length;
-    const remapped = fragment.sql.replace(/\$(\d+)/g, (_m, idx) => `$${Number(idx) + offset}`);
-    for (const p of fragment.params) params.push(p);
-    return remapped;
   }
 
   private resolveSort(

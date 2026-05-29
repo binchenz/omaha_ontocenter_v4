@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@omaha/db';
 import { LlmMessage } from '../agent/llm/llm-client.interface';
-import { formatToolResultForLlm } from '../agent/llm/format-tool-result';
+import { toAssistantToolCallMsg, toToolResultMsg } from '../agent/llm/llm-message-mapping';
 
 @Injectable()
 export class ConversationService {
@@ -65,29 +65,19 @@ export class ConversationService {
         const rawCalls = turn.toolCalls as Array<{ id?: string; name: string; args: unknown }>;
         const rawResults = (Array.isArray(turn.toolResults) ? turn.toolResults : []) as Array<{ id?: string; name: string; data: unknown }>;
 
+        // Backfill ids for legacy turns persisted before tool-call ids existed,
+        // then pair calls with results positionally — both are persistence
+        // concerns that stay here, on the replay side.
         const callsWithIds = rawCalls.map((tc, idx) => ({
           id: tc.id ?? `legacy_${idx}`,
           name: tc.name,
           args: tc.args,
         }));
 
-        messages.push({
-          role: 'assistant',
-          content: null,
-          tool_calls: callsWithIds.map(tc => ({
-            id: tc.id,
-            type: 'function' as const,
-            function: { name: tc.name, arguments: JSON.stringify(tc.args) },
-          })),
-        });
+        messages.push(toAssistantToolCallMsg(callsWithIds));
 
         for (let i = 0; i < callsWithIds.length; i++) {
-          const matchingResult = rawResults[i];
-          messages.push({
-            role: 'tool',
-            content: formatToolResultForLlm(matchingResult?.data ?? null),
-            tool_call_id: callsWithIds[i].id,
-          });
+          messages.push(toToolResultMsg(callsWithIds[i].id, rawResults[i]?.data ?? null));
         }
       } else {
         messages.push({
