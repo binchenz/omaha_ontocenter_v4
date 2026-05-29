@@ -69,6 +69,16 @@ pnpm tsx demo-ecommerce/seed-signal.ts
 
 登录 / Login: `admin@demo-ecommerce.local` / `demo2026`
 
+#### 短剧拉片分析 / Short Drama Shot Analysis
+
+```bash
+cd scripts
+pnpm tsx demo-drama/setup.ts
+pnpm tsx demo-drama/seed.ts
+```
+
+登录 / Login: `admin@demo-drama.local` / `demo2026`
+
 ---
 
 ## 文档 / Documentation

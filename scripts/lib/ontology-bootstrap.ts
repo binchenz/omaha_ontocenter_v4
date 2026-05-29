@@ -5,6 +5,7 @@ import { IndexManagerService } from '../../apps/core-api/src/modules/ontology/in
 export interface ObjectTypeSpec {
   name: string;
   label: string;
+  description?: string;
   properties: PropertyDefinition[];
 }
 
@@ -46,6 +47,7 @@ export async function bootstrapOntology(
         where: { id: existing.id },
         data: {
           label: t.label,
+          description: t.description ?? null,
           properties: t.properties as unknown as Prisma.InputJsonValue,
         },
       });
@@ -57,6 +59,7 @@ export async function bootstrapOntology(
           tenantId,
           name: t.name,
           label: t.label,
+          description: t.description ?? null,
           properties: t.properties as unknown as Prisma.InputJsonValue,
         },
       });
