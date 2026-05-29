@@ -71,10 +71,20 @@ pnpm tsx demo-ecommerce/seed-signal.ts
 
 #### 短剧拉片分析 / Short Drama Shot Analysis
 
+**路径①：确定性 e2e 基线**（固定 schema，供 `drama-query.e2e-spec.ts` 使用）
+
 ```bash
 cd scripts
-pnpm tsx demo-drama/setup.ts
-pnpm tsx demo-drama/seed.ts
+pnpm tsx demo-drama/setup.ts   # 建租户 + 本体
+pnpm tsx demo-drama/seed.ts    # 从 HTTP 源灌数据
+```
+
+**路径②：对话式接入 demo**（Agent 自动推断 schema 含语义标注，需 `pnpm dev` 运行中）
+
+```bash
+cd scripts
+pnpm tsx demo-drama/stage-to-pg.ts    # HTTP 源 → 本地 PG 临时表
+pnpm tsx demo-drama/demo-ingestion.ts # 驱动 Agent 完成对话式接入
 ```
 
 登录 / Login: `admin@demo-drama.local` / `demo2026`
