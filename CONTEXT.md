@@ -2,6 +2,8 @@
 
 Ontology-native platform for querying and acting on business objects via natural language. MVP focus: order/payment/review/customer/task for SMB commerce.
 
+The platform is **not** a commercial end-product sold to enterprises directly. It is tooling for an **OPC** who privately deploys it for an SMB, models that SMB's business into an Ontology, and hands off a working data-querying Agent. The product therefore has two distinct faces: a **design-time** modeling workbench (the OPC's tool) and a **runtime** querying Agent (the SMB end users' tool). See `docs/adr/0030-opc-design-runtime-split.md`.
+
 ## Language
 
 **User**:
@@ -106,6 +108,32 @@ _Avoid_: API client, Service layer (in agent context)
 A persistent dialogue session between a User and the Agent. Stores the full sequence of turns (user messages, agent responses, tool calls, results) for audit and context. The Agent dynamically compresses older turns when feeding history to the LLM.
 _Avoid_: Chat, Session, Thread
 
+### Delivery Roles
+
+**OPC** (One Person Company):
+The single operator — typically a data-analyst-background freelancer — who privately deploys the platform for one SMB client, interviews the client to understand the business, models it into an Ontology, loads the client's data, tunes query accuracy, and hands off a working Agent. The OPC is the platform's **design-time** user. Modeled on Palantir's **FDE**. The platform's goal is to maximize OPC delivery throughput, not to close a commercial loop itself.
+_Avoid_: FDE (use OPC in this codebase; FDE is the external reference model), Consultant, Integrator
+
+**FDE** (Forward Deployed Engineer):
+The external reference model (Palantir) that OPC workflows are designed against. An engineer embedded at a customer who models the domain into an ontology, ships a working app fast, and iterates on feedback — backed by tooling for fast modeling, closed-loop validation (Evals/preview), and branch-based change review. Used in design discussions; not a code entity.
+_Avoid_: (don't use as a code identifier — it's a design touchstone)
+
+**Design-time** vs **Runtime**:
+Two disjoint product faces. **Design-time** is the OPC's modeling workbench: schema reverse-inference, ontology editing on a Draft, accuracy Evals, template instantiation, publish. **Runtime** is the SMB end users' querying Agent: read-only natural-language Q&A over the published Ontology. The two have different users, interaction models, histories, and security boundaries; conflating them is the root of the "unclear functionality" problem this split resolves.
+_Avoid_: Build-time, Edit mode / Query mode (those are narrower)
+
+**Ontology Draft**:
+A mutable working copy of a Tenant's Ontology that the OPC edits, reverse-infers into, instantiates templates into, and validates with Evals — before promoting it to the live Ontology via Publish. Exactly two states exist per Tenant: the live **published** Ontology that the runtime Agent reads, and at most one **Draft**. Discarding a Draft is the rollback mechanism. (Lightweight two-state model, not full version history — see `docs/adr/0031-ontology-draft-publish-state.md`.)
+_Avoid_: Branch (no multi-branch), Version (the `version` Int is just an optimistic-lock counter), Snapshot
+
+**Publish** (of an Ontology Draft):
+The OPC-initiated promotion of a Draft to the live Ontology, after which the runtime Agent sees the changes. The one moment design-time changes become visible to runtime users.
+_Avoid_: Deploy, Release, Commit
+
+**Accuracy Eval**:
+A reusable, productized batch probe (generalizing the ad-hoc N=8 probe of ADR-0029) that runs a set of representative natural-language questions against a Draft's Agent and scores whether the generated Query Plans are correct — the OPC's objective go/no-go evidence before Publish. Modeled on Palantir's AIP Evals.
+_Avoid_: Probe (that was the throwaway script), Test, Benchmark
+
 ## Relationships
 
 - A **User** belongs to exactly one **Tenant**
@@ -119,6 +147,9 @@ _Avoid_: Chat, Session, Thread
 - A **Skill** exposes a subset of **Tools** and is auto-activated by the **Agent**
 - A **Conversation** belongs to one **User** and one **Agent** session
 - A **Tool** invokes **SDK** methods; the **SDK** delegates to underlying services (OntologyService, QueryService, etc.)
+- An **OPC** operates **design-time**; SMB end users operate **runtime**; both act within one **Tenant**
+- An **Ontology Draft** belongs to one **Tenant**; **Publish** promotes it to that Tenant's live **Ontology**
+- An **Accuracy Eval** runs against a **Draft** and gates **Publish**
 
 (`Order`, `Customer`, `Payment`, `Review`, `Task` etc. that appear in PRD §7.2 are **example** Object Types used for the demo tenant — they are not platform-level concepts.)
 
