@@ -116,6 +116,14 @@ export class QueryPlannerService {
    * by extending the SELECT/GROUP BY/ORDER BY/LIMIT clause builders only.
    */
   async planAggregate(args: AggregatePlanArgs): Promise<PlannedAggregateQuery> {
+    // Cross-relationship group keys carry a dot: "relationName.field". If any
+    // groupBy entry is cross-rel, delegate to the join planner. Local-only
+    // aggregation keeps the original single-table path untouched.
+    const groupByRaw = args.groupBy ?? [];
+    if (groupByRaw.some((g) => typeof g === 'string' && g.includes('.'))) {
+      return this.planCrossRelAggregate(args);
+    }
+
     const view = await this.viewLoader.load(args.tenantId, args.objectType);
 
     const scope = parentScope({ tenantId: args.tenantId, objectType: args.objectType });
@@ -284,6 +292,211 @@ export class QueryPlannerService {
       params,
       effectivePermissionFilter,
       groupByFields: groupBy,
+      maxGroups: clamped,
+      offset,
+      warnings,
+    };
+  }
+
+  /**
+   * Cross-relationship aggregate (ADR-0027). A groupBy entry "relationName.field"
+   * groups the base type by a field that lives on a *related* type. We isolate
+   * the base type's scoped/filtered rows in a subquery (so the existing
+   * ScopedWhere column references stay unambiguous, zero changes there) and JOIN
+   * to the related instances on the JSONB foreign key.
+   *
+   * v1 scope: exactly one cross-rel relation per query, joined as the base type's
+   * parent (fkSide='self'; the base row holds relationships->>'<rel>' =
+   * parentExternalId). Local groupBy keys may be mixed in. Metrics/filters apply
+   * to the base type.
+   */
+  private async planCrossRelAggregate(args: AggregatePlanArgs): Promise<PlannedAggregateQuery> {
+    const view = await this.viewLoader.load(args.tenantId, args.objectType);
+    const groupByRaw = args.groupBy ?? [];
+
+    // Partition local vs cross-rel keys.
+    const localKeys: string[] = [];
+    const crossKeys: Array<{ raw: string; relation: string; field: string }> = [];
+    for (const g of groupByRaw) {
+      if (typeof g === 'string' && g.includes('.')) {
+        const dot = g.indexOf('.');
+        crossKeys.push({ raw: g, relation: g.slice(0, dot), field: g.slice(dot + 1) });
+      } else if (typeof g === 'string') {
+        localKeys.push(g);
+      }
+    }
+    if (crossKeys.length > 1) {
+      throw new BadRequestException({
+        error: {
+          code: 'MULTI_CROSS_REL_NOT_SUPPORTED',
+          hint: 'Only one cross-relationship group key is supported per query.',
+        },
+      });
+    }
+    const cross = crossKeys[0];
+
+    // Resolve the relation by name (direction-agnostic) → other type + storage key.
+    const resolved = await this.viewLoader.resolveRelationByName(args.tenantId, args.objectType, cross.relation);
+    if (!resolved) {
+      throw new BadRequestException({
+        error: {
+          code: 'UNKNOWN_RELATION',
+          relation: cross.relation,
+          objectType: args.objectType,
+          hint: `'${cross.relation}' is not a relationship on '${args.objectType}'. Use a relation name shown in the schema (e.g. "relationName.field").`,
+        },
+      });
+    }
+    if (resolved.fkSide !== 'self') {
+      // The base type is the parent (one-side); the FK lives on the child. v1
+      // only joins to the parent. Reject clearly rather than emit wrong SQL.
+      throw new BadRequestException({
+        error: {
+          code: 'CROSS_REL_DIRECTION_UNSUPPORTED',
+          relation: cross.relation,
+          hint: `Cross-relationship grouping from '${args.objectType}' via '${cross.relation}' is only supported toward the parent side in v1.`,
+        },
+      });
+    }
+
+    // Validate the related field is groupable on the OTHER type's view.
+    const otherView = await this.viewLoader.load(args.tenantId, resolved.otherType);
+    if (otherView && otherView.filterableFields.size > 0 && !otherView.filterableFields.has(cross.field)) {
+      throw new BadRequestException({
+        error: {
+          code: 'PROPERTY_NOT_GROUPABLE',
+          property: cross.field,
+          objectType: resolved.otherType,
+          hint: `Property '${cross.field}' is not groupable on related type '${resolved.otherType}'.`,
+        },
+      });
+    }
+    // Validate local groupBy keys against the base view (same rule as planAggregate).
+    if (view) {
+      for (const lk of localKeys) {
+        if (view.filterableFields.size > 0 && !view.filterableFields.has(lk)) {
+          throw new BadRequestException({
+            error: {
+              code: 'PROPERTY_NOT_GROUPABLE',
+              property: lk,
+              objectType: args.objectType,
+              hint: `Property '${lk}' is not groupable on '${args.objectType}'.`,
+            },
+          });
+        }
+      }
+    }
+
+    return this.buildCrossRelSql(args, view, localKeys, cross, resolved);
+  }
+
+  private buildCrossRelSql(
+    args: AggregatePlanArgs,
+    view: OntologyView | null,
+    localKeys: string[],
+    cross: { raw: string; relation: string; field: string },
+    resolved: { otherType: string; storageKey: string; fkSide: 'self' | 'other' },
+  ): PlannedAggregateQuery {
+    // Base rows: scoped + filtered in a subquery so existing ScopedWhere column
+    // refs (bare `properties`, `tenant_id`, …) stay unambiguous. Expose
+    // properties + relationships so the outer query can join and read fields.
+    const scope = parentScope({ tenantId: args.tenantId, objectType: args.objectType });
+    const scoped = new ScopedWhere(scope)
+      .filters(args.filters, view, args.objectType)
+      .predicates(args.permissionPredicates);
+    const { where, params, effectivePermissionFilter } = scoped.build();
+
+    // Outer params continue numbering after the subquery's params.
+    const outParams: unknown[] = [...params];
+    const tenantParamIdx = outParams.push(args.tenantId);          // $N for e.tenant_id
+    const otherTypeParamIdx = outParams.push(resolved.otherType);  // $N for e.object_type
+
+    // GROUP BY exprs + SELECT aliases. The cross key uses its full dotted path as
+    // alias so the service reads it back by the original groupBy string.
+    const groupExprs: string[] = [];
+    const selectGroupExprs: string[] = [];
+    for (const lk of localKeys) {
+      groupExprs.push(`(s.properties->>'${lk}')`);
+      selectGroupExprs.push(`(s.properties->>'${lk}') AS "${lk}"`);
+    }
+    const crossExpr = `(e.properties->>'${cross.field}')`;
+    groupExprs.push(crossExpr);
+    selectGroupExprs.push(`${crossExpr} AS "${cross.raw}"`);
+
+    // Metric SELECTs (operate on base rows, prefixed s.).
+    const numericKinds = new Set(['sum', 'avg', 'min', 'max']);
+    const metricExprs: string[] = [];
+    for (const m of args.metrics) {
+      if (m.kind === 'count') { metricExprs.push(`count(*)::int AS "${m.alias}"`); continue; }
+      if (m.kind === 'countDistinct') {
+        if (!m.field) throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, hint: `'countDistinct' requires a 'field'.` } });
+        metricExprs.push(`count(DISTINCT (s.properties->>'${m.field}'))::int AS "${m.alias}"`);
+        continue;
+      }
+      if (numericKinds.has(m.kind)) {
+        if (!m.field) throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, hint: `Metric kind '${m.kind}' requires a 'field'.` } });
+        if (view && view.numericFields.size > 0 && !view.numericFields.has(m.field)) {
+          const numericList = Array.from(view.numericFields).join(', ') || '(none declared)';
+          throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, field: m.field, kind: m.kind, hint: `Metric '${m.kind}' requires a numeric property. Available numeric fields on '${args.objectType}': ${numericList}.` } });
+        }
+        metricExprs.push(`${m.kind.toUpperCase()}((s.properties->>'${m.field}')::numeric) AS "${m.alias}"`);
+        continue;
+      }
+      throw new Error(`metric kind '${m.kind}' not supported in cross-rel v1`);
+    }
+    // orderBy (single key; same validation contract as planAggregate).
+    const allGroupByOut = [...localKeys, cross.raw];
+    let orderByClause = '';
+    if ((args.orderBy ?? []).length > 1) {
+      throw new BadRequestException({ error: { code: 'MULTI_KEY_SORT_NOT_SUPPORTED', hint: 'Provide at most one orderBy entry.' } });
+    }
+    const ob = (args.orderBy ?? [])[0];
+    if (ob) {
+      const dir = ob.direction === 'asc' ? 'ASC' : 'DESC';
+      if (ob.kind === 'metric') {
+        const aliases = args.metrics.map((m) => m.alias);
+        if (!aliases.includes(ob.by)) throw new BadRequestException({ error: { code: 'UNKNOWN_METRIC_ALIAS', alias: ob.by, validAliases: aliases, hint: `orderBy.by '${ob.by}' is not a metric alias.` } });
+        orderByClause = `ORDER BY "${ob.by}" ${dir} NULLS LAST`;
+      } else {
+        if (!allGroupByOut.includes(ob.by)) throw new BadRequestException({ error: { code: 'UNKNOWN_METRIC_ALIAS', alias: ob.by, hint: `orderBy.by '${ob.by}' is a groupKey but not in groupBy.` } });
+        orderByClause = `ORDER BY "${ob.by}" ${dir} NULLS LAST`;
+      }
+    }
+
+    const MAX_GROUPS_DEFAULT = 100;
+    const MAX_GROUPS_HARD_CAP = 500;
+    const requested = args.maxGroups ?? MAX_GROUPS_DEFAULT;
+    const clamped = Math.min(requested, MAX_GROUPS_HARD_CAP);
+    const warnings: string[] = [];
+    if (requested > MAX_GROUPS_HARD_CAP) warnings.push(`maxGroups clamped from ${requested} to ${MAX_GROUPS_HARD_CAP}`);
+
+    let offset = 0;
+    if (args.pageToken) {
+      try {
+        const decoded = JSON.parse(Buffer.from(args.pageToken, 'base64').toString('utf8'));
+        if (typeof decoded.offset === 'number') offset = decoded.offset;
+      } catch {
+        throw new BadRequestException({ error: { code: 'STALE_PAGE_TOKEN', hint: 'pageToken is malformed; restart pagination.' } });
+      }
+    }
+
+    const sql = `
+      SELECT ${[...selectGroupExprs, ...metricExprs].join(', ')}
+      FROM (SELECT properties, relationships FROM object_instances WHERE ${where}) s
+      JOIN object_instances e
+        ON e.external_id = (s.relationships->>'${resolved.storageKey}')
+       AND e.tenant_id = $${tenantParamIdx}::uuid
+       AND e.object_type = $${otherTypeParamIdx}
+      GROUP BY ${groupExprs.join(', ')}
+      ${orderByClause}
+      OFFSET ${offset} LIMIT ${clamped + 1}
+    `;
+
+    return {
+      sql,
+      params: outParams,
+      effectivePermissionFilter,
+      groupByFields: allGroupByOut,
       maxGroups: clamped,
       offset,
       warnings,
