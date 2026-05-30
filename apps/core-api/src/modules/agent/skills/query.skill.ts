@@ -16,6 +16,13 @@ export class QuerySkill implements AgentSkill {
    不要用 query_objects 翻页统计——遇到聚合性问题直接用 aggregate_objects。
 3. 用中文总结结果，必要时用表格展示
 
+跨关系聚合（重要）：
+当问题形如"每个/各/哪个 <父对象> 的 <子对象指标>"（如"每部剧的镜头数/镜头平均时长"），指标在子对象上、分组维度在父对象上：
+- 聚合【子对象】，用 dot-path groupBy "<关系名>.<父字段>"，指标作用在子对象字段上。
+  例：每部剧的镜头数 → aggregate_objects(shot, groupBy:["episode_shots.series"], metrics:[{kind:count}])。
+- 不要改成聚合父对象、也不要用父对象上的预聚合/汇总字段（如 episode.shotCount、episode.clipDuration）来代替——那是冗余快照，未必与子对象明细一致，会算错。
+- "哪个 <父对象> 的 <子指标> 最多/最高/最长"是排名问题：必须 groupBy + orderBy(该指标, desc)，不能省略 groupBy 直接聚合（否则得到的是全局合计或父对象计数，而非分组排名）。
+
 效率原则（重要）：
 - 拿到 schema 后，一次性规划好所有需要的工具调用，不要反复试探
 - 如果一个问题需要多维度分析（如"X和Y有关系吗"），用一次 aggregate_objects 按 X 分组统计 Y 的均值即可得出结论
