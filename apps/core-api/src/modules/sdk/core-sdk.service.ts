@@ -14,7 +14,7 @@ export interface OntologySchema {
     name: string;
     label: string;
     description?: string;
-    properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean; description?: string; unit?: string }>;
+    properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean; description?: string; unit?: string; allowedValues?: string[] }>;
     derivedProperties: Array<{ name: string; type: string; label: string }>;
   }>;
   relationships: Array<{
@@ -67,7 +67,7 @@ export class CoreSdkService {
         description: t.description ?? undefined,
         properties: (t.properties ?? []).map((p: any) => ({
           name: p.name, type: p.type, label: p.label, filterable: p.filterable, sortable: p.sortable,
-          description: p.description, unit: p.unit,
+          description: p.description, unit: p.unit, allowedValues: p.allowedValues,
         })),
         derivedProperties: (t.derivedProperties ?? []).map((d: any) => ({
           name: d.name, type: d.type, label: d.label,
@@ -110,6 +110,10 @@ export class CoreSdkService {
           if (p.description) {
             const d = p.description.length > MAX_DESC ? `${p.description.slice(0, MAX_DESC)}…` : p.description;
             s += `{${d}}`;
+          }
+          if (p.allowedValues && p.allowedValues.length > 0) {
+            const shown = p.allowedValues.slice(0, 8).join('|');
+            s += `=(${shown}${p.allowedValues.length > 8 ? '|…' : ''})`;
           }
           return s;
         })

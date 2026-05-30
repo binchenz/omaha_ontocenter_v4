@@ -9,6 +9,14 @@ export interface PropertyDefinition {
   scale?: number;
   description?: string;
   unit?: string;
+  /**
+   * Controlled value set for a low-cardinality string field (e.g. status,
+   * grade, relation type). A hard constraint: instance values outside this set
+   * are rejected at import time. Only meaningful for `type: 'string'`.
+   * Normalization of dirty source values is an upstream ETL concern — the
+   * ontology only gates, it does not clean.
+   */
+  allowedValues?: string[];
 }
 
 export interface DerivedPropertyDefinition extends PropertyDefinition {

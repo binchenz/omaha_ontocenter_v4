@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@omaha/db';
+import { PropertyDefinition, validateInstanceProperties, AllowedValueViolation } from '@omaha/shared-types';
 import { FileParserService } from '../tools/file-parser.service';
 import { TypeResolver } from './type-resolver.service';
 import * as path from 'path';
@@ -33,6 +34,32 @@ export class ImportEngine {
     const rows = await this.fileParser.parseAll(params.filePath);
     if (rows.length === 0) {
       return { imported: 0, skipped: 0, objectType: params.objectType };
+    }
+
+    // Hard gate: reject the whole batch if any value violates a property's
+    // allowedValues. Normalization of dirty source data is an upstream concern;
+    // the importer only gates (ADR: Property.allowedValues).
+    const objectType = await this.prisma.objectType.findFirst({
+      where: { tenantId, name: params.objectType },
+      select: { properties: true },
+    });
+    const propertyDefs = (objectType?.properties ?? []) as unknown as PropertyDefinition[];
+    const hasConstraints = propertyDefs.some((p) => p.allowedValues && p.allowedValues.length > 0);
+    if (hasConstraints) {
+      const violations: Array<AllowedValueViolation & { row: number }> = [];
+      rows.forEach((row, idx) => {
+        for (const v of validateInstanceProperties(row as Record<string, unknown>, propertyDefs)) {
+          violations.push({ ...v, row: idx + 1 });
+        }
+      });
+      if (violations.length > 0) {
+        const preview = violations.slice(0, 5)
+          .map((v) => `第${v.row}行 ${v.field}="${v.value}"（合法值：${v.allowed.join('/')}）`)
+          .join('；');
+        throw new BadRequestException(
+          `导入被拒绝：${violations.length} 处值不在字段的合法值范围内。请先在数据源/ETL 中规范化后再导入。示例：${preview}`,
+        );
+      }
     }
 
     let imported = 0;
