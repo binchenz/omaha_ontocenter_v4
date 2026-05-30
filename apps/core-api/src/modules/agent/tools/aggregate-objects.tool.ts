@@ -29,7 +29,7 @@ export class AggregateObjectsTool implements AgentTool {
             value: {},
           },
         },
-        description: '过滤条件数组（同 query_objects）。注意：当用户说"大于 X"、"高于 X"时，倾向用 gte（含 X），除非明确说"严格大于"/"不含 X"。',
+        description: '过滤条件数组（同 query_objects）。注意边界含/不含：“大于/高于/超过 X”用 gt（不含 X），“至少/不少于/不超过 X”等用 gte/lte（含 X）。',
       },
       groupBy: {
         type: 'array',

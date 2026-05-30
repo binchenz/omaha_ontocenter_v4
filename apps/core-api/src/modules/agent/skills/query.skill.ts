@@ -28,6 +28,8 @@ export class QuerySkill implements AgentSkill {
 - 只用带 ↕ 的字段做 query_objects 的排序
 - query_objects 的 contains 当前对 json/array 字段（如 tags）不工作；遇到 PROPERTY_NOT_FILTERABLE 时改用 search 参数做全文搜索
 - aggregate_objects 的 groupBy 同样不支持 json/array 字段（PROPERTY_NOT_GROUPABLE），改用 search 后由 Agent 自己整理
-- 当用户说"大于 X"、"高于 X"、"超过 X"时，倾向用 gte 操作符（含 X），除非明确说"严格大于"或"不含 X"`;
+- 过滤的边界要按中文字面严格区分含/不含边界值：
+  - "大于/高于/超过 X" → gt（不含 X）；"小于/低于/少于 X" → lt（不含 X）
+  - "至少/不少于/不低于 X"、"X 及以上" → gte（含 X）；"至多/最多/不超过/不多于 X"、"X 及以下" → lte（含 X）`;
   }
 }
