@@ -16,6 +16,7 @@ interface AgentEvent {
   conversationId?: string;
   toolName?: string;
   id?: string;
+  planSummary?: string;
 }
 
 interface Message {
@@ -23,6 +24,7 @@ interface Message {
   content: string;
   toolCalls?: Array<{ name: string; args: unknown }>;
   toolResults?: Array<{ name: string; data: unknown }>;
+  planSummaries?: string[];
   confirmationId?: string;
   confirmationArgs?: Record<string, unknown>;
   confirmed?: boolean | null;
@@ -83,10 +85,16 @@ export default function ChatPage() {
       });
       if (res.ok) {
         const turns = await res.json();
-        setMessages(turns.map((t: { role: string; content: string | null }) => ({
-          role: t.role === 'user' ? 'user' : 'assistant',
-          content: t.content ?? '',
-        })));
+        setMessages(turns.map((t: { role: string; content: string | null; toolCalls?: Array<{ planSummary?: string }> }) => {
+          const planSummaries = Array.isArray(t.toolCalls)
+            ? t.toolCalls.map((tc) => tc.planSummary).filter((s): s is string => !!s)
+            : [];
+          return {
+            role: t.role === 'user' ? 'user' : 'assistant',
+            content: t.content ?? '',
+            planSummaries: planSummaries.length ? planSummaries : undefined,
+          };
+        }));
       }
     } catch {}
   };
@@ -152,6 +160,7 @@ export default function ChatPage() {
     const decoder = new TextDecoder();
     let buffer = '';
     let assistantContent = '';
+    const planSummaries: string[] = [];
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -162,11 +171,18 @@ export default function ChatPage() {
         if (!line.startsWith('data: ')) continue;
         try {
           const event: AgentEvent = JSON.parse(line.slice(6));
+          if (event.type === 'tool_call' && event.planSummary) planSummaries.push(event.planSummary);
           handleEvent(event, (content) => { assistantContent = content; });
         } catch {}
       }
     }
-    if (assistantContent) setMessages(prev => [...prev, { role: 'assistant', content: assistantContent }]);
+    if (assistantContent) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: assistantContent,
+        planSummaries: planSummaries.length ? planSummaries : undefined,
+      }]);
+    }
   };
 
   const handleEvent = (event: AgentEvent, setContent: (s: string) => void) => {

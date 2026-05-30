@@ -30,6 +30,7 @@ import { QuerySkill } from './skills/query.skill';
 import { DataIngestionSkill } from './skills/data-ingestion.skill';
 import { OntologyDesignSkill } from './skills/ontology-design.skill';
 import { AgentBootstrap } from './agent.bootstrap';
+import { PlanSummarizer } from './plan-summarizer.service';
 import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
 
 @Module({
@@ -69,10 +70,11 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
     },
     {
       provide: OrchestratorService,
-      useFactory: (llm: LlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate) =>
-        new OrchestratorService(llm, tools, skills, gate),
-      inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate],
+      useFactory: (llm: LlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate, planSummarizer: PlanSummarizer) =>
+        new OrchestratorService(llm, tools, skills, gate, planSummarizer),
+      inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate, PlanSummarizer],
     },
+    PlanSummarizer,
     AgentBootstrap,
   ],
 })

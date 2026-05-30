@@ -7,6 +7,7 @@ import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { ConversationService } from '../conversation/conversation.service';
 import { CoreSdkService } from '../sdk/core-sdk.service';
 import { SseAgentRunner } from './sse/sse-agent-runner.service';
+import { PlanSummarizer } from './plan-summarizer.service';
 import { ChatDto } from './dto/chat.dto';
 
 @Controller('agent')
@@ -17,6 +18,7 @@ export class AgentController {
     private readonly conversationService: ConversationService,
     private readonly sseRunner: SseAgentRunner,
     private readonly sdk: CoreSdkService,
+    private readonly planSummarizer: PlanSummarizer,
   ) {}
 
   @Get('conversations')
@@ -26,7 +28,22 @@ export class AgentController {
 
   @Get('conversations/:id/turns')
   async getConversationTurns(@CurrentUser() user: CurrentUserType, @Param('id') id: string) {
-    return this.conversationService.getHistory(id);
+    const turns = await this.conversationService.getHistory(id);
+    // Enrich persisted tool calls with a back-translated planSummary so reloaded
+    // conversations show the same query-plan transparency as live streaming (ADR-0029).
+    return Promise.all(
+      turns.map(async (turn) => {
+        if (!Array.isArray(turn.toolCalls) || turn.toolCalls.length === 0) return turn;
+        const enriched = await Promise.all(
+          (turn.toolCalls as Array<{ name: string; args: Record<string, unknown> }>).map(async (tc) => ({
+            ...tc,
+            planSummary:
+              (await this.planSummarizer.summarize(user.tenantId, tc.name, tc.args ?? {})) ?? undefined,
+          })),
+        );
+        return { ...turn, toolCalls: enriched };
+      }),
+    );
   }
 
   @Post('confirm')

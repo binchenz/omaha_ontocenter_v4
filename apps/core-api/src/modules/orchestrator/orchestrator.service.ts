@@ -6,9 +6,10 @@ import { AgentSkill, SkillContext } from '../agent/skills/skill.interface';
 import { ConfirmationGate } from '../agent/confirmation/confirmation-gate.service';
 import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
 import { estimateTokens, PROMPT_BUDGET_WARN, PROMPT_BUDGET_ERROR } from '../agent/prompt-budget';
+import { PlanSummarizer } from '../agent/plan-summarizer.service';
 
 export type AgentEvent =
-  | { type: 'tool_call'; id: string; name: string; args: Record<string, unknown> }
+  | { type: 'tool_call'; id: string; name: string; args: Record<string, unknown>; planSummary?: string }
   | { type: 'tool_result'; id: string; name: string; data: unknown }
   | { type: 'text'; content: string }
   | { type: 'confirmation_request'; id: string; toolName: string; args: Record<string, unknown>; message: string }
@@ -37,6 +38,7 @@ export class OrchestratorService {
     private readonly tools: AgentTool[],
     private readonly skills: AgentSkill[] = [],
     private readonly confirmationGate?: ConfirmationGate,
+    private readonly planSummarizer?: PlanSummarizer,
   ) {}
 
   async *run(input: RunInput): AsyncGenerator<AgentEvent> {
@@ -138,7 +140,10 @@ export class OrchestratorService {
       ));
 
       for (const call of response.calls) {
-        yield { type: 'tool_call', id: call.id, name: call.name, args: call.arguments };
+        const planSummary = this.planSummarizer
+          ? (await this.planSummarizer.summarize(input.user.tenantId, call.name, call.arguments)) ?? undefined
+          : undefined;
+        yield { type: 'tool_call', id: call.id, name: call.name, args: call.arguments, planSummary };
 
         const tool = this.tools.find(t => t.name === call.name);
         if (!tool) {

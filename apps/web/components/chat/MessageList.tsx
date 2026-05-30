@@ -7,6 +7,7 @@ interface Message {
   content: string;
   toolCalls?: Array<{ name: string; args: unknown }>;
   toolResults?: Array<{ name: string; data: unknown }>;
+  planSummaries?: string[];
   confirmationId?: string;
   confirmationArgs?: Record<string, unknown>;
   confirmed?: boolean | null;
@@ -95,19 +96,33 @@ interface MessageListProps {
 
         return (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] rounded-xl px-4 py-2.5 text-sm ${
-              msg.role === 'user' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-900'
-            }`}>
-              {msg.fileInfo && (
-                <div className="flex items-center gap-1.5 mb-1 text-xs opacity-75">
-                  <span>📎</span>
-                  <span>{msg.fileInfo.name}</span>
-                </div>
-              )}
-              {msg.role === 'user' ? (
-                <div className="whitespace-pre-wrap">{msg.content}</div>
-              ) : (
-                <Markdown content={msg.content} />
+            <div className={`flex flex-col max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className={`rounded-xl px-4 py-2.5 text-sm ${
+                msg.role === 'user' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-900'
+              }`}>
+                {msg.fileInfo && (
+                  <div className="flex items-center gap-1.5 mb-1 text-xs opacity-75">
+                    <span>📎</span>
+                    <span>{msg.fileInfo.name}</span>
+                  </div>
+                )}
+                {msg.role === 'user' ? (
+                  <div className="whitespace-pre-wrap">{msg.content}</div>
+                ) : (
+                  <Markdown content={msg.content} />
+                )}
+              </div>
+              {msg.role === 'assistant' && msg.planSummaries && msg.planSummaries.length > 0 && (
+                <details className="mt-1 text-xs text-gray-500">
+                  <summary className="cursor-pointer select-none hover:text-gray-700">
+                    📋 数据来源
+                  </summary>
+                  <ul className="mt-1 ml-4 space-y-0.5 list-disc text-gray-600">
+                    {msg.planSummaries.map((s, j) => (
+                      <li key={j}>{s}</li>
+                    ))}
+                  </ul>
+                </details>
               )}
             </div>
           </div>
