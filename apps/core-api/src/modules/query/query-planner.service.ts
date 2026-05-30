@@ -136,147 +136,28 @@ export class QueryPlannerService {
     // Non-filterable / json-typed fields (e.g. tags) cannot be grouped on;
     // emit PROPERTY_NOT_GROUPABLE so the agent can fall back to search.
     const groupBy = args.groupBy ?? [];
-    if (view) {
-      for (const field of groupBy) {
-        if (view.filterableFields.size > 0 && !view.filterableFields.has(field)) {
-          throw new BadRequestException({
-            error: {
-              code: 'PROPERTY_NOT_GROUPABLE',
-              property: field,
-              objectType: args.objectType,
-              hint: `Property '${field}' is not groupable. json/array properties cannot be group keys; if you wanted to filter by it, try the 'search' parameter on query_objects instead.`,
-            },
-          });
-        }
-      }
-    }
+    for (const field of groupBy) this.assertGroupable(field, view, args.objectType);
 
     const groupExprs = groupBy.map((f) => `(properties->>'${f}')`);
 
-    // Metric SELECT clauses.
-    const numericKinds = new Set(['sum', 'avg', 'min', 'max']);
-    const selectExprs: string[] = [];
     // groupBy fields appear in SELECT first so the service layer can read
     // them keyed by the original property name.
-    for (let i = 0; i < groupBy.length; i++) {
-      selectExprs.push(`${groupExprs[i]} AS "${groupBy[i]}"`);
-    }
-    for (const m of args.metrics) {
-      if (m.kind === 'count') {
-        selectExprs.push(`count(*)::int AS "${m.alias}"`);
-        continue;
-      }
-      if (m.kind === 'countDistinct') {
-        if (!m.field) {
-          throw new BadRequestException({
-            error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, hint: `'countDistinct' requires a 'field'.` },
-          });
-        }
-        // No ::numeric cast — count distinct works over any text.
-        selectExprs.push(`count(DISTINCT (properties->>'${m.field}'))::int AS "${m.alias}"`);
-        continue;
-      }
-      if (numericKinds.has(m.kind)) {
-        if (!m.field) {
-          throw new BadRequestException({
-            error: {
-              code: 'METRIC_INVALID_FIELD_TYPE',
-              alias: m.alias,
-              hint: `Metric kind '${m.kind}' requires a 'field'.`,
-            },
-          });
-        }
-        if (view && view.numericFields.size > 0 && !view.numericFields.has(m.field)) {
-          const numericList = Array.from(view.numericFields).join(', ') || '(none declared)';
-          throw new BadRequestException({
-            error: {
-              code: 'METRIC_INVALID_FIELD_TYPE',
-              alias: m.alias,
-              field: m.field,
-              kind: m.kind,
-              hint: `Metric '${m.kind}' requires a numeric property. Available numeric fields on '${args.objectType}': ${numericList}.`,
-            },
-          });
-        }
-        const fn = m.kind.toUpperCase();
-        // Cast to numeric matches the bug-#33 sort fix convention.
-        selectExprs.push(`${fn}((properties->>'${m.field}')::numeric) AS "${m.alias}"`);
-        continue;
-      }
-      // countDistinct lands in #43.
-      throw new Error(`metric kind '${m.kind}' not yet supported in v1`);
-    }
+    const selectExprs: string[] = groupBy.map((f, i) => `${groupExprs[i]} AS "${f}"`);
+    selectExprs.push(...this.buildMetricExprs(args.metrics, view, args.objectType, (f) => `properties->>'${f}'`));
 
     const groupByClause = groupBy.length > 0
       ? `GROUP BY ${groupExprs.join(', ')}`
       : '';
 
-    // orderBy validation + SQL generation.
-    const orderByList = args.orderBy ?? [];
-    if (orderByList.length > 1) {
-      throw new BadRequestException({
-        error: {
-          code: 'MULTI_KEY_SORT_NOT_SUPPORTED',
-          hint: 'Multi-key sort not supported in v1. Provide at most one orderBy entry.',
-        },
-      });
-    }
-    let orderByClause = '';
-    if (orderByList.length === 1) {
-      const ob = orderByList[0];
-      const dir = ob.direction === 'asc' ? 'ASC' : 'DESC';
-      if (ob.kind === 'metric') {
-        const validAliases = args.metrics.map((m) => m.alias);
-        if (!validAliases.includes(ob.by)) {
-          throw new BadRequestException({
-            error: {
-              code: 'UNKNOWN_METRIC_ALIAS',
-              alias: ob.by,
-              validAliases,
-              hint: `orderBy.by '${ob.by}' is not a declared metric alias. Valid aliases: ${validAliases.join(', ')}.`,
-            },
-          });
-        }
-        orderByClause = `ORDER BY "${ob.by}" ${dir} NULLS LAST`;
-      } else {
-        // groupKey
-        if (!groupBy.includes(ob.by)) {
-          throw new BadRequestException({
-            error: {
-              code: 'UNKNOWN_METRIC_ALIAS',
-              alias: ob.by,
-              hint: `orderBy.by '${ob.by}' is a groupKey but not in groupBy: [${groupBy.join(', ')}].`,
-            },
-          });
-        }
-        orderByClause = `ORDER BY (properties->>'${ob.by}') ${dir} NULLS LAST`;
-      }
-    }
-
-    // maxGroups clamp (per ADR-0017): default 100, max 500. Clamp + warn,
-    // never reject. The SQL requests +1 to detect truncation cheaply.
-    const MAX_GROUPS_DEFAULT = 100;
-    const MAX_GROUPS_HARD_CAP = 500;
-    const requestedMaxGroups = args.maxGroups ?? MAX_GROUPS_DEFAULT;
-    const clamped = Math.min(requestedMaxGroups, MAX_GROUPS_HARD_CAP);
-    const warnings: string[] = [];
-    if (requestedMaxGroups > MAX_GROUPS_HARD_CAP) {
-      warnings.push(`maxGroups clamped from ${requestedMaxGroups} to ${MAX_GROUPS_HARD_CAP}`);
-    }
-
-    // pageToken = base64({ sqlHash, offset }). The hash is recomputed on
-    // follow-up to detect spec drift; mismatch → STALE_PAGE_TOKEN.
-    let offset = 0;
-    if (args.pageToken) {
-      try {
-        const decoded = JSON.parse(Buffer.from(args.pageToken, 'base64').toString('utf8'));
-        if (typeof decoded.offset === 'number') offset = decoded.offset;
-      } catch {
-        throw new BadRequestException({
-          error: { code: 'STALE_PAGE_TOKEN', hint: 'pageToken is malformed; restart pagination.' },
-        });
-      }
-    }
+    // orderBy / maxGroups / pageToken via shared builders.
+    const orderByClause = this.buildOrderByClause(
+      args.orderBy,
+      args.metrics.map((m) => m.alias),
+      groupBy,
+      (by) => `(properties->>'${by}')`,
+    );
+    const { clamped, warnings } = this.clampMaxGroups(args.maxGroups);
+    const offset = this.decodeOffset(args.pageToken);
 
     const sql = `
       SELECT ${selectExprs.join(', ')}
@@ -311,39 +192,42 @@ export class QueryPlannerService {
    * to the base type.
    */
   private async planCrossRelAggregate(args: AggregatePlanArgs): Promise<PlannedAggregateQuery> {
-    const view = await this.viewLoader.load(args.tenantId, args.objectType);
     const groupByRaw = args.groupBy ?? [];
 
-    // Partition local vs cross-rel keys.
+    // Partition local vs cross-rel keys. groupBy is string[]; a dot marks a
+    // cross-rel "relationName.field" key. v1 allows at most one cross-rel key.
     const localKeys: string[] = [];
-    const crossKeys: Array<{ raw: string; relation: string; field: string }> = [];
+    let cross: { raw: string; relation: string; field: string } | null = null;
     for (const g of groupByRaw) {
-      if (typeof g === 'string' && g.includes('.')) {
-        const dot = g.indexOf('.');
-        crossKeys.push({ raw: g, relation: g.slice(0, dot), field: g.slice(dot + 1) });
-      } else if (typeof g === 'string') {
+      const dot = g.indexOf('.');
+      if (dot < 0) {
         localKeys.push(g);
+        continue;
       }
+      if (cross) {
+        throw new BadRequestException({
+          error: { code: 'MULTI_CROSS_REL_NOT_SUPPORTED', hint: 'Only one cross-relationship group key is supported per query.' },
+        });
+      }
+      cross = { raw: g, relation: g.slice(0, dot), field: g.slice(dot + 1) };
     }
-    if (crossKeys.length > 1) {
-      throw new BadRequestException({
-        error: {
-          code: 'MULTI_CROSS_REL_NOT_SUPPORTED',
-          hint: 'Only one cross-relationship group key is supported per query.',
-        },
-      });
-    }
-    const cross = crossKeys[0];
+    // planAggregate only delegates here when a dotted key exists, so cross is
+    // always set; assert for type-narrowing and defence-in-depth.
+    if (!cross) return this.planAggregate({ ...args, groupBy: localKeys });
+    const xkey = cross;
 
-    // Resolve the relation by name (direction-agnostic) → other type + storage key.
-    const resolved = await this.viewLoader.resolveRelationByName(args.tenantId, args.objectType, cross.relation);
+    // Base view + relation resolution are independent — load in parallel.
+    const [view, resolved] = await Promise.all([
+      this.viewLoader.load(args.tenantId, args.objectType),
+      this.viewLoader.resolveRelationByName(args.tenantId, args.objectType, xkey.relation),
+    ]);
     if (!resolved) {
       throw new BadRequestException({
         error: {
           code: 'UNKNOWN_RELATION',
-          relation: cross.relation,
+          relation: xkey.relation,
           objectType: args.objectType,
-          hint: `'${cross.relation}' is not a relationship on '${args.objectType}'. Use a relation name shown in the schema (e.g. "relationName.field").`,
+          hint: `'${xkey.relation}' is not a relationship on '${args.objectType}'. Use a relation name shown in the schema (e.g. "relationName.field").`,
         },
       });
     }
@@ -353,41 +237,23 @@ export class QueryPlannerService {
       throw new BadRequestException({
         error: {
           code: 'CROSS_REL_DIRECTION_UNSUPPORTED',
-          relation: cross.relation,
-          hint: `Cross-relationship grouping from '${args.objectType}' via '${cross.relation}' is only supported toward the parent side in v1.`,
+          relation: xkey.relation,
+          hint: `Cross-relationship grouping from '${args.objectType}' via '${xkey.relation}' is only supported toward the parent side in v1.`,
         },
       });
     }
 
-    // Validate the related field is groupable on the OTHER type's view.
+    // Validate the related field is groupable on the OTHER type's view, and the
+    // local keys on the base view (same rule as planAggregate).
     const otherView = await this.viewLoader.load(args.tenantId, resolved.otherType);
-    if (otherView && otherView.filterableFields.size > 0 && !otherView.filterableFields.has(cross.field)) {
-      throw new BadRequestException({
-        error: {
-          code: 'PROPERTY_NOT_GROUPABLE',
-          property: cross.field,
-          objectType: resolved.otherType,
-          hint: `Property '${cross.field}' is not groupable on related type '${resolved.otherType}'.`,
-        },
-      });
-    }
-    // Validate local groupBy keys against the base view (same rule as planAggregate).
-    if (view) {
-      for (const lk of localKeys) {
-        if (view.filterableFields.size > 0 && !view.filterableFields.has(lk)) {
-          throw new BadRequestException({
-            error: {
-              code: 'PROPERTY_NOT_GROUPABLE',
-              property: lk,
-              objectType: args.objectType,
-              hint: `Property '${lk}' is not groupable on '${args.objectType}'.`,
-            },
-          });
-        }
-      }
-    }
+    this.assertGroupable(xkey.field, otherView, resolved.otherType);
+    for (const lk of localKeys) this.assertGroupable(lk, view, args.objectType);
 
-    return this.buildCrossRelSql(args, view, localKeys, cross, resolved);
+    return this.buildCrossRelSql(args, view, localKeys, xkey, {
+      otherType: resolved.otherType,
+      storageKey: resolved.storageKey,
+      fkSide: 'self',
+    });
   }
 
   private buildCrossRelSql(
@@ -395,7 +261,7 @@ export class QueryPlannerService {
     view: OntologyView | null,
     localKeys: string[],
     cross: { raw: string; relation: string; field: string },
-    resolved: { otherType: string; storageKey: string; fkSide: 'self' | 'other' },
+    resolved: { otherType: string; storageKey: string; fkSide: 'self' },
   ): PlannedAggregateQuery {
     // Base rows: scoped + filtered in a subquery so existing ScopedWhere column
     // refs (bare `properties`, `tenant_id`, …) stay unambiguous. Expose
@@ -411,74 +277,27 @@ export class QueryPlannerService {
     const tenantParamIdx = outParams.push(args.tenantId);          // $N for e.tenant_id
     const otherTypeParamIdx = outParams.push(resolved.otherType);  // $N for e.object_type
 
-    // GROUP BY exprs + SELECT aliases. The cross key uses its full dotted path as
-    // alias so the service reads it back by the original groupBy string.
-    const groupExprs: string[] = [];
-    const selectGroupExprs: string[] = [];
-    for (const lk of localKeys) {
-      groupExprs.push(`(s.properties->>'${lk}')`);
-      selectGroupExprs.push(`(s.properties->>'${lk}') AS "${lk}"`);
-    }
-    const crossExpr = `(e.properties->>'${cross.field}')`;
-    groupExprs.push(crossExpr);
-    selectGroupExprs.push(`${crossExpr} AS "${cross.raw}"`);
-
-    // Metric SELECTs (operate on base rows, prefixed s.).
-    const numericKinds = new Set(['sum', 'avg', 'min', 'max']);
-    const metricExprs: string[] = [];
-    for (const m of args.metrics) {
-      if (m.kind === 'count') { metricExprs.push(`count(*)::int AS "${m.alias}"`); continue; }
-      if (m.kind === 'countDistinct') {
-        if (!m.field) throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, hint: `'countDistinct' requires a 'field'.` } });
-        metricExprs.push(`count(DISTINCT (s.properties->>'${m.field}'))::int AS "${m.alias}"`);
-        continue;
-      }
-      if (numericKinds.has(m.kind)) {
-        if (!m.field) throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, hint: `Metric kind '${m.kind}' requires a 'field'.` } });
-        if (view && view.numericFields.size > 0 && !view.numericFields.has(m.field)) {
-          const numericList = Array.from(view.numericFields).join(', ') || '(none declared)';
-          throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, field: m.field, kind: m.kind, hint: `Metric '${m.kind}' requires a numeric property. Available numeric fields on '${args.objectType}': ${numericList}.` } });
-        }
-        metricExprs.push(`${m.kind.toUpperCase()}((s.properties->>'${m.field}')::numeric) AS "${m.alias}"`);
-        continue;
-      }
-      throw new Error(`metric kind '${m.kind}' not supported in cross-rel v1`);
-    }
-    // orderBy (single key; same validation contract as planAggregate).
+    // GROUP BY exprs + SELECT aliases. Local keys read from base rows (s.), the
+    // cross key from the joined related rows (e.). The cross key uses its full
+    // dotted path as alias so the service reads it back by the groupBy string.
+    const groupExprs = [
+      ...localKeys.map((lk) => `(s.properties->>'${lk}')`),
+      `(e.properties->>'${cross.field}')`,
+    ];
     const allGroupByOut = [...localKeys, cross.raw];
-    let orderByClause = '';
-    if ((args.orderBy ?? []).length > 1) {
-      throw new BadRequestException({ error: { code: 'MULTI_KEY_SORT_NOT_SUPPORTED', hint: 'Provide at most one orderBy entry.' } });
-    }
-    const ob = (args.orderBy ?? [])[0];
-    if (ob) {
-      const dir = ob.direction === 'asc' ? 'ASC' : 'DESC';
-      if (ob.kind === 'metric') {
-        const aliases = args.metrics.map((m) => m.alias);
-        if (!aliases.includes(ob.by)) throw new BadRequestException({ error: { code: 'UNKNOWN_METRIC_ALIAS', alias: ob.by, validAliases: aliases, hint: `orderBy.by '${ob.by}' is not a metric alias.` } });
-        orderByClause = `ORDER BY "${ob.by}" ${dir} NULLS LAST`;
-      } else {
-        if (!allGroupByOut.includes(ob.by)) throw new BadRequestException({ error: { code: 'UNKNOWN_METRIC_ALIAS', alias: ob.by, hint: `orderBy.by '${ob.by}' is a groupKey but not in groupBy.` } });
-        orderByClause = `ORDER BY "${ob.by}" ${dir} NULLS LAST`;
-      }
-    }
+    const selectGroupExprs = groupExprs.map((expr, i) => `${expr} AS "${allGroupByOut[i]}"`);
 
-    const MAX_GROUPS_DEFAULT = 100;
-    const MAX_GROUPS_HARD_CAP = 500;
-    const requested = args.maxGroups ?? MAX_GROUPS_DEFAULT;
-    const clamped = Math.min(requested, MAX_GROUPS_HARD_CAP);
-    const warnings: string[] = [];
-    if (requested > MAX_GROUPS_HARD_CAP) warnings.push(`maxGroups clamped from ${requested} to ${MAX_GROUPS_HARD_CAP}`);
-
-    let offset = 0;
-    if (args.pageToken) {
-      try {
-        const decoded = JSON.parse(Buffer.from(args.pageToken, 'base64').toString('utf8'));
-        if (typeof decoded.offset === 'number') offset = decoded.offset;
-      } catch {
-        throw new BadRequestException({ error: { code: 'STALE_PAGE_TOKEN', hint: 'pageToken is malformed; restart pagination.' } });
-      }
-    }
+    // Metrics operate on the base rows (s.); orderBy/maxGroups/pageToken via the
+    // shared builders. Cross-key ordering uses the SELECT alias, not the json expr.
+    const metricExprs = this.buildMetricExprs(args.metrics, view, args.objectType, (f) => `s.properties->>'${f}'`);
+    const orderByClause = this.buildOrderByClause(
+      args.orderBy,
+      args.metrics.map((m) => m.alias),
+      allGroupByOut,
+      (by) => `"${by}"`,
+    );
+    const { clamped, warnings } = this.clampMaxGroups(args.maxGroups);
+    const offset = this.decodeOffset(args.pageToken);
 
     const sql = `
       SELECT ${[...selectGroupExprs, ...metricExprs].join(', ')}
@@ -501,6 +320,122 @@ export class QueryPlannerService {
       offset,
       warnings,
     };
+  }
+
+  /**
+   * Shared aggregate-builder helpers (used by both the local `planAggregate`
+   * path and the cross-rel `buildCrossRelSql` path). They differ only in the
+   * column source, which the callers inject via `propRef` / `groupKeyExpr`.
+   */
+  private assertGroupable(field: string, view: OntologyView | null, objectType: string): void {
+    if (view && view.filterableFields.size > 0 && !view.filterableFields.has(field)) {
+      throw new BadRequestException({
+        error: {
+          code: 'PROPERTY_NOT_GROUPABLE',
+          property: field,
+          objectType,
+          hint: `Property '${field}' is not groupable on '${objectType}'. json/array properties cannot be group keys; if you wanted to filter by it, try the 'search' parameter on query_objects instead.`,
+        },
+      });
+    }
+  }
+
+  private buildMetricExprs(
+    metrics: AggregateMetric[],
+    view: OntologyView | null,
+    objectType: string,
+    propRef: (field: string) => string,
+  ): string[] {
+    const numericKinds = new Set(['sum', 'avg', 'min', 'max']);
+    const out: string[] = [];
+    for (const m of metrics) {
+      if (m.kind === 'count') {
+        out.push(`count(*)::int AS "${m.alias}"`);
+        continue;
+      }
+      if (!m.field) {
+        const hint = m.kind === 'countDistinct'
+          ? `'countDistinct' requires a 'field'.`
+          : `Metric kind '${m.kind}' requires a 'field'.`;
+        throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, hint } });
+      }
+      if (m.kind === 'countDistinct') {
+        // No ::numeric cast — count distinct works over any text.
+        out.push(`count(DISTINCT (${propRef(m.field)}))::int AS "${m.alias}"`);
+        continue;
+      }
+      if (numericKinds.has(m.kind)) {
+        if (view && view.numericFields.size > 0 && !view.numericFields.has(m.field)) {
+          const numericList = Array.from(view.numericFields).join(', ') || '(none declared)';
+          throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, field: m.field, kind: m.kind, hint: `Metric '${m.kind}' requires a numeric property. Available numeric fields on '${objectType}': ${numericList}.` } });
+        }
+        // Cast to numeric matches the bug-#33 sort fix convention.
+        out.push(`${m.kind.toUpperCase()}((${propRef(m.field)})::numeric) AS "${m.alias}"`);
+        continue;
+      }
+      throw new Error(`metric kind '${m.kind}' not supported`);
+    }
+    return out;
+  }
+
+  /**
+   * orderBy validation + ORDER BY clause. A single key only (v1).
+   * `metricAliases` are valid for kind:'metric'; `groupKeys` for kind:'groupKey'.
+   * `groupKeyExpr` maps a groupKey to its SQL ordering expression — the local
+   * path orders by the raw json expr, the cross-rel path by the SELECT alias.
+   */
+  private buildOrderByClause(
+    orderBy: AggregateOrderBy[] | undefined,
+    metricAliases: string[],
+    groupKeys: string[],
+    groupKeyExpr: (by: string) => string,
+  ): string {
+    const list = orderBy ?? [];
+    if (list.length > 1) {
+      throw new BadRequestException({
+        error: { code: 'MULTI_KEY_SORT_NOT_SUPPORTED', hint: 'Multi-key sort not supported in v1. Provide at most one orderBy entry.' },
+      });
+    }
+    const ob = list[0];
+    if (!ob) return '';
+    const dir = ob.direction === 'asc' ? 'ASC' : 'DESC';
+    if (ob.kind === 'metric') {
+      if (!metricAliases.includes(ob.by)) {
+        throw new BadRequestException({
+          error: { code: 'UNKNOWN_METRIC_ALIAS', alias: ob.by, validAliases: metricAliases, hint: `orderBy.by '${ob.by}' is not a declared metric alias. Valid aliases: ${metricAliases.join(', ')}.` },
+        });
+      }
+      return `ORDER BY "${ob.by}" ${dir} NULLS LAST`;
+    }
+    if (!groupKeys.includes(ob.by)) {
+      throw new BadRequestException({
+        error: { code: 'UNKNOWN_METRIC_ALIAS', alias: ob.by, hint: `orderBy.by '${ob.by}' is a groupKey but not in groupBy: [${groupKeys.join(', ')}].` },
+      });
+    }
+    return `ORDER BY ${groupKeyExpr(ob.by)} ${dir} NULLS LAST`;
+  }
+
+  // maxGroups clamp (per ADR-0017): default 100, max 500. Clamp + warn, never
+  // reject. The SQL requests +1 to detect truncation cheaply.
+  private clampMaxGroups(maxGroups: number | undefined): { clamped: number; warnings: string[] } {
+    const DEFAULT = 100;
+    const HARD_CAP = 500;
+    const requested = maxGroups ?? DEFAULT;
+    const clamped = Math.min(requested, HARD_CAP);
+    const warnings: string[] = [];
+    if (requested > HARD_CAP) warnings.push(`maxGroups clamped from ${requested} to ${HARD_CAP}`);
+    return { clamped, warnings };
+  }
+
+  // pageToken = base64({ offset, … }). Malformed → STALE_PAGE_TOKEN.
+  private decodeOffset(pageToken: string | undefined): number {
+    if (!pageToken) return 0;
+    try {
+      const decoded = JSON.parse(Buffer.from(pageToken, 'base64').toString('utf8'));
+      return typeof decoded.offset === 'number' ? decoded.offset : 0;
+    } catch {
+      throw new BadRequestException({ error: { code: 'STALE_PAGE_TOKEN', hint: 'pageToken is malformed; restart pagination.' } });
+    }
   }
 
   private resolveSort(
