@@ -72,4 +72,46 @@ export class OntologyViewLoader {
     );
     return { view, relationTargets };
   }
+
+  /**
+   * Resolve a relationship by name regardless of direction (relation names are
+   * globally unique per tenant). For cross-relationship aggregation: the LLM
+   * copies the relation name verbatim from the schema string; this maps it to
+   * the "other" object type and the JSONB storage key, so the planner can join
+   * — without the model ever reasoning about link direction.
+   *
+   * The storage key is the relation NAME (seed stores `relationships: { <name>:
+   * <parentExternalId> }`), held on whichever side carries the foreign key.
+   * For a one-to-many `source --name--> target`, the FK lives on the *target*
+   * (many) side pointing at the source's external_id. So from the current type:
+   *   - current == target  → otherType = source, fkSide = 'self'   (we hold the key)
+   *   - current == source  → otherType = target, fkSide = 'other'  (they hold it)
+   */
+  async resolveRelationByName(
+    tenantId: string,
+    currentType: string,
+    relationName: string,
+  ): Promise<{ otherType: string; storageKey: string; fkSide: 'self' | 'other' } | null> {
+    const rel = await this.prisma.objectRelationship.findFirst({
+      where: { tenantId, name: relationName },
+      select: {
+        name: true,
+        cardinality: true,
+        sourceType: { select: { name: true } },
+        targetType: { select: { name: true } },
+      },
+    });
+    if (!rel) return null;
+    const source = rel.sourceType.name;
+    const target = rel.targetType.name;
+    const storageKey = rel.name;
+    if (currentType === target) {
+      // current is the many-side that physically holds the FK
+      return { otherType: source, storageKey, fkSide: 'self' };
+    }
+    if (currentType === source) {
+      return { otherType: target, storageKey, fkSide: 'other' };
+    }
+    return null; // relation does not touch currentType
+  }
 }

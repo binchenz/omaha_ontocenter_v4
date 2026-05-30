@@ -34,7 +34,11 @@ export class AggregateObjectsTool implements AgentTool {
       groupBy: {
         type: 'array',
         items: { type: 'string' },
-        description: '按这些字段分组。每个字段必须是 filterable 的；json/array 类型字段（如 tags）不可分组，会返回 PROPERTY_NOT_GROUPABLE，此时改用 query_objects 的 search 参数。',
+        description: [
+          '按这些字段分组。每个字段必须是 filterable 的；json/array 类型字段（如 tags）不可分组，会返回 PROPERTY_NOT_GROUPABLE，此时改用 query_objects 的 search 参数。',
+          '跨关系分组：当要分组的字段在【关联对象】上而不在当前对象上时，用 "关系名.字段名" 的点路径。关系名见 get_ontology_schema 输出的"关系："行（格式 A→B(关系名)）。',
+          '通用示例（假想 schema）：若 schema 显示 store→order(store_orders)，要把 order 按它所属 store 的 region 分组，写 groupBy: ["store_orders.region"]，而不是 ["region"]（region 不在 order 上）。请把这个模式套用到当前 schema 的实际关系名和字段上。',
+        ].join('\n'),
       },
       metrics: {
         type: 'array',
