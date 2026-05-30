@@ -32,6 +32,7 @@ export class OntologyService {
   }
 
   async createObjectType(tenantId: string, dto: CreateObjectTypeRequest) {
+    this.validateAllowedValues(dto.properties);
     await this.validateDerivedProperties(tenantId, undefined, dto.properties, dto.derivedProperties ?? []);
     const created = await this.prisma.objectType.create({
       data: {
@@ -53,6 +54,7 @@ export class OntologyService {
     const nextDerived = dto.derivedProperties
       ?? ((existing!.derivedProperties ?? []) as unknown as DerivedPropertyDefinition[]);
     if (dto.properties !== undefined || dto.derivedProperties !== undefined) {
+      this.validateAllowedValues(nextProps);
       await this.validateDerivedProperties(tenantId, id, nextProps, nextDerived);
     }
     const updated = await this.prisma.objectType.update({
@@ -134,6 +136,34 @@ export class OntologyService {
       throw new BadRequestException(
         `Derived property cycle detected: ${cycle.join(' -> ')}`,
       );
+    }
+  }
+
+  /**
+   * Gate `allowedValues`: a controlled value set is only meaningful on a string
+   * property, and must be a non-empty, duplicate-free set of non-empty strings.
+   * Mirrors the validate-then-throw pattern of validateDerivedProperties.
+   */
+  private validateAllowedValues(properties: PropertyDefinition[]): void {
+    for (const p of properties) {
+      if (p.allowedValues === undefined) continue;
+      if (!Array.isArray(p.allowedValues) || p.allowedValues.length === 0) {
+        throw new BadRequestException(
+          `Property '${p.name}': allowedValues must be a non-empty array when present.`,
+        );
+      }
+      if (p.type !== 'string') {
+        throw new BadRequestException(
+          `Property '${p.name}': allowedValues is only supported on string fields (got '${p.type}').`,
+        );
+      }
+      const cleaned = p.allowedValues.map((v) => String(v).trim());
+      if (cleaned.some((v) => v === '')) {
+        throw new BadRequestException(`Property '${p.name}': allowedValues must not contain empty strings.`);
+      }
+      if (new Set(cleaned).size !== cleaned.length) {
+        throw new BadRequestException(`Property '${p.name}': allowedValues must not contain duplicates.`);
+      }
     }
   }
 

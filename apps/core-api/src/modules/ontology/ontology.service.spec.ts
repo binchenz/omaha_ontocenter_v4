@@ -85,6 +85,36 @@ describe('OntologyService', () => {
         data: { tenantId: 't1', name: 'customer', label: 'Customer', properties: [], derivedProperties: [] },
       });
     });
+
+    it('accepts allowedValues on a string property', async () => {
+      const created = { id: 'ot1', name: 'order', properties: [], derivedProperties: [], version: 1 };
+      prisma.objectType.create.mockResolvedValue(created);
+      await expect(service.createObjectType('t1', {
+        name: 'order', label: 'Order',
+        properties: [{ name: 'status', label: '状态', type: 'string', allowedValues: ['pending', 'paid'] }],
+      })).resolves.toEqual(created);
+    });
+
+    it('rejects allowedValues on a non-string property', async () => {
+      await expect(service.createObjectType('t1', {
+        name: 'order', label: 'Order',
+        properties: [{ name: 'amount', label: '金额', type: 'number', allowedValues: ['1', '2'] as any }],
+      })).rejects.toThrow(/only supported on string/);
+    });
+
+    it('rejects an empty allowedValues array', async () => {
+      await expect(service.createObjectType('t1', {
+        name: 'order', label: 'Order',
+        properties: [{ name: 'status', label: '状态', type: 'string', allowedValues: [] }],
+      })).rejects.toThrow(/non-empty/);
+    });
+
+    it('rejects duplicate allowedValues', async () => {
+      await expect(service.createObjectType('t1', {
+        name: 'order', label: 'Order',
+        properties: [{ name: 'status', label: '状态', type: 'string', allowedValues: ['a', 'a'] }],
+      })).rejects.toThrow(/duplicate/);
+    });
   });
 
   describe('updateObjectType', () => {

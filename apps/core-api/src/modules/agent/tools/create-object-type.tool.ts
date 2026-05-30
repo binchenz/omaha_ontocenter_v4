@@ -25,6 +25,11 @@ export class CreateObjectTypeTool implements AgentTool {
             sortable: { type: 'boolean' },
             description: { type: 'string', description: '字段的业务含义' },
             unit: { type: 'string', description: '度量单位（如 km, min, 元, 个）' },
+            allowedValues: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '该 string 字段的合法值枚举（硬约束）。仅低基数受控字段（如状态/等级/类型/关系类型）需要；设置后，导入时不在此列表内的值会被整批拒绝。先和用户确认合法值集合，不要凭数据猜。',
+            },
           },
           required: ['name', 'type', 'label'],
         },

@@ -22,6 +22,11 @@ export class UpdateObjectTypeTool implements AgentTool {
             label: { type: 'string' },
             filterable: { type: 'boolean' },
             sortable: { type: 'boolean' },
+            allowedValues: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '该 string 字段的合法值枚举（硬约束）；导入时不在此列表内的值会被整批拒绝。仅低基数受控字段需要。',
+            },
           },
           required: ['name', 'type', 'label'],
         },

@@ -18,6 +18,10 @@ describe('ImportEngine', () => {
     $transaction: jest.fn(async (fn: (tx: any) => Promise<any>) => {
       return fn(mockPrisma);
     }),
+    objectType: {
+      // No allowedValues constraints → the import gate is a no-op for these tests.
+      findFirst: jest.fn(async () => ({ properties: [] })),
+    },
     objectInstance: {
       upsert: jest.fn(async (args: any) => {
         upsertedRows.push(args);
@@ -86,6 +90,7 @@ describe('ImportEngine', () => {
 
   it('rolls back entirely on mid-batch failure', async () => {
     const failingPrisma = {
+      objectType: { findFirst: jest.fn(async () => ({ properties: [] })) },
       $transaction: jest.fn(async (fn: (tx: any) => Promise<any>) => {
         return fn({
           objectInstance: {
