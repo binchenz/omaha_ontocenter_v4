@@ -2,13 +2,21 @@
 
 Ontology-native platform for querying and acting on business objects via natural language. MVP focus: order/payment/review/customer/task for SMB commerce.
 
-The platform is **not** a commercial end-product sold to enterprises directly. It is tooling for an **OPC** who privately deploys it for an SMB, models that SMB's business into an Ontology, and hands off a working data-querying Agent. The product therefore has two distinct faces: a **design-time** modeling workbench (the OPC's tool) and a **runtime** querying Agent (the SMB end users' tool). See `docs/adr/0030-opc-design-runtime-split.md`.
+The platform is **not** a commercial end-product sold to enterprises directly. It is tooling for an **OPC** who privately deploys it for an SMB, models that SMB's business into an Ontology, and hands off a working data-querying Agent. The product is organised into task-shaped **Surfaces** (consume / maintain / create / Pipeline), each with its own interaction model; which Surfaces a person sees follows the **tasks their Role authorizes**, not who they are. Two interaction-model families span those Surfaces — **design-time** (modeling: reverse-inference, Draft editing, Evals, Publish) and **runtime** (querying: read-only NL Q&A over the published Ontology). See `docs/adr/0030-opc-design-runtime-split.md` (the concept) and `docs/adr/0038-surfaces-follow-tasks-roles-authorize.md` (surface←task / authz←role).
 
 ## Language
 
 **User**:
 A person with a platform account — includes both active operators (boss, ops, customer service, admin) and login-disabled accounts created solely to be assignable as task owners or order owners. Every assignable human in the system is a User; there is no separate Employee entity.
 _Avoid_: Employee, Staff, Member, Account
+
+**Role**:
+A tenant-scoped named set of **Permissions** a User holds. The single axis that governs authorization: which tasks a User may perform, and within what scope, is a function of their Role — never of which Surface they are on (ADR-0038). The OPC/SMB-developer/boss distinction is a Permission distinction, not a separate identity. Seeded roles: `admin` (`*`), `operator` (query-only), `opc` (explicit design-time grant).
+_Avoid_: Group, Persona, Audience
+
+**Permission**:
+A `resource.action` capability string carried on a Role (e.g. `object.query`, `ontology.design`, `ontology.publish`, `reverse-inference.run`). The wildcard `*` grants all; `resource.*` grants every action on a resource. The single source of truth for the permission→capability mapping is the pure `hasCapability` / `surfacesFor` / `isDesignTimeUser` functions in `@omaha/shared-types`, imported by every consumer (front-end nav, Skill assembly, the write-authz gate) so they cannot drift. A Permission may also carry a `:fields` scope (field-level visibility, ADR-0036) and a row-level **Predicate** condition. Write/design-time Permissions are enforced at one service/SDK gate that both the HTTP and Agent paths pass through (ADR-0040).
+_Avoid_: Scope, Grant, ACL, Capability (informally fine, but "Permission" is the term)
 
 **Tenant**:
 An isolated workspace for one enterprise customer. Every data row, query, and action is scoped to exactly one tenant.
@@ -100,12 +108,16 @@ _Avoid_: Import, Run, Ingestion job
 
 ### Agent Layer
 
+**Surface**:
+A task-shaped face of the product (consume / maintain / create / Pipeline), each with its own interaction model. Surfaces follow **tasks** and are visible to a User per the tasks their **Role** authorizes — `surfacesFor(permissions)` derives the set (ADR-0038/0041). On the front end a Surface is a URL segment plus a `SurfaceContext`; switching Surface does not unmount the conversation. A Surface drives **Skill** assembly, and a **Conversation** records the Surface it was created on (fixed for its lifetime, so its Skill set stays stable). The Surface/nav layer is the shallow UX layer of the boundary, never the authorization gate.
+_Avoid_: Page, Tab, View, Mode, App
+
 **Agent**:
-The conversational AI that is the platform's primary user interface. A single LLM-driven loop that understands user intent, activates Skills, calls Tools via the SDK, and streams responses. Operates within one Tenant's Ontology. See `docs/adr/0008-agent-first-architecture.md`.
+The conversational AI that is the platform's primary user interface. A single LLM-driven loop — one Agent across all Surfaces (ADR-0039), not one per Surface — that understands user intent, activates Skills, calls Tools via the SDK, and streams responses. Operates within one Tenant's Ontology. See `docs/adr/0008-agent-first-architecture.md`.
 _Avoid_: Bot, Assistant, Copilot
 
 **Skill**:
-A domain capability package that the Agent auto-activates based on user intent. Contains a system prompt fragment, a subset of available Tools, and optional workflow guidance. Code-defined, not tenant-configurable. Examples: data ingestion skill, ontology design skill, query skill.
+A domain capability package the Agent loads for a turn. Contains a system prompt fragment, a subset of available Tools, and optional workflow guidance. Code-defined, not tenant-configurable. Examples: data ingestion skill, ontology design skill, query skill. **Assembled per request from `{permissions, surface}`** (ADR-0039/0041): the declared Surface narrows which Skills load; absent a Surface the all-active union holds (ADR-0010). This assembly is a relevance + least-privilege layer, **not** the security gate — a wrongly-scoped Skill is a UX/accuracy regression, not a vulnerability; the write-authz gate (ADR-0040) is the real boundary. When a Skill is withheld for lack of permission, the Agent is given opening guidance to say so up front rather than fail late.
 _Avoid_: Plugin, Module (in agent context), Capability
 
 **Tool**:
@@ -117,13 +129,13 @@ The ontology-aware typed interface layer between Tools and underlying services. 
 _Avoid_: API client, Service layer (in agent context)
 
 **Conversation**:
-A persistent dialogue session between a User and the Agent. Stores the full sequence of turns (user messages, agent responses, tool calls, results) for audit and context. The Agent dynamically compresses older turns when feeding history to the LLM.
+A persistent dialogue session between a User and the Agent. Stores the full sequence of turns (user messages, agent responses, tool calls, results) for audit and context. Records the **Surface** it was created on — fixed for its lifetime, so the Agent's Skill set stays stable even if the User navigates elsewhere (ADR-0041 §3). The Agent dynamically compresses older turns when feeding history to the LLM.
 _Avoid_: Chat, Session, Thread
 
 ### Delivery Roles
 
 **OPC** (One Person Company):
-The single operator — typically a data-analyst-background freelancer — who privately deploys the platform for one SMB client, interviews the client to understand the business, models it into an Ontology, loads the client's data, tunes query accuracy, and hands off a working Agent. The OPC is the platform's **design-time** user. Modeled on Palantir's **FDE**. The platform's goal is to maximize OPC delivery throughput, not to close a commercial loop itself.
+The single operator — typically a data-analyst-background freelancer — who privately deploys the platform for one SMB client, interviews the client to understand the business, models it into an Ontology, loads the client's data, tunes query accuracy, and hands off a working Agent. The OPC is the platform's primary **design-time** user, but not the *only* possible one — design-time access follows **Permissions**, so an SMB developer granted them can also model (ADR-0038). Modeled on Palantir's **FDE**. The platform's goal is to maximize OPC delivery throughput, not to close a commercial loop itself.
 _Avoid_: FDE (use OPC in this codebase; FDE is the external reference model), Consultant, Integrator
 
 **FDE** (Forward Deployed Engineer):
@@ -131,8 +143,8 @@ The external reference model (Palantir) that OPC workflows are designed against.
 _Avoid_: (don't use as a code identifier — it's a design touchstone)
 
 **Design-time** vs **Runtime**:
-Two disjoint product faces. **Design-time** is the OPC's modeling workbench: schema reverse-inference, ontology editing on a Draft, accuracy Evals, template instantiation, publish. **Runtime** is the SMB end users' querying Agent: read-only natural-language Q&A over the published Ontology. The two have different users, interaction models, histories, and security boundaries; conflating them is the root of the "unclear functionality" problem this split resolves.
-_Avoid_: Build-time, Edit mode / Query mode (those are narrower)
+Two interaction-model families, **not** two audiences (ADR-0038 supersedes ADR-0030's people-binding). **Design-time** is the modeling interaction: schema reverse-inference, ontology editing on a Draft, accuracy Evals, template instantiation, publish. **Runtime** is the querying interaction: read-only natural-language Q&A over the published Ontology. They have different interaction models, histories, and security boundaries — but each is reached per **task** (via the matching **Surface**) and gated per **Role**, so an SMB developer with the right Permissions can reach design-time tasks, not only the OPC.
+_Avoid_: Build-time, Edit mode / Query mode (those are narrower); "design-time = OPC, runtime = SMB" (the audience-binding ADR-0038 removed)
 
 **Ontology Draft**:
 A mutable working copy of a Tenant's Ontology that the OPC edits, reverse-infers into, instantiates templates into, and validates with Evals — before promoting it to the live Ontology via Publish. Exactly two states exist per Tenant: the live **published** Ontology that the runtime Agent reads, and at most one **Draft**. Discarding a Draft is the rollback mechanism. (Lightweight two-state model, not full version history — see `docs/adr/0031-ontology-draft-publish-state.md`.)
@@ -149,6 +161,8 @@ _Avoid_: Probe (that was the throwaway script), Test, Benchmark
 ## Relationships
 
 - A **User** belongs to exactly one **Tenant**
+- A **User** holds exactly one **Role**; a **Role** carries a set of **Permissions**, both scoped to the Tenant
+- The **Surfaces** a User sees are derived from their **Permissions** (`surfacesFor`); authorization to perform a task follows the **Role**, never the Surface (ADR-0038)
 - An **Ontology** belongs to exactly one **Tenant**
 - An **Object Instance** is an instance of one **Object Type** within a tenant's **Ontology**
 - A **Derived Property** is declared on an **Object Type** and resolved at query time
@@ -156,10 +170,11 @@ _Avoid_: Probe (that was the throwaway script), Test, Benchmark
 - An **Action** is declared on an **Object Type** and run by its **Action Handler**
 - **Preview** of an **Action** produces an **ActionPlan**; **Execute** consumes it
 - An **Agent** operates within one **Tenant**'s **Ontology**, calling **Tools** via the **SDK**
-- A **Skill** exposes a subset of **Tools** and is auto-activated by the **Agent**
-- A **Conversation** belongs to one **User** and one **Agent** session
+- A **Skill** exposes a subset of **Tools** and is assembled per request from the User's **Permissions** and current **Surface**
+- A **Conversation** belongs to one **User** and one **Agent** session, and records the **Surface** it was created on
 - A **Tool** invokes **SDK** methods; the **SDK** delegates to underlying services (OntologyService, QueryService, etc.)
-- An **OPC** operates **design-time**; SMB end users operate **runtime**; both act within one **Tenant**
+- Write/design-time **Permissions** are enforced at one service/SDK gate shared by the HTTP and Agent paths (ADR-0040)
+- An **OPC** typically performs **design-time** tasks and SMB end users **runtime** tasks, but both are reached per **task** (**Surface**) and gated per **Role**; all act within one **Tenant**
 - An **Ontology Draft** belongs to one **Tenant**; **Publish** promotes it to that Tenant's live **Ontology**
 - An **Accuracy Eval** runs against a **Draft** and gates **Publish**
 
