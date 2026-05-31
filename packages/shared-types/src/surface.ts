@@ -56,3 +56,20 @@ export function surfacesFor(permissions: string[]): Surface[] {
   }
   return surfaces;
 }
+
+/**
+ * Whether a permission set grants `resource.action`. The pure core of the write-authz
+ * gate (ADR-0040 §4): the wildcard `*` grants everything, a `resource.*` grants every
+ * action on that resource, and an exact `resource.action` grants that action. A trailing
+ * `:fields` field-scope (used by read permissions) is ignored for the capability check.
+ * Pure so both the back-end guard and any caller share one decision, with no DI scope.
+ */
+export function hasCapability(permissions: string[], resource: string, action: string): boolean {
+  return permissions.some((permission) => {
+    if (permission === PERMISSION.WILDCARD) return true;
+    const base = permission.split(':')[0];
+    const [res, act] = base.split('.');
+    if (res !== resource) return false;
+    return act === '*' || act === action;
+  });
+}

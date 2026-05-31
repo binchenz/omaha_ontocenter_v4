@@ -39,6 +39,6 @@ export class UpdateObjectTypeTool implements AgentTool {
   constructor(private readonly sdk: CoreSdkService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
-    return this.sdk.updateObjectType(context.user.tenantId, args as any);
+    return this.sdk.updateObjectType(context.user, args as any);
   }
 }

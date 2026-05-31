@@ -1,4 +1,4 @@
-import { surfacesFor, isDesignTimeUser, SURFACE, PERMISSION } from './surface';
+import { surfacesFor, isDesignTimeUser, SURFACE, PERMISSION, hasCapability } from './surface';
 
 describe('surfacesFor', () => {
   it('grants only the consume surface to a query-only operator', () => {
@@ -34,5 +34,23 @@ describe('isDesignTimeUser', () => {
 
   it('is true when the user holds a design-time permission', () => {
     expect(isDesignTimeUser([PERMISSION.ONTOLOGY_DESIGN])).toBe(true);
+  });
+});
+
+describe('hasCapability', () => {
+  it('grants a capability the wildcard covers', () => {
+    expect(hasCapability(['*'], 'ontology', 'design')).toBe(true);
+  });
+
+  it('grants an exact resource.action match', () => {
+    expect(hasCapability(['ontology.design'], 'ontology', 'design')).toBe(true);
+  });
+
+  it('denies when the permission is absent', () => {
+    expect(hasCapability(['object.query'], 'ontology', 'design')).toBe(false);
+  });
+
+  it('grants a resource wildcard (ontology.*)', () => {
+    expect(hasCapability(['ontology.*'], 'ontology', 'publish')).toBe(true);
   });
 });

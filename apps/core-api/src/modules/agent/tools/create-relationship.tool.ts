@@ -21,6 +21,6 @@ export class CreateRelationshipTool implements AgentTool {
   constructor(private readonly sdk: CoreSdkService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
-    return this.sdk.createRelationship(context.user.tenantId, args as any);
+    return this.sdk.createRelationship(context.user, args as any);
   }
 }

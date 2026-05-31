@@ -34,6 +34,28 @@ async function main() {
     },
   });
 
+  // Explicit design-time grant (ADR-0035 §1 / ADR-0041): the OPC's authorization is
+  // declarative — named design-time permissions — not implicit in a wildcard.
+  await prisma.role.upsert({
+    where: { tenantId_name: { tenantId: tenant.id, name: 'opc' } },
+    update: {
+      permissions: [
+        'object.read', 'object.query', 'action.preview',
+        'ontology.design', 'ontology.publish', 'data.ingest',
+        'evals.manage', 'reverse-inference.run',
+      ],
+    },
+    create: {
+      tenantId: tenant.id,
+      name: 'opc',
+      permissions: [
+        'object.read', 'object.query', 'action.preview',
+        'ontology.design', 'ontology.publish', 'data.ingest',
+        'evals.manage', 'reverse-inference.run',
+      ],
+    },
+  });
+
   const passwordHash = await bcrypt.hash('admin123', 10);
 
   await prisma.user.upsert({
