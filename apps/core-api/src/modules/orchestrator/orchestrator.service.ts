@@ -25,6 +25,8 @@ export interface RunInput {
   fileId?: string;
   schemaSummary?: string;
   objectTypeNames?: string[];
+  /** Surface the Conversation was created on; drives Skill assembly (ADR-0041 §3). */
+  surface?: string;
 }
 
 const MAX_TOOL_ITERATIONS = 8;

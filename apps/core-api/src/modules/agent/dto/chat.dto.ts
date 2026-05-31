@@ -11,4 +11,10 @@ export class ChatDto {
   @IsOptional()
   @IsString()
   fileId?: string;
+
+  /** The Surface this message originates from; sets a new Conversation's surface
+   * at creation (ADR-0041 §3). Ignored for an existing Conversation. */
+  @IsOptional()
+  @IsString()
+  surface?: string;
 }

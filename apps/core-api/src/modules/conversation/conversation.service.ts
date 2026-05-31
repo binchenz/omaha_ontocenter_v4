@@ -7,14 +7,16 @@ import { toAssistantToolCallMsg, toToolResultMsg } from '../agent/llm/llm-messag
 export class ConversationService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getOrCreate(userId: string, tenantId: string, conversationId?: string) {
+  async getOrCreate(userId: string, tenantId: string, conversationId?: string, surface?: string) {
     if (conversationId) {
       const existing = await this.prisma.conversation.findFirst({
         where: { id: conversationId, tenantId, userId },
       });
+      // Surface is fixed at creation (ADR-0041 §3): a later message carrying a
+      // different surface never mutates an existing Conversation's surface.
       if (existing) return existing;
     }
-    return this.prisma.conversation.create({ data: { userId, tenantId } });
+    return this.prisma.conversation.create({ data: { userId, tenantId, surface: surface ?? null } });
   }
 
   async addTurn(conversationId: string, turn: {
@@ -42,7 +44,7 @@ export class ConversationService {
     });
   }
 
-  async listByUser(userId: string, tenantId: string): Promise<Array<{ id: string; title: string; updatedAt: Date }>> {
+  async listByUser(userId: string, tenantId: string): Promise<Array<{ id: string; title: string; surface: string | null; updatedAt: Date }>> {
     const conversations = await this.prisma.conversation.findMany({
       where: { userId, tenantId },
       orderBy: { updatedAt: 'desc' },
@@ -52,6 +54,7 @@ export class ConversationService {
     return conversations.map(c => ({
       id: c.id,
       title: c.title ?? c.turns[0]?.content?.slice(0, 20) ?? '新对话',
+      surface: c.surface,
       updatedAt: c.updatedAt,
     }));
   }
