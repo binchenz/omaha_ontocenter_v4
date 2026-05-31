@@ -1,8 +1,11 @@
 ---
 status: accepted
+superseded-in-part-by: ADR-0038
 ---
 
 # Split the product into an OPC design-time workbench and an SMB runtime Agent
+
+> **Partially superseded by ADR-0038.** The design-time/runtime *concept* (distinct interaction models and security boundaries) stands. The *audience binding* below — "two disjoint faces bound to two disjoint audiences" (OPC=design-time, SMB=runtime-only) — does **not**: ADR-0038 decouples surface (← task) from authorization (← role), so an SMB developer may be authorized for design-time tasks. Read this ADR for the concept; read ADR-0038 for who-sees-what.
 
 ## Context
 

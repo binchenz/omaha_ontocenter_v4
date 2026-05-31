@@ -1,5 +1,7 @@
 # Skill Activation: All-Active Union with Soft Token Budget
 
+> **Superseded in part by ADR-0039.** Once the product gained task-shaped surfaces (ADR-0038), the *surface* became an explicit, declared signal for Skill assembly — so the all-active union below yields to surface-driven assembly. The reasoning here (intent-inference is unreliable, hence don't classify) is preserved and in fact *honoured* by ADR-0039: the surface is declared intent, not inferred, so the tool set narrows without a classifier. The tool-scoping seam this ADR deliberately kept is exactly where that narrowing lands.
+
 The Agent activates all registered Skills simultaneously on every turn — base prompt + every Skill's `systemPrompt()` is concatenated into the system message, and the union of all Skills' declared `tools[]` arrays is sent to the LLM. There is no per-turn intent classifier and no two-stage activation. Prompt budget enforcement is monitoring-only (warn at >4000 tokens, error at >5000), not a hard gate.
 
 ## Why
