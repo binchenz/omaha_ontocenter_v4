@@ -15,3 +15,4 @@ export * from './eval-plan-core';
 export * from './provenance-classifier';
 export * from './reverse-inference-assembler';
 export * from './ontology-template';
+export * from './surface';

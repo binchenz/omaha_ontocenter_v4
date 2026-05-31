@@ -71,7 +71,7 @@ export class AgentController {
     @Res() res: Response,
   ) {
     const conversation = await this.conversationService.getOrCreate(
-      user.id, user.tenantId, dto.conversationId,
+      user.id, user.tenantId, dto.conversationId, dto.surface,
     );
 
     const history = await this.conversationService.buildLlmHistory(conversation.id);
@@ -93,6 +93,9 @@ export class AgentController {
         fileId: dto.fileId,
         schemaSummary: summary,
         objectTypeNames: typeNames,
+        // Surface comes from the Conversation (fixed at creation), never the live
+        // request — so the Skill set is stable across the conversation (ADR-0041 §3).
+        surface: conversation.surface ?? undefined,
       }),
       conversation.id,
     );

@@ -230,7 +230,7 @@ export default function ChatPage() {
       const res = await fetch(`${API_BASE}/agent/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ message: userMessage, ...(conversationId ? { conversationId } : {}), ...(fileId ? { fileId } : {}) }),
+        body: JSON.stringify({ message: userMessage, surface: 'consume', ...(conversationId ? { conversationId } : {}), ...(fileId ? { fileId } : {}) }),
       });
       await processSSEStream(res);
       loadConversations();

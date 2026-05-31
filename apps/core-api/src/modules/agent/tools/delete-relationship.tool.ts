@@ -19,6 +19,6 @@ export class DeleteRelationshipTool implements AgentTool {
   constructor(private readonly sdk: CoreSdkService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
-    return this.sdk.deleteRelationship(context.user.tenantId, args as any);
+    return this.sdk.deleteRelationship(context.user, args as any);
   }
 }

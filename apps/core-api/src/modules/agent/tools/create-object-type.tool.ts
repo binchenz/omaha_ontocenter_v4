@@ -42,7 +42,7 @@ export class CreateObjectTypeTool implements AgentTool {
   constructor(private readonly sdk: CoreSdkService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<ObjectEdit[]> {
-    await this.sdk.createObjectType(context.user.tenantId, args as any);
+    await this.sdk.createObjectType(context.user, args as any);
     const edit: ObjectEdit = {
       op: 'create',
       objectType: args.name as string,

@@ -6,6 +6,8 @@ import { PublishService } from './publish.service';
 import { TemplateService } from './template.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
+import { assertCapability } from '../../common/helpers/assert-capability';
 import { CreateObjectTypeDto } from './dto/create-object-type.dto';
 import { UpdateObjectTypeDto } from './dto/update-object-type.dto';
 import { CreateRelationshipDto } from './dto/create-relationship.dto';
@@ -33,18 +35,21 @@ export class OntologyController {
   }
 
   @Post('types')
-  createType(@CurrentUser('tenantId') tenantId: string, @Body() dto: CreateObjectTypeDto): Promise<unknown> {
-    return this.ontologyService.createObjectType(tenantId, dto);
+  createType(@CurrentUser() user: CurrentUserType, @Body() dto: CreateObjectTypeDto): Promise<unknown> {
+    assertCapability(user, 'ontology', 'design');
+    return this.ontologyService.createObjectType(user.tenantId, dto);
   }
 
   @Put('types/:id')
-  updateType(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string, @Body() dto: UpdateObjectTypeDto): Promise<unknown> {
-    return this.ontologyService.updateObjectType(tenantId, id, dto);
+  updateType(@CurrentUser() user: CurrentUserType, @Param('id') id: string, @Body() dto: UpdateObjectTypeDto): Promise<unknown> {
+    assertCapability(user, 'ontology', 'design');
+    return this.ontologyService.updateObjectType(user.tenantId, id, dto);
   }
 
   @Delete('types/:id')
-  deleteType(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string): Promise<unknown> {
-    return this.ontologyService.deleteObjectType(tenantId, id);
+  deleteType(@CurrentUser() user: CurrentUserType, @Param('id') id: string): Promise<unknown> {
+    assertCapability(user, 'ontology', 'design');
+    return this.ontologyService.deleteObjectType(user.tenantId, id);
   }
 
   @Post('types/:id/reconcile-indexes')
@@ -72,13 +77,15 @@ export class OntologyController {
   }
 
   @Post('relationships')
-  createRelationship(@CurrentUser('tenantId') tenantId: string, @Body() dto: CreateRelationshipDto): Promise<unknown> {
-    return this.ontologyService.createRelationship(tenantId, dto);
+  createRelationship(@CurrentUser() user: CurrentUserType, @Body() dto: CreateRelationshipDto): Promise<unknown> {
+    assertCapability(user, 'ontology', 'design');
+    return this.ontologyService.createRelationship(user.tenantId, dto);
   }
 
   @Delete('relationships/:id')
-  deleteRelationship(@CurrentUser('tenantId') tenantId: string, @Param('id') id: string): Promise<unknown> {
-    return this.ontologyService.deleteRelationship(tenantId, id);
+  deleteRelationship(@CurrentUser() user: CurrentUserType, @Param('id') id: string): Promise<unknown> {
+    assertCapability(user, 'ontology', 'design');
+    return this.ontologyService.deleteRelationship(user.tenantId, id);
   }
 
   // --- Draft lifecycle (ADR-0030/0031: OPC design-time workbench) ---
@@ -92,8 +99,9 @@ export class OntologyController {
   /** Create a Draft by snapshotting the live published ontology (idempotent). */
   @Post('draft')
   @HttpCode(200)
-  createDraft(@CurrentUser('tenantId') tenantId: string): Promise<unknown> {
-    return this.draftService.createFromPublished(tenantId);
+  createDraft(@CurrentUser() user: CurrentUserType): Promise<unknown> {
+    assertCapability(user, 'ontology', 'design');
+    return this.draftService.createFromPublished(user.tenantId);
   }
 
   /**
@@ -104,18 +112,20 @@ export class OntologyController {
   @Put('draft')
   @HttpCode(200)
   replaceDraft(
-    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser() user: CurrentUserType,
     @Body() body: { snapshot: unknown },
   ): Promise<unknown> {
+    assertCapability(user, 'ontology', 'design');
     const snapshot = OntologySnapshotCodec.decode(body?.snapshot);
-    return this.draftService.replaceSnapshot(tenantId, snapshot);
+    return this.draftService.replaceSnapshot(user.tenantId, snapshot);
   }
 
   /** Discard the Draft (rollback all pending changes). */
   @Delete('draft')
   @HttpCode(204)
-  async discardDraft(@CurrentUser('tenantId') tenantId: string): Promise<void> {
-    await this.draftService.discard(tenantId);
+  async discardDraft(@CurrentUser() user: CurrentUserType): Promise<void> {
+    assertCapability(user, 'ontology', 'design');
+    await this.draftService.discard(user.tenantId);
   }
 
   /** Publish preflight: diff + safe/breaking classification + breaking-change impact counts. */
@@ -131,10 +141,11 @@ export class OntologyController {
   @Post('draft/publish')
   @HttpCode(200)
   publishDraft(
-    @CurrentUser('tenantId') tenantId: string,
+    @CurrentUser() user: CurrentUserType,
     @Body() body: { confirmed?: boolean } = {},
   ): Promise<unknown> {
-    return this.publishService.publish(tenantId, { confirmed: body?.confirmed });
+    assertCapability(user, 'ontology', 'publish');
+    return this.publishService.publish(user.tenantId, { confirmed: body?.confirmed });
   }
 
   // --- Template library (ADR-0034: per-OPC private toolbox) ---

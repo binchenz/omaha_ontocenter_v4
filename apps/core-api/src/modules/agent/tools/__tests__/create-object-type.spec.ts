@@ -38,6 +38,9 @@ describe('CreateObjectTypeTool (ObjectEdit migration)', () => {
       properties: [],
     }, ctx);
 
-    expect(mockSdk.createObjectType).toHaveBeenCalledWith('t1', expect.objectContaining({ name: 'widget' }));
+    expect(mockSdk.createObjectType).toHaveBeenCalledWith(
+      ctx.user,
+      expect.objectContaining({ name: 'widget' }),
+    );
   });
 });

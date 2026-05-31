@@ -1,6 +1,8 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
+import { assertCapability } from '../../common/helpers/assert-capability';
 import { ReverseInferenceService } from './reverse-inference.service';
 
 interface InferBody {
@@ -20,7 +22,8 @@ export class ReverseInferenceController {
   constructor(private readonly reverseInference: ReverseInferenceService) {}
 
   @Post()
-  infer(@CurrentUser('tenantId') tenantId: string, @Body() body: InferBody) {
-    return this.reverseInference.inferToDraft(tenantId, body.connectorId, { merge: body.merge });
+  infer(@CurrentUser() user: CurrentUserType, @Body() body: InferBody) {
+    assertCapability(user, 'reverse-inference', 'run');
+    return this.reverseInference.inferToDraft(user.tenantId, body.connectorId, { merge: body.merge });
   }
 }

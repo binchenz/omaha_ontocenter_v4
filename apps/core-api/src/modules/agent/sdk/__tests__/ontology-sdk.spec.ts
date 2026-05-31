@@ -1,4 +1,10 @@
 import { CoreSdkService } from '../../../sdk/core-sdk.service';
+import { CurrentUser } from '@omaha/shared-types';
+
+const ADMIN: CurrentUser = {
+  id: 'u1', email: 'a@a', name: 'A', tenantId: 'tenant-1', roleId: 'r1',
+  roleName: 'admin', permissions: ['*'], permissionRules: [{ permission: '*' }],
+};
 
 describe('CoreSdkService', () => {
   const mockTypeResolver = {
@@ -43,7 +49,7 @@ describe('CoreSdkService', () => {
   });
 
   it('deleteObjectType is atomic — uses $transaction', async () => {
-    await sdk.deleteObjectType('tenant-1', 'Customer');
+    await sdk.deleteObjectType(ADMIN, 'Customer');
 
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
     expect(mockTypeResolver.resolve).toHaveBeenCalledWith('tenant-1', 'Customer');
@@ -52,7 +58,7 @@ describe('CoreSdkService', () => {
   });
 
   it('methods use TypeResolver instead of listObjectTypes directly', async () => {
-    await sdk.updateObjectType('tenant-1', {
+    await sdk.updateObjectType(ADMIN, {
       objectTypeName: 'Order',
       properties: [{ name: 'amount', type: 'number', label: '金额' }],
     });
@@ -62,7 +68,7 @@ describe('CoreSdkService', () => {
   });
 
   it('createRelationship uses resolveMany for source + target', async () => {
-    await sdk.createRelationship('tenant-1', {
+    await sdk.createRelationship(ADMIN, {
       name: 'has_orders',
       sourceType: 'Source',
       targetType: 'Target',

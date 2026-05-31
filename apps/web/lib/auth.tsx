@@ -35,7 +35,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await api.login(tenantSlug, email, password);
     localStorage.setItem('token', res.accessToken);
     setToken(res.accessToken);
-    setUser(res.user);
+    // The login response carries only a partial user (no permissions); fetch the
+    // full CurrentUser so the client always holds the permission list that drives
+    // surface assembly (ADR-0041).
+    setUser(await api.me());
   };
 
   const logout = () => {

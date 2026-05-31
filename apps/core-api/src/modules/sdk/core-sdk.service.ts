@@ -4,6 +4,7 @@ import { OntologyService } from '../ontology/ontology.service';
 import { QueryService } from '../query/query.service';
 import { PrismaService } from '@omaha/db';
 import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
+import { assertCapability } from '../../common/helpers/assert-capability';
 import { TypeResolver } from '../agent/sdk/type-resolver.service';
 import { ConnectorClient } from '../agent/connector/connector-client.service';
 import { ImportEngine, UPLOAD_DIR } from '../agent/sdk/import-engine.service';
@@ -162,12 +163,14 @@ export class CoreSdkService {
 
   // --- Ontology ---
 
-  async createObjectType(tenantId: string, dto: {
+  async createObjectType(actor: CurrentUserType, dto: {
     name: string;
     label: string;
     description?: string;
     properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean; description?: string; unit?: string }>;
   }): Promise<unknown> {
+    assertCapability(actor, 'ontology', 'design');
+    const tenantId = actor.tenantId;
     const result = await this.ontologyService.createObjectType(tenantId, {
       name: dto.name,
       label: dto.label,
@@ -180,12 +183,14 @@ export class CoreSdkService {
     return result;
   }
 
-  async updateObjectType(tenantId: string, params: {
+  async updateObjectType(actor: CurrentUserType, params: {
     objectTypeName: string;
     label?: string;
     description?: string;
     properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean; description?: string; unit?: string }>;
   }): Promise<unknown> {
+    assertCapability(actor, 'ontology', 'design');
+    const tenantId = actor.tenantId;
     const typeId = await this.typeResolver.resolve(tenantId, params.objectTypeName);
     return this.ontologyService.updateObjectType(tenantId, typeId, {
       ...(params.label ? { label: params.label } : {}),
@@ -193,7 +198,9 @@ export class CoreSdkService {
     });
   }
 
-  async deleteObjectType(tenantId: string, objectTypeName: string): Promise<unknown> {
+  async deleteObjectType(actor: CurrentUserType, objectTypeName: string): Promise<unknown> {
+    assertCapability(actor, 'ontology', 'design');
+    const tenantId = actor.tenantId;
     const typeId = await this.typeResolver.resolve(tenantId, objectTypeName);
     await this.prisma.$transaction(async (tx: any) => {
       await tx.objectInstance.updateMany({
@@ -207,12 +214,14 @@ export class CoreSdkService {
     return { message: `对象类型 "${objectTypeName}" 已删除，关联数据已软删除。` };
   }
 
-  async createRelationship(tenantId: string, params: {
+  async createRelationship(actor: CurrentUserType, params: {
     name: string;
     sourceType: string;
     targetType: string;
     cardinality: string;
   }): Promise<unknown> {
+    assertCapability(actor, 'ontology', 'design');
+    const tenantId = actor.tenantId;
     const ids = await this.typeResolver.resolveMany(tenantId, [params.sourceType, params.targetType]);
     return this.ontologyService.createRelationship(tenantId, {
       name: params.name,
@@ -222,10 +231,12 @@ export class CoreSdkService {
     });
   }
 
-  async deleteRelationship(tenantId: string, params: {
+  async deleteRelationship(actor: CurrentUserType, params: {
     name: string;
     sourceType: string;
   }): Promise<unknown> {
+    assertCapability(actor, 'ontology', 'design');
+    const tenantId = actor.tenantId;
     const relationships = await this.ontologyService.listRelationships(tenantId);
     const target = relationships.find((r: any) => r.name === params.name && r.sourceType.name === params.sourceType);
     if (!target) throw new Error(`关系 "${params.name}" 不存在`);

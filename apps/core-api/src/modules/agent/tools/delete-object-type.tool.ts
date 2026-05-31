@@ -18,6 +18,6 @@ export class DeleteObjectTypeTool implements AgentTool {
   constructor(private readonly sdk: CoreSdkService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
-    return this.sdk.deleteObjectType(context.user.tenantId, args.objectTypeName as string);
+    return this.sdk.deleteObjectType(context.user, args.objectTypeName as string);
   }
 }
