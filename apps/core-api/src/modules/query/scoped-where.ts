@@ -124,7 +124,7 @@ export class ScopedWhere {
       throw new BadRequestException('Filter must have either field or derivedProperty');
     }
 
-    if (view && view.filterableFields.size > 0 && !view.filterableFields.has(f.field)) {
+    if (view && (view.filterableFields.size > 0 || view.visibilityRestricted) && !view.filterableFields.has(f.field)) {
       throw new BadRequestException({
         code: 'PROPERTY_NOT_FILTERABLE',
         property: f.field,

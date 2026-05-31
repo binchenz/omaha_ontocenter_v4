@@ -7,5 +7,6 @@ export type { AnalyzerContext, AnalyzeResult } from './analyzer';
 export type { ObjectInstanceScope, ParentScope, ChildScope, EmittedScope } from './scope';
 export { emitScope, parentScope, childScope } from './scope';
 export type { OntologyView, OntologyDerivedPropertyView } from './ontology-view';
+export { visibleClosure, projectVisible } from './visible-view';
 export type { Predicate, EmittedPredicate } from './predicate';
 export { emit } from './predicate';

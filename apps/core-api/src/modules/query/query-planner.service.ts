@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { parentScope } from '@omaha/dsl';
+import { parentScope, projectVisible } from '@omaha/dsl';
 import type { Predicate, OntologyView } from '@omaha/dsl';
 import type { QueryFilter } from '@omaha/shared-types';
 import { ScopedWhere } from './scoped-where';
@@ -23,6 +23,12 @@ export interface PlanArgs {
   skip: number;
   take: number;
   permissionPredicates?: Predicate[];
+  /**
+   * The principal's visible base-field set (resolver's `allowedFields`):
+   * `null` = all visible. Narrows the OntologyView the input gates trust, so a
+   * masked field is rejected exactly like a non-filterable / absent one.
+   */
+  allowedFields: Set<string> | null;
 }
 
 export interface AggregateMetric {
@@ -47,6 +53,16 @@ export interface AggregatePlanArgs {
   maxGroups?: number;
   pageToken?: string;
   permissionPredicates?: Predicate[];
+  /** Visible base-field set (resolver's `allowedFields`); `null` = all visible. */
+  allowedFields: Set<string> | null;
+  /**
+   * For a cross-relationship groupBy (`relation.field`), the visible base-field
+   * set of the OTHER (related) type, resolved by the caller. `null` = all
+   * visible. Gates the related group-key field so its values are not surfaced
+   * as group keys to a principal who cannot see that field. Unused when no
+   * cross-rel key is present.
+   */
+  crossRelAllowedFields?: Set<string> | null;
 }
 
 export interface PlannedAggregateQuery {
@@ -69,7 +85,11 @@ export class QueryPlannerService {
   ) {}
 
   async plan(args: PlanArgs): Promise<PlannedQuery> {
-    const view = await this.viewLoader.load(args.tenantId, args.objectType);
+    const rawView = await this.viewLoader.load(args.tenantId, args.objectType);
+    // Narrow the view to the principal's visible fields BEFORE any gate reads it:
+    // a masked field falls out of filterable/sortable/numeric and is rejected
+    // like a non-capable one (no existence oracle). ⊤ returns the view by ref.
+    const view = rawView ? projectVisible(rawView, args.allowedFields) : rawView;
     const useView = await this.viewManager.exists(args.tenantId, args.objectType);
     // Alias the view AS object_instances so correlated subqueries from DSL
     // (which reference object_instances.tenant_id and object_instances.id) work.
@@ -124,7 +144,8 @@ export class QueryPlannerService {
       return this.planCrossRelAggregate(args);
     }
 
-    const view = await this.viewLoader.load(args.tenantId, args.objectType);
+    const rawView = await this.viewLoader.load(args.tenantId, args.objectType);
+    const view = rawView ? projectVisible(rawView, args.allowedFields) : rawView;
 
     const scope = parentScope({ tenantId: args.tenantId, objectType: args.objectType });
     const scoped = new ScopedWhere(scope)
@@ -135,6 +156,7 @@ export class QueryPlannerService {
     // groupBy validation: each field must be filterable on the view.
     // Non-filterable / json-typed fields (e.g. tags) cannot be grouped on;
     // emit PROPERTY_NOT_GROUPABLE so the agent can fall back to search.
+    // (A masked field is now absent from the narrowed view → same rejection.)
     const groupBy = args.groupBy ?? [];
     for (const field of groupBy) this.assertGroupable(field, view, args.objectType);
 
@@ -217,10 +239,11 @@ export class QueryPlannerService {
     const xkey = cross;
 
     // Base view + relation resolution are independent — load in parallel.
-    const [view, resolved] = await Promise.all([
+    const [rawView, resolved] = await Promise.all([
       this.viewLoader.load(args.tenantId, args.objectType),
       this.viewLoader.resolveRelationByName(args.tenantId, args.objectType, xkey.relation),
     ]);
+    const view = rawView ? projectVisible(rawView, args.allowedFields) : rawView;
     if (!resolved) {
       throw new BadRequestException({
         error: {
@@ -244,8 +267,13 @@ export class QueryPlannerService {
     }
 
     // Validate the related field is groupable on the OTHER type's view, and the
-    // local keys on the base view (same rule as planAggregate).
-    const otherView = await this.viewLoader.load(args.tenantId, resolved.otherType);
+    // local keys on the base view (same rule as planAggregate). Both views are
+    // narrowed to the principal's visible fields first, so a masked related
+    // field is rejected like a non-groupable one.
+    const rawOtherView = await this.viewLoader.load(args.tenantId, resolved.otherType);
+    const otherView = rawOtherView
+      ? projectVisible(rawOtherView, args.crossRelAllowedFields ?? null)
+      : rawOtherView;
     this.assertGroupable(xkey.field, otherView, resolved.otherType);
     for (const lk of localKeys) this.assertGroupable(lk, view, args.objectType);
 
@@ -328,7 +356,7 @@ export class QueryPlannerService {
    * column source, which the callers inject via `propRef` / `groupKeyExpr`.
    */
   private assertGroupable(field: string, view: OntologyView | null, objectType: string): void {
-    if (view && view.filterableFields.size > 0 && !view.filterableFields.has(field)) {
+    if (view && (view.filterableFields.size > 0 || view.visibilityRestricted) && !view.filterableFields.has(field)) {
       throw new BadRequestException({
         error: {
           code: 'PROPERTY_NOT_GROUPABLE',
@@ -338,6 +366,21 @@ export class QueryPlannerService {
         },
       });
     }
+  }
+
+  /**
+   * Is `field` a real property of this (possibly visibility-narrowed) view? A
+   * field is present if it is in any type-system set or is a derived property.
+   * On a restricted view the sets have already been narrowed to visible fields,
+   * so "not on view" subsumes "masked".
+   */
+  private isFieldOnView(field: string, view: OntologyView): boolean {
+    return (
+      view.numericFields.has(field) ||
+      view.stringFields.has(field) ||
+      view.booleanFields.has(field) ||
+      view.derivedProperties.has(field)
+    );
   }
 
   private buildMetricExprs(
@@ -359,13 +402,21 @@ export class QueryPlannerService {
           : `Metric kind '${m.kind}' requires a 'field'.`;
         throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, hint } });
       }
+      // Visibility gate for ALL field-bearing metrics (countDistinct included):
+      // a metric over a field the principal cannot see must be rejected exactly
+      // like a metric over an absent field — otherwise countDistinct would leak
+      // the cardinality of a masked field. Only enforced on a restricted view;
+      // an unprojected (⊤) view never sets visibilityRestricted.
+      if (view?.visibilityRestricted && !this.isFieldOnView(m.field, view)) {
+        throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, field: m.field, kind: m.kind, hint: `Metric '${m.kind}' references a property that is not available on '${objectType}'.` } });
+      }
       if (m.kind === 'countDistinct') {
         // No ::numeric cast — count distinct works over any text.
         out.push(`count(DISTINCT (${propRef(m.field)}))::int AS "${m.alias}"`);
         continue;
       }
       if (numericKinds.has(m.kind)) {
-        if (view && view.numericFields.size > 0 && !view.numericFields.has(m.field)) {
+        if (view && (view.numericFields.size > 0 || view.visibilityRestricted) && !view.numericFields.has(m.field)) {
           const numericList = Array.from(view.numericFields).join(', ') || '(none declared)';
           throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, field: m.field, kind: m.kind, hint: `Metric '${m.kind}' requires a numeric property. Available numeric fields on '${objectType}': ${numericList}.` } });
         }

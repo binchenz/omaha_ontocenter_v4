@@ -50,6 +50,10 @@ _Avoid_: Filter expression, Condition, Rule (in code; "condition" is still fine 
 The resolved runtime view of an Object Type for a given tenant — properties (with types / filterable / sortable / precision / scale), derived properties, and the set of relations out of it. Loaded once per request rather than re-queried per **Predicate**.
 _Avoid_: Ontology cache, Resolved ontology
 
+**Visible View**:
+A per-principal projection of an **OntologyView**, narrowed to the fields a caller may see, produced by `projectVisible(view, allowedFields)`. A masked field is dropped from every capability set (filterable / sortable / numeric / …) so the existing input gates reject a reference to it exactly as they reject a non-filterable or absent field — no existence oracle. A **Derived Property** survives only if every base field in its transitive dependency closure is visible. `allowedFields = null` (the common, all-visible case) returns the view unchanged. This is the input-seam half of field-level permission; the output-seam half is `toInstanceDto`, which masks an **Object Instance**'s returned properties (mask-before-`select`). Both consume the resolver's `allowedFields`; neither touches a compiled **Predicate**, which carries its own full view and may legitimately reference fields the end user cannot see. See `docs/adr/0036-field-level-visibility-enforcement.md`.
+_Avoid_: Masked view, FieldMask (no value type — the set is threaded directly), Filtered view
+
 **ObjectInstanceScope**:
 The single module that emits the `FROM object_instances WHERE tenant_id = ? AND deleted_at IS NULL` prefix (parent form) and its correlated-subquery form (child form). The invariant gate for ADR-0006's soft-delete rule; all read paths must pass through it.
 _Avoid_: Instance reader, Instance query helper

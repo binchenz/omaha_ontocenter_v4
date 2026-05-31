@@ -15,7 +15,7 @@ import {
   type AggregateOrderBy,
 } from './query-planner.service';
 import { OntologyViewLoader } from '../ontology/ontology-view-loader.service';
-import { filterMaskedFields } from '../../common/filter-masked-fields';
+import { toInstanceDto } from '../../common/to-instance-dto';
 import type { QueryFilter } from '@omaha/shared-types';
 
 interface RawInstanceRow {
@@ -129,6 +129,7 @@ export class QueryService {
       skip,
       take: pageSize,
       permissionPredicates: resolution.predicates,
+      allowedFields: resolution.allowedFields,
     });
 
     const [rows, countRows] = await Promise.all([
@@ -138,16 +139,16 @@ export class QueryService {
     const total = Number(countRows[0]?.count ?? 0);
 
     const includes = await this.resolveIncludes(user.tenantId, req.objectType, req.include ?? []);
-    const includedByParent = await this.fetchIncludes(user.tenantId, rows.map((r) => r.id), includes);
+    const includedByParent = await this.fetchIncludes(user, rows.map((r) => r.id), includes);
 
     const data = rows.map((inst) => {
-      const properties = filterMaskedFields(
-        (inst.properties ?? {}) as Record<string, unknown>,
+      // toInstanceDto seals the mask-before-select ordering: visibility first,
+      // then the caller's select narrows what survived. select cannot unmask.
+      const projected = toInstanceDto(
+        inst.properties as Record<string, unknown> | null,
         resolution.allowedFields,
+        req.select,
       );
-      const projected = req.select && req.select.length > 0
-        ? Object.fromEntries(req.select.filter((k) => k in properties).map((k) => [k, properties[k]]))
-        : properties;
 
       const relationships: Record<string, unknown> = {};
       for (const inc of includes) {
@@ -220,6 +221,22 @@ export class QueryService {
       req.objectType,
     );
 
+    // Cross-relationship groupBy ("relation.field") groups by a field on a
+    // RELATED type; that field must be gated by the related type's own
+    // visibility. Resolve the other type's read permission so the planner can
+    // narrow its view too. Denial ⇒ the relation is unreadable; reject the
+    // whole aggregate rather than leak grouped keys from it.
+    let crossRelAllowedFields: Set<string> | null | undefined;
+    const crossKey = (req.groupBy ?? []).find((g) => typeof g === 'string' && g.includes('.'));
+    if (crossKey) {
+      const relationName = crossKey.slice(0, crossKey.indexOf('.'));
+      const resolved = await this.viewLoader.resolveRelationByName(user.tenantId, req.objectType, relationName);
+      if (resolved) {
+        const otherRes = await this.permissionResolver.resolveOrThrow(user, 'object', 'read', resolved.otherType);
+        crossRelAllowedFields = otherRes.allowedFields;
+      }
+    }
+
     const planned = await this.planner.planAggregate({
       tenantId: user.tenantId,
       objectType: req.objectType,
@@ -230,6 +247,8 @@ export class QueryService {
       maxGroups: req.maxGroups,
       pageToken: req.pageToken,
       permissionPredicates: resolution.predicates,
+      allowedFields: resolution.allowedFields,
+      crossRelAllowedFields,
     });
 
     const rows = await this.executeWithTimeout<Record<string, unknown>[]>(planned.sql, planned.params);
@@ -313,7 +332,7 @@ export class QueryService {
   }
 
   private async fetchIncludes(
-    tenantId: string,
+    user: CurrentUserType,
     parentIds: string[],
     includes: Array<{ name: string; targetType: string; foreignKey: string }>,
   ): Promise<Record<string, Record<string, unknown[]>>> {
@@ -322,9 +341,16 @@ export class QueryService {
     for (const id of parentIds) out[id] = {};
 
     for (const inc of includes) {
-      const scope = parentScope({ tenantId, objectType: inc.targetType });
+      // Resolve the CHILD type's permission: yields both the row-level
+      // predicates and the field mask. Denial ⇒ omit the relation entirely
+      // (it surfaces as an empty array via the caller's `?? []`).
+      const childRes = await this.permissionResolver.resolve(user, 'object', 'read', inc.targetType);
+      if (!childRes.allowed) continue;
+
+      const scope = parentScope({ tenantId: user.tenantId, objectType: inc.targetType });
       const scoped = new ScopedWhere(scope, { keepFrom: true })
-        .raw('(relationships->>?) = ANY(?::text[])', inc.foreignKey, parentIds);
+        .raw('(relationships->>?) = ANY(?::text[])', inc.foreignKey, parentIds)
+        .predicates(childRes.predicates);
       const { fromWhere, params } = scoped.build();
       const sql =
         `SELECT id, tenant_id AS "tenantId", object_type AS "objectType", ` +
@@ -343,7 +369,10 @@ export class QueryService {
           objectType: c.objectType,
           externalId: c.externalId,
           label: c.label,
-          properties: (c.properties ?? {}) as Record<string, unknown>,
+          properties: toInstanceDto(
+            c.properties as Record<string, unknown> | null,
+            childRes.allowedFields,
+          ),
         });
       }
     }
