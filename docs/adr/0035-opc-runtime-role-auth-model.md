@@ -43,6 +43,8 @@ Rationale: the pilot is single-tenant-trusted *today*, but the whole point of fo
 
 ### 3. Field-level permission bypass: document and defer, with an explicit P0 trigger
 
+> **SUPERSEDED by ADR-0036 (enforce now).** This decision deferred the fix behind a P0 trigger; the project owner instead chose to enforce field-level visibility immediately. The bypass is now closed at the query seam via a visible-view projection (`projectVisible`) at the input gates plus a single output materializer (`toInstanceDto`), and the include path resolves child visibility + predicates. The "deferred fix" sketch below is what ADR-0036 actually implemented. Retained for history.
+
 Do **not** change the query-planner in this pass. ADR-0035 records the bypass and its precise trigger: it becomes **P0 the instant a runtime role that is not fully trusted with all field values is introduced into a tenant** (e.g. outsourced support, a distributor, a temp). Until then, the documented pilot premise ("no untrusted roles within the tenant") holds and no planner change ships here.
 
 The deferred fix, when triggered: thread the resolver's `allowedFields` into `PlanArgs` and enforce it in the planner's `filter`/`sort`/`search`/`groupBy`/`metrics` stages (reject or drop references to non-allowed fields) — moving masking from post-query projection to plan-time, closing the `WHERE`/`groupBy` leak. The delivery contract for an engagement must state "no untrusted roles within the tenant" as a precondition while this remains deferred.
