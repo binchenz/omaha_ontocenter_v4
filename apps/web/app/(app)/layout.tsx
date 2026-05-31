@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
+import { SurfaceProvider, useSurface, ROUTE_SURFACE } from '@/lib/surface';
 import { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -12,14 +13,13 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const { authorizedSurfaces } = useSurface();
   const router = useRouter();
   const [conversations, setConversations] = useState<Array<{ id: string; title: string }>>([]);
 
-  const nav = [
-    { href: '/chat', label: 'AI 对话', icon: '◉' },
-    { href: '/query', label: '数据查询', icon: '⊞' },
-    { href: '/ontology', label: '本体浏览', icon: '◈' },
-  ];
+  // Nav is derived from the surfaces the user's permissions authorize (ADR-0041 §2),
+  // not a hardcoded list. Routes on an unauthorized surface are simply absent.
+  const nav = ROUTE_SURFACE.filter(item => authorizedSurfaces.includes(item.surface));
 
   useEffect(() => {
     if (user) {
@@ -122,11 +122,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   if (!user) return null;
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar />
-      <main className="flex-1 min-w-0 overflow-auto">
-        {children}
-      </main>
-    </div>
+    <SurfaceProvider>
+      <div className="flex min-h-screen bg-gray-50">
+        <Sidebar />
+        <main className="flex-1 min-w-0 overflow-auto">
+          {children}
+        </main>
+      </div>
+    </SurfaceProvider>
   );
 }
