@@ -92,6 +92,7 @@ export class OntologyService {
         targetTypeId: dto.targetTypeId,
         name: dto.name,
         cardinality: dto.cardinality,
+        ...(dto.description !== undefined && { description: dto.description }),
       },
     });
   }

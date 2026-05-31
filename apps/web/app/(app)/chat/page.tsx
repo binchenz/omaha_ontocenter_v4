@@ -25,6 +25,8 @@ interface Message {
   toolCalls?: Array<{ name: string; args: unknown }>;
   toolResults?: Array<{ name: string; data: unknown }>;
   planSummaries?: string[];
+  plans?: Array<{ name: string; args: Record<string, unknown>; summary?: string }>;
+  sourceQuestion?: string;
   confirmationId?: string;
   confirmationArgs?: Record<string, unknown>;
   confirmed?: boolean | null;
@@ -55,6 +57,8 @@ export default function ChatPage() {
   const [rejectComment, setRejectComment] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastQuestionRef = useRef<string>('');
+  const [capturedIds, setCapturedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -161,6 +165,7 @@ export default function ChatPage() {
     let buffer = '';
     let assistantContent = '';
     const planSummaries: string[] = [];
+    const capturedPlans: Array<{ name: string; args: Record<string, unknown>; summary?: string }> = [];
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -172,6 +177,9 @@ export default function ChatPage() {
         try {
           const event: AgentEvent = JSON.parse(line.slice(6));
           if (event.type === 'tool_call' && event.planSummary) planSummaries.push(event.planSummary);
+          if (event.type === 'tool_call' && (event.name === 'query_objects' || event.name === 'aggregate_objects')) {
+            capturedPlans.push({ name: event.name, args: (event.args ?? {}) as Record<string, unknown>, summary: event.planSummary });
+          }
           handleEvent(event, (content) => { assistantContent = content; });
         } catch {}
       }
@@ -181,6 +189,8 @@ export default function ChatPage() {
         role: 'assistant',
         content: assistantContent,
         planSummaries: planSummaries.length ? planSummaries : undefined,
+        plans: capturedPlans.length ? capturedPlans : undefined,
+        sourceQuestion: lastQuestionRef.current,
       }]);
     }
   };
@@ -206,6 +216,7 @@ export default function ChatPage() {
     e.preventDefault();
     if ((!input.trim() && !attachedFile) || isLoading) return;
     const userMessage = input.trim() || (attachedFile ? `导入文件: ${attachedFile.name}` : '');
+    lastQuestionRef.current = userMessage;
     setInput('');
     setMessages(prev => [...prev, {
       role: 'user', content: userMessage,
@@ -230,6 +241,19 @@ export default function ChatPage() {
       setIsLoading(false);
       setCurrentToolCall(null);
     }
+  };
+
+  // Capture a chat plan as an Evals baseline (ADR-0033): the OPC's entry point for
+  // establishing acceptance baselines without hand-writing plan JSON.
+  const captureEval = async (key: string, question: string, plan: { name: string; args: Record<string, unknown> }) => {
+    try {
+      const res = await fetch(`${API_BASE}/evals/questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ question, baselineTool: plan.name, baselineArgs: plan.args }),
+      });
+      if (res.ok) setCapturedIds(prev => new Set(prev).add(key));
+    } catch {}
   };
 
   return (
@@ -263,6 +287,8 @@ export default function ChatPage() {
           onConfirm={handleConfirm}
           onSetRejectingId={setRejectingId}
           onSetRejectComment={setRejectComment}
+          onCaptureEval={captureEval}
+          capturedIds={capturedIds}
           messagesEndRef={messagesEndRef}
         />
         <InputBar

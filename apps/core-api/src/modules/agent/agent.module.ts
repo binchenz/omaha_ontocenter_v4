@@ -31,11 +31,13 @@ import { DataIngestionSkill } from './skills/data-ingestion.skill';
 import { OntologyDesignSkill } from './skills/ontology-design.skill';
 import { AgentBootstrap } from './agent.bootstrap';
 import { PlanSummarizer } from './plan-summarizer.service';
+import { EvalsService } from './evals.service';
+import { EvalsController } from './evals.controller';
 import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
 
 @Module({
   imports: [CoreSdkModule, ConversationModule, MulterModule.register({ dest: './uploads' })],
-  controllers: [AgentController, FileController],
+  controllers: [AgentController, FileController, EvalsController],
   providers: [
     { provide: LLM_CLIENT, useFactory: () => new ResilientLlmClient(new DeepSeekLlmClient()) },
     ConfirmationGate,
@@ -75,6 +77,7 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
       inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate, PlanSummarizer],
     },
     PlanSummarizer,
+    EvalsService,
     AgentBootstrap,
   ],
 })

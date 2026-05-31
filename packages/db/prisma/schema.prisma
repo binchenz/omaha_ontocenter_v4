@@ -29,6 +29,8 @@ model Tenant {
   actionDefinitions  ActionDefinition[]
   actionPreviews     ActionPreview[]
   actionRuns         ActionRun[]
+  ontologyDraft      OntologyDraft?
+  evalQuestions      EvalQuestion[]
 
   @@map("tenants")
 }
@@ -326,4 +328,62 @@ model ActionRun {
   user    User          @relation(fields: [userId], references: [id])
 
   @@map("action_runs")
+}
+
+/// Lightweight ontology Draft state (ADR-0031): at most one row per tenant holding a
+/// JSON snapshot of the entire ontology. The live `object_types`/`object_relationships`
+/// tables remain the sole source for all runtime read paths; this table is design-time
+/// only. Discarding the Draft = deleting the row.
+model OntologyDraft {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @unique @map("tenant_id") @db.Uuid
+  snapshot  Json     @default("{}")
+  status    String   @default("editing")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("ontology_drafts")
+}
+
+/// Accuracy Evals question bank (ADR-0033): per-tenant design-time data, not test code.
+/// Each row is one captured question + its expected query-plan baseline (the tool name
+/// and args back-translated for display). `passHistory` accumulates per-run pass rates
+/// for the N-repetition runner (#75). Lives per tenant; carried (de-identified) into
+/// templates (#76).
+model EvalQuestion {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  question      String
+  baselineTool  String   @map("baseline_tool")
+  baselineArgs  Json     @default("{}") @map("baseline_args")
+  planSummary   String?  @map("plan_summary")
+  passHistory   Json     @default("[]") @map("pass_history")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("eval_questions")
+}
+
+/// Per-OPC private ontology template (ADR-0034): a de-identified snapshot + Evals question
+/// bank in tenant-INDEPENDENT storage (no FK to a tenant), so the OPC can reuse a tuned,
+/// validated ontology across clients. Carries reusable business knowledge (structure,
+/// annotations, allowedValues, externalId names, question bank); never client privacy
+/// (instances, tenant_id, connector credentials). Not a community marketplace — private toolbox.
+model OntologyTemplate {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  description  String?
+  snapshot     Json     @default("{}")
+  questionBank Json     @default("[]") @map("question_bank")
+  /// Soft attribution of which tenant saved it; NOT a scoping constraint (templates are shared).
+  ownerTenantId String? @map("owner_tenant_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("ontology_templates")
 }

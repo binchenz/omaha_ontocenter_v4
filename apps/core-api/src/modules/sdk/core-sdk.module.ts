@@ -6,10 +6,14 @@ import { TypeResolver } from '../agent/sdk/type-resolver.service';
 import { ConnectorClient } from '../agent/connector/connector-client.service';
 import { ImportEngine } from '../agent/sdk/import-engine.service';
 import { FileParserService } from '../agent/tools/file-parser.service';
+import { DbIntrospectionService } from './db-introspection.service';
+import { ReverseInferenceService } from './reverse-inference.service';
+import { ReverseInferenceController } from './reverse-inference.controller';
 
 @Module({
   imports: [OntologyModule, QueryModule],
-  providers: [CoreSdkService, TypeResolver, ConnectorClient, ImportEngine, FileParserService],
-  exports: [CoreSdkService, TypeResolver],
+  controllers: [ReverseInferenceController],
+  providers: [CoreSdkService, TypeResolver, ConnectorClient, ImportEngine, FileParserService, DbIntrospectionService, ReverseInferenceService],
+  exports: [CoreSdkService, TypeResolver, DbIntrospectionService, ReverseInferenceService],
 })
 export class CoreSdkModule {}

@@ -1,4 +1,4 @@
-import { IsString, IsUUID, IsIn } from 'class-validator';
+import { IsString, IsUUID, IsIn, IsOptional } from 'class-validator';
 import { Cardinality } from '@omaha/shared-types';
 
 export class CreateRelationshipDto {
@@ -13,4 +13,8 @@ export class CreateRelationshipDto {
 
   @IsIn(['one-to-one', 'one-to-many', 'many-to-many'])
   cardinality!: Cardinality;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
 }
