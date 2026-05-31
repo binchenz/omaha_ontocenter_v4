@@ -1,5 +1,7 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
+import type { CurrentUser, LoginResponse } from '@omaha/shared-types';
+
 function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('token');
@@ -28,7 +30,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   login: (tenantSlug: string, email: string, password: string) =>
-    request<{ accessToken: string; user: User }>('/auth/login', {
+    request<{ accessToken: string; user: LoginResponse['user'] }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ tenantSlug, email, password }),
     }),
@@ -97,13 +99,10 @@ export const api = {
 };
 
 // Types
-export interface User {
-  id: string;
-  email: string;
-  name: string;
-  tenantId: string;
-  role: string;
-}
+// The authenticated user is the same `CurrentUser` the back end issues — it carries
+// `permissions`/`permissionRules`, the input to surface assembly (ADR-0041). Aliased
+// as `User` to keep existing imports stable.
+export type User = CurrentUser;
 
 export interface PropertyDefinition {
   name: string;
