@@ -10,6 +10,10 @@ export class UpdateObjectTypeDto {
   label?: string;
 
   @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => PropertyDefinitionDto)

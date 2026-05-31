@@ -8,6 +8,8 @@ interface Message {
   toolCalls?: Array<{ name: string; args: unknown }>;
   toolResults?: Array<{ name: string; data: unknown }>;
   planSummaries?: string[];
+  plans?: Array<{ name: string; args: Record<string, unknown>; summary?: string }>;
+  sourceQuestion?: string;
   confirmationId?: string;
   confirmationArgs?: Record<string, unknown>;
   confirmed?: boolean | null;
@@ -22,6 +24,8 @@ interface MessageListProps {
   onConfirm: (id: string, confirmed: boolean, comment?: string) => void;
   onSetRejectingId: (id: string | null) => void;
   onSetRejectComment: (comment: string) => void;
+  onCaptureEval?: (key: string, question: string, plan: { name: string; args: Record<string, unknown> }) => void;
+  capturedIds?: Set<string>;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
 }export function MessageList({
   messages,
@@ -31,6 +35,8 @@ interface MessageListProps {
   onConfirm,
   onSetRejectingId,
   onSetRejectComment,
+  onCaptureEval,
+  capturedIds,
   messagesEndRef,
 }: MessageListProps) {
   return (
@@ -122,6 +128,24 @@ interface MessageListProps {
                       <li key={j}>{s}</li>
                     ))}
                   </ul>
+                  {onCaptureEval && msg.plans && msg.plans.length > 0 && (
+                    <div className="mt-2 ml-4 flex flex-col gap-1">
+                      {msg.plans.map((plan, j) => {
+                        const key = `${i}:${j}`;
+                        const captured = capturedIds?.has(key);
+                        return (
+                          <button
+                            key={key}
+                            disabled={captured}
+                            onClick={() => onCaptureEval(key, msg.sourceQuestion ?? msg.content, { name: plan.name, args: plan.args })}
+                            className={`self-start text-xs px-2 py-0.5 rounded border ${captured ? 'border-emerald-200 text-emerald-600 bg-emerald-50' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+                          >
+                            {captured ? '✓ 已加入 Evals 基准' : '+ 加入 Evals 基准（计划正确时）'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </details>
               )}
             </div>

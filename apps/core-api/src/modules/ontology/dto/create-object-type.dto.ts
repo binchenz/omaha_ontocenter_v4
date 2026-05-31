@@ -12,6 +12,11 @@ export class CreateObjectTypeDto {
   @MinLength(1)
   label!: string;
 
+  // Without this, the whitelist ValidationPipe strips the type-level description on create.
+  @IsOptional()
+  @IsString()
+  description?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => PropertyDefinitionDto)

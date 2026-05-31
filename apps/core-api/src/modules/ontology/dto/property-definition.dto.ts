@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsIn, IsBoolean, IsInt, Min } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsBoolean, IsInt, Min, IsArray, ArrayNotEmpty } from 'class-validator';
 
 export class PropertyDefinitionDto {
   @IsString()
@@ -32,4 +32,22 @@ export class PropertyDefinitionDto {
   @IsInt()
   @Min(0)
   scale?: number;
+
+  // Semantic-annotation fields (ADR-0023). Without these declared, the whitelist
+  // ValidationPipe silently strips them on the create/update path — deleting the very
+  // payload the ontology relies on to disambiguate fields (description/unit) and gate
+  // values (allowedValues). Required for the editable workbench (#70) and projection (#67).
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  unit?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  allowedValues?: string[];
 }
