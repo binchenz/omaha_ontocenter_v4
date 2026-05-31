@@ -1,0 +1,45 @@
+import { assembleSkills, openingGuidanceFor } from './skill-assembly';
+import { AgentSkill, SkillContext } from '../agent/skills/skill.interface';
+
+function skill(name: string, tools: string[]): AgentSkill {
+  return { name, description: name, tools, systemPrompt: (_c: SkillContext) => name };
+}
+
+const QUERY = skill('query', ['query_objects', 'aggregate_objects', 'get_ontology_schema']);
+const INGEST = skill('data_ingestion', ['parse_file', 'create_object_type', 'import_data']);
+const DESIGN = skill('ontology_design', ['get_ontology_schema', 'create_object_type', 'update_object_type']);
+const ALL = [QUERY, INGEST, DESIGN];
+
+describe('assembleSkills', () => {
+  it('loads only the query skill on the consume surface', () => {
+    const result = assembleSkills(ALL, 'consume', ['object.query']);
+    expect(result.map((s) => s.name)).toEqual(['query']);
+  });
+
+  it('loads the ontology-design skill on the maintain surface', () => {
+    const result = assembleSkills(ALL, 'maintain', ['ontology.design']);
+    expect(result.map((s) => s.name)).toEqual(['ontology_design']);
+  });
+
+  it('withholds the design skill when the surface wants it but permissions do not authorize it', () => {
+    // A query-only user who somehow lands on the maintain surface gets no design skill.
+    const result = assembleSkills(ALL, 'maintain', ['object.query']);
+    expect(result.map((s) => s.name)).not.toContain('ontology_design');
+  });
+});
+
+describe('openingGuidanceFor', () => {
+  it('produces guidance when a query-only user is on a design surface', () => {
+    const guidance = openingGuidanceFor('maintain', ['object.query']);
+    expect(guidance).toBeTruthy();
+  });
+
+  it('produces no guidance for a design-time user on a design surface', () => {
+    const guidance = openingGuidanceFor('maintain', ['ontology.design']);
+    expect(guidance).toBeNull();
+  });
+
+  it('produces no guidance on the consume surface', () => {
+    expect(openingGuidanceFor('consume', ['object.query'])).toBeNull();
+  });
+});
