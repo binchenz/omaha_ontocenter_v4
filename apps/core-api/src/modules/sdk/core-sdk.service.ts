@@ -1,9 +1,10 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import * as path from 'path';
 import { OntologyService } from '../ontology/ontology.service';
 import { QueryService } from '../query/query.service';
 import { PrismaService } from '@omaha/db';
-import { CurrentUser as CurrentUserType, hasCapability } from '@omaha/shared-types';
+import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
+import { assertCapability } from '../../common/helpers/assert-capability';
 import { TypeResolver } from '../agent/sdk/type-resolver.service';
 import { ConnectorClient } from '../agent/connector/connector-client.service';
 import { ImportEngine, UPLOAD_DIR } from '../agent/sdk/import-engine.service';
@@ -51,14 +52,6 @@ export class CoreSdkService {
     private readonly importEngine: ImportEngine,
     private readonly fileParser: FileParserService,
   ) {}
-
-  /** The single write-authz gate on the Agent/SDK path (ADR-0040 §4). Pure capability
-   * check (no DI scope) so it cannot drift from the HTTP path, which uses the same fn. */
-  private assertCapability(actor: CurrentUserType, resource: string, action: string): void {
-    if (!hasCapability(actor.permissions ?? [], resource, action)) {
-      throw new ForbiddenException(`No permission for ${resource}.${action}`);
-    }
-  }
 
   // --- Schema ---
 
@@ -176,7 +169,7 @@ export class CoreSdkService {
     description?: string;
     properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean; description?: string; unit?: string }>;
   }): Promise<unknown> {
-    this.assertCapability(actor, 'ontology', 'design');
+    assertCapability(actor, 'ontology', 'design');
     const tenantId = actor.tenantId;
     const result = await this.ontologyService.createObjectType(tenantId, {
       name: dto.name,
@@ -196,7 +189,7 @@ export class CoreSdkService {
     description?: string;
     properties: Array<{ name: string; type: string; label: string; filterable?: boolean; sortable?: boolean; description?: string; unit?: string }>;
   }): Promise<unknown> {
-    this.assertCapability(actor, 'ontology', 'design');
+    assertCapability(actor, 'ontology', 'design');
     const tenantId = actor.tenantId;
     const typeId = await this.typeResolver.resolve(tenantId, params.objectTypeName);
     return this.ontologyService.updateObjectType(tenantId, typeId, {
@@ -206,7 +199,7 @@ export class CoreSdkService {
   }
 
   async deleteObjectType(actor: CurrentUserType, objectTypeName: string): Promise<unknown> {
-    this.assertCapability(actor, 'ontology', 'design');
+    assertCapability(actor, 'ontology', 'design');
     const tenantId = actor.tenantId;
     const typeId = await this.typeResolver.resolve(tenantId, objectTypeName);
     await this.prisma.$transaction(async (tx: any) => {
@@ -227,7 +220,7 @@ export class CoreSdkService {
     targetType: string;
     cardinality: string;
   }): Promise<unknown> {
-    this.assertCapability(actor, 'ontology', 'design');
+    assertCapability(actor, 'ontology', 'design');
     const tenantId = actor.tenantId;
     const ids = await this.typeResolver.resolveMany(tenantId, [params.sourceType, params.targetType]);
     return this.ontologyService.createRelationship(tenantId, {
@@ -242,7 +235,7 @@ export class CoreSdkService {
     name: string;
     sourceType: string;
   }): Promise<unknown> {
-    this.assertCapability(actor, 'ontology', 'design');
+    assertCapability(actor, 'ontology', 'design');
     const tenantId = actor.tenantId;
     const relationships = await this.ontologyService.listRelationships(tenantId);
     const target = relationships.find((r: any) => r.name === params.name && r.sourceType.name === params.sourceType);

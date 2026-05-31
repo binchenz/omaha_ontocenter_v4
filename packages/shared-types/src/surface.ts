@@ -36,10 +36,6 @@ const DESIGN_TIME_PERMISSIONS: string[] = [
   PERMISSION.REVERSE_INFERENCE_RUN,
 ];
 
-function has(permissions: string[], wanted: string): boolean {
-  return permissions.some((p) => p === PERMISSION.WILDCARD || p === wanted);
-}
-
 export function isDesignTimeUser(permissions: string[]): boolean {
   return permissions.some(
     (p) => p === PERMISSION.WILDCARD || DESIGN_TIME_PERMISSIONS.includes(p),
@@ -51,7 +47,7 @@ export function surfacesFor(permissions: string[]): Surface[] {
   if (isDesignTimeUser(permissions)) {
     surfaces.push(SURFACE.MAINTAIN, SURFACE.CREATE);
   }
-  if (has(permissions, PERMISSION.PIPELINE_AUTHOR)) {
+  if (hasCapability(permissions, 'pipeline', 'author')) {
     surfaces.push(SURFACE.PIPELINE);
   }
   return surfaces;

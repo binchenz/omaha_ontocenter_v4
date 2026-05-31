@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, HttpCode, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, HttpCode } from '@nestjs/common';
 import { OntologyService } from './ontology.service';
 import { IndexManagerService } from './index-manager.service';
 import { DraftService } from './draft.service';
@@ -6,19 +6,12 @@ import { PublishService } from './publish.service';
 import { TemplateService } from './template.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { CurrentUser as CurrentUserType, hasCapability } from '@omaha/shared-types';
+import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
+import { assertCapability } from '../../common/helpers/assert-capability';
 import { CreateObjectTypeDto } from './dto/create-object-type.dto';
 import { UpdateObjectTypeDto } from './dto/update-object-type.dto';
 import { CreateRelationshipDto } from './dto/create-relationship.dto';
 import { OntologySnapshotCodec } from '@omaha/shared-types';
-
-/** The write-authz gate on the HTTP path (ADR-0040 §4) — the same pure capability check
- * the Agent/SDK path uses, so the two entries cannot disagree. */
-function assertCapability(user: CurrentUserType, resource: string, action: string): void {
-  if (!hasCapability(user.permissions ?? [], resource, action)) {
-    throw new ForbiddenException(`No permission for ${resource}.${action}`);
-  }
-}
 
 @Controller('ontology')
 @UseGuards(JwtAuthGuard)

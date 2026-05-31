@@ -19,10 +19,9 @@ const SURFACE_SKILLS: Record<string, string[]> = {
  * even when the surface would otherwise load them (least-privilege over relevance). */
 const DESIGN_TIME_SKILLS = ['ontology_design', 'data_ingestion'];
 
-function wantedSkillNames(surface: string | undefined, permissions: string[]): string[] {
-  const key = surface && surface in SURFACE_SKILLS ? surface : SURFACE.CONSUME;
-  const designTime = isDesignTimeUser(permissions);
-  return SURFACE_SKILLS[key].filter((name) => designTime || !DESIGN_TIME_SKILLS.includes(name));
+/** A surface that declares a known Skill set. Absent/unknown → no narrowing applies. */
+function declaredSurface(surface: string | undefined): surface is string {
+  return surface !== undefined && surface in SURFACE_SKILLS;
 }
 
 export function assembleSkills(
@@ -32,8 +31,11 @@ export function assembleSkills(
 ): AgentSkill[] {
   // No declared surface → preserve the all-active union (ADR-0010). Surface narrows
   // the Skill set only when the user has actually declared one (ADR-0039/0041).
-  if (!surface || !(surface in SURFACE_SKILLS)) return allSkills;
-  const wanted = wantedSkillNames(surface, permissions);
+  if (!declaredSurface(surface)) return allSkills;
+  const designTime = isDesignTimeUser(permissions);
+  const wanted = SURFACE_SKILLS[surface].filter(
+    (name) => designTime || !DESIGN_TIME_SKILLS.includes(name),
+  );
   return allSkills.filter((s) => wanted.includes(s.name));
 }
 
@@ -44,7 +46,7 @@ export function assembleSkills(
  * ForbiddenException (ADR-0041 §2). Returns null when no capability is withheld.
  */
 export function openingGuidanceFor(surface: string | undefined, permissions: string[]): string | null {
-  if (!surface || !(surface in SURFACE_SKILLS)) return null;
+  if (!declaredSurface(surface)) return null;
   const withheld = SURFACE_SKILLS[surface].some(
     (name) => DESIGN_TIME_SKILLS.includes(name) && !isDesignTimeUser(permissions),
   );

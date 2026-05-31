@@ -1,7 +1,8 @@
-import { Body, Controller, Post, UseGuards, ForbiddenException } from '@nestjs/common';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { CurrentUser as CurrentUserType, hasCapability } from '@omaha/shared-types';
+import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
+import { assertCapability } from '../../common/helpers/assert-capability';
 import { ReverseInferenceService } from './reverse-inference.service';
 
 interface InferBody {
@@ -22,9 +23,7 @@ export class ReverseInferenceController {
 
   @Post()
   infer(@CurrentUser() user: CurrentUserType, @Body() body: InferBody) {
-    if (!hasCapability(user.permissions ?? [], 'reverse-inference', 'run')) {
-      throw new ForbiddenException('No permission for reverse-inference.run');
-    }
+    assertCapability(user, 'reverse-inference', 'run');
     return this.reverseInference.inferToDraft(user.tenantId, body.connectorId, { merge: body.merge });
   }
 }
