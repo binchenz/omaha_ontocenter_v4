@@ -75,19 +75,27 @@ A dry-run invocation of an Action Handler that produces an ActionPlan, persists 
 _Avoid_: Simulation, Dry run (standalone — use "Action Preview" or just "Preview")
 
 **Connector**:
-A tenant-configured source of external data (CSV, Excel, MySQL, PostgreSQL). Produces rows that the Mapping engine turns into Object Instances.
+A tenant-configured adapter that pulls raw rows from an external source (CSV, Excel, MySQL, PostgreSQL) into the platform. A Connector's sole responsibility is ingestion — it produces a **Dataset** (raw), not Object Instances directly. Transform and mapping logic live downstream.
 _Avoid_: Data source, Integration
 
+**Dataset**:
+A tenant-owned, persistent, versioned snapshot of tabular data — the unit of data that Pipelines transform and Mappings consume. Every Dataset has a declared schema and a lineage record (which Connector or Pipeline step produced it). Two kinds: **raw** (produced directly by a Connector) and **clean** (produced by a Pipeline transform step). Object Types bind to a clean Dataset, not to a Connector source table directly. Datasets are the platform's answer to the data-quality problem: dirty source data is cleaned in a Pipeline before it ever reaches Object Instances.
+_Avoid_: Table, Staging table, Intermediate result
+
+**Pipeline**:
+A tenant-configured, declarative DAG of transform steps that produces a clean **Dataset** from one or more raw Datasets. Each step is a named, reusable transform (normalise free-text, deduplicate, join, compute column). The Pipeline is the platform's T layer — it is where the OPC encodes data-cleaning rules that would otherwise be hand-written scripts re-done on every maintenance visit. Lineage is recorded at the step level: any field in a clean Dataset can be traced back through the Pipeline to its source column. Pipelines are design-time artifacts (OPC-authored, workbench-managed); they run automatically when a Sync Job refreshes the upstream raw Dataset.
+_Avoid_: ETL script, Transform job, dbt model
+
 **Mapping**:
-A per-Object-Type recipe that points at a Connector + source table and maps source columns to Object Type properties and relationships. Owns the sync strategy (`full` or `incremental`).
+A per-Object-Type declaration that binds an Object Type to a clean **Dataset** and maps Dataset columns to Object Type properties and relationships. Owns the sync strategy (`full` or `incremental`). A Mapping no longer points at a Connector source table directly — the Dataset is the stable, clean interface between the data layer and the ontology layer.
 _Avoid_: Integration, Connector mapping
 
 **IngestRecipe**:
-A declarative, code-defined description of how to materialise one Object Type from a single-shot snapshot of a source database. Lives in `scripts/`, not in tenant configuration. Names which source rows to read, how to map each row to an Object Instance, and (optionally) how to resolve parent references and entity-resolution lookups. Distinct from **Mapping**: a Mapping is tenant-configured infrastructure that runs on a schedule via Connector + Sync Job; an IngestRecipe is engineer-authored code that runs once during a customer onboarding (per ADR-0015).
-_Avoid_: IngestPass, Pipeline, Recipe (standalone)
+A declarative, code-defined description of how to materialise one Object Type from a single-shot snapshot of a source database. Lives in `scripts/`, not in tenant configuration. Names which source rows to read, how to map each row to an Object Instance, and (optionally) how to resolve parent references and entity-resolution lookups. Distinct from **Mapping**: a Mapping is tenant-configured infrastructure that runs on a schedule via Connector + Pipeline + Sync Job; an IngestRecipe is engineer-authored code that runs once during a customer onboarding (per ADR-0015). Distinct from **Pipeline**: a Pipeline is a tenant-owned, persisted transform DAG with lineage; an IngestRecipe is a one-shot `scripts/` artifact with no materialised Dataset or lineage — it is the lightweight stand-in the platform Pipeline now supersedes for tenant-configured ingestion.
+_Avoid_: IngestPass, Recipe (standalone)
 
 **Sync Job**:
-One execution of a Mapping. A `full` Sync Job is a world snapshot (upsert + soft-delete of missing rows); an `incremental` Sync Job pulls rows past a watermark and never detects deletes. See `docs/adr/0006-sync-model.md`.
+One execution of a Mapping. Reads from the Mapping's bound clean **Dataset** and upserts Object Instances. A `full` Sync Job is a world snapshot (upsert + soft-delete of missing rows); an `incremental` Sync Job pulls rows past a watermark and never detects deletes. When the upstream Pipeline has not yet run, the Sync Job reads the most recently materialised Dataset snapshot. See `docs/adr/0006-sync-model.md`.
 _Avoid_: Import, Run, Ingestion job
 
 ### Agent Layer

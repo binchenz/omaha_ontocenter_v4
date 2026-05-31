@@ -4,6 +4,8 @@ status: accepted
 
 # Whole-database ontology reverse-inference with provenance-tagged drafts
 
+> **Unaffected by ADR-0037 (Dataset/Pipeline data plane) — by design.** ADR-0037 introduces a transform layer between Connector and Ontology, but reverse-inference keeps reading the **raw source DB** (not a clean Dataset), precisely to preserve the FK-grounded honesty model below. The two are *parallel legs* off the same raw source, not stacked. See ADR-0037 §"Reverse-inference stays on the raw source."
+
 ## Context
 
 The OPC's first design-time act (FDE Day 0-1) is turning a client's data into an ontology. The platform already has mature *single-table* schema inference (the data-ingestion skill: type inference, label/externalId candidates, low-cardinality→filterable, semantic annotation, single-table `xxx_id` relationship guessing). What is missing is *whole-ontology* inference: taking an entire data source and producing a complete draft (N object types + the relationships between them + hierarchy + allowedValues) as one snapshot, rather than creating types one file at a time in a conversation.
