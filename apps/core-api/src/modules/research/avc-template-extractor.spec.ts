@@ -49,3 +49,42 @@ d('AvcTemplateExtractor — 数据报告 variant, core size metrics', () => {
     await expect(extractor.extract(FIXTURE, '扫地机器人')).rejects.toThrow();
   });
 });
+
+const ESSENCE = path.join(__dirname, '../../../test-fixtures/avc/kongqizhaguo-essence.xlsx');
+const e = fs.existsSync(ESSENCE) ? describe : describe.skip;
+
+e('AvcTemplateExtractor — 综合分析精华版 variant', () => {
+  let extractor: AvcTemplateExtractor;
+
+  beforeAll(() => {
+    extractor = new AvcTemplateExtractor();
+  });
+
+  it('extracts the same three metrics across 13 months from the essence variant', async () => {
+    const rows = await extractor.extract(ESSENCE, '空气炸锅');
+    expect(new Set(rows.map((r) => r.metric))).toEqual(new Set(['零售额', '零售量', '零售均价']));
+    expect(new Set(rows.map((r) => r.month)).size).toBe(13);
+    expect(rows).toHaveLength(39);
+  });
+
+  it('reads known values despite the one-row header offset vs the full variant', async () => {
+    const rows = await extractor.extract(ESSENCE, '空气炸锅');
+    const retail = rows.find((r) => r.metric === '零售额' && r.month === '25.04');
+    expect(retail!.value).toBeCloseTo(13951.92, 1);
+    const volume = rows.find((r) => r.metric === '零售量' && r.month === '26.04');
+    expect(volume!.value).toBe(632088);
+  });
+});
+
+describe('AvcTemplateExtractor.detectVariant', () => {
+  const extractor = new AvcTemplateExtractor();
+
+  (fs.existsSync(FIXTURE) ? it : it.skip)('detects the full 数据报告 variant', async () => {
+    expect(await extractor.detectVariant(FIXTURE)).toBe('full');
+  });
+
+  (fs.existsSync(ESSENCE) ? it : it.skip)('detects the essence 综合分析精华版 variant', async () => {
+    expect(await extractor.detectVariant(ESSENCE)).toBe('essence');
+  });
+});
+

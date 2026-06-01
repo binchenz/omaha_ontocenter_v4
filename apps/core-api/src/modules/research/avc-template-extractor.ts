@@ -13,9 +13,14 @@ export interface MarketMetricRow {
 
 /** The size-trend sheet present in every AVC monthly report (both variants). */
 const SIZE_TREND_SHEET = '2-1整体市场销售规模走势';
+/** A sheet present only in the full 数据报告 variant, absent from the 综合分析精华版. */
+const FULL_VARIANT_SHEET = '2-7TOP机型明细';
 /** The three core size metrics; their row is identified by this label in the sub-label column. */
 const CORE_METRICS = ['零售额', '零售量', '零售均价'];
 const MONTH_PATTERN = /^\d\d\.\d\d$/;
+
+/** Which of the two known AVC layouts a file uses. */
+export type AvcVariant = 'full' | 'essence';
 
 /**
  * Extracts clean market-metric rows from an AVC monthly monitoring spreadsheet (ADR-0042 §4).
@@ -62,7 +67,22 @@ export class AvcTemplateExtractor {
     return rows;
   }
 
-  /** Locate the header row by its `YY.MM` cells; return each month column and its label. */
+  /**
+   * Detect which of the two known AVC layouts a file uses. The full 数据报告 carries the
+   * TOP-机型 / platform-breakdown sheets that the 综合分析精华版 strips out, so their
+   * presence distinguishes the variants. Extraction itself is offset-agnostic and does not
+   * need the variant, but ingestion records it and an unrecognized layout fails loudly.
+   */
+  async detectVariant(filePath: string): Promise<AvcVariant> {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    if (!workbook.getWorksheet(SIZE_TREND_SHEET)) {
+      throw new Error(
+        `Unrecognized AVC layout in ${path.basename(filePath)}: missing "${SIZE_TREND_SHEET}".`,
+      );
+    }
+    return workbook.getWorksheet(FULL_VARIANT_SHEET) ? 'full' : 'essence';
+  }
   private findMonthColumns(sheet: ExcelJS.Worksheet): Array<{ col: number; month: string }> {
     let best: Array<{ col: number; month: string }> = [];
     sheet.eachRow((row) => {
