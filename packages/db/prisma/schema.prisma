@@ -31,6 +31,8 @@ model Tenant {
   actionRuns         ActionRun[]
   ontologyDraft      OntologyDraft?
   evalQuestions      EvalQuestion[]
+  researchDocuments  ResearchDocument[]
+  documentChunks     DocumentChunk[]
 
   @@map("tenants")
 }
@@ -387,4 +389,55 @@ model OntologyTemplate {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@map("ontology_templates")
+}
+
+/// A research document ingested into the market-intelligence archive (ADR-0042 §2). The
+/// document is *provenance*, never a star Object Type: it carries the classification spine
+/// (品类/机构/季度) and a reference to the original file in the BlobStore, so a narrative
+/// answer can cite "据 <机构> <季度> 报告第 N 页" and the reader can open the source.
+model ResearchDocument {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  /// Canonical 品类 (CategoryVocabulary) — the join key to AVC market metrics.
+  category  String
+  /// 机构: the research agency that produced the report (e.g. 艾瑞, 奥维云网).
+  agency    String?
+  /// 季度: the reporting period (e.g. 2025Q2), free-text as declared at ingest.
+  quarter   String?
+  title     String?
+  /// BlobStore reference to the original file (so a citation is openable).
+  mediaRef  String   @map("media_ref")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id])
+  chunks DocumentChunk[]
+
+  @@index([tenantId, category])
+  @@map("research_documents")
+}
+
+/// One embedded text chunk of a ResearchDocument (ADR-0042 §2). The enrichment layer hung
+/// on the 品类 spine: semantic retrieval pre-filters by category/price-band, then ranks by
+/// vector distance. The `embedding` column is a pgvector `vector(1024)` (doubao-embedding-
+/// large-text truncated to 1024 dims); Prisma cannot type it, so it is declared Unsupported
+/// and all reads/writes of the vector go through raw SQL.
+model DocumentChunk {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  documentId String   @map("document_id") @db.Uuid
+  /// Canonical 品类 (denormalised from the document) — the semantic-search pre-filter key.
+  category   String
+  /// Optional canonical 价格段 label, when the chunk is about a specific band.
+  priceBand  String?  @map("price_band")
+  text       String
+  /// 1-based page anchor in the source document, for provenance.
+  page       Int
+  embedding  Unsupported("vector(1024)")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id])
+  document ResearchDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, category])
+  @@map("document_chunks")
 }
