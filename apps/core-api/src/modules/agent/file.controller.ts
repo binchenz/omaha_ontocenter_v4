@@ -6,7 +6,7 @@ import { UPLOAD_DIR } from './sdk/import-engine.service';
 import * as path from 'path';
 
 const MAX_SIZE = 50 * 1024 * 1024;
-const ALLOWED_EXTENSIONS = ['.csv', '.xlsx', '.xls'];
+const ALLOWED_EXTENSIONS = ['.csv', '.xlsx', '.xls', '.pdf'];
 
 @Controller('files')
 @UseGuards(JwtAuthGuard)

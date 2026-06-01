@@ -2,6 +2,9 @@ import { randomUUID } from 'crypto';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
+/** Persistent blob directory (survives across requests, unlike the ephemeral uploads/ dir). */
+export const BLOB_DIR = path.join(process.cwd(), 'blobs');
+
 /**
  * Persistent storage for original ingested files (ADR-0042 §2). Unlike the ephemeral
  * `uploads/` dir used for transient tabular imports, a blob survives so a research-document

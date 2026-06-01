@@ -22,6 +22,7 @@ import { PreviewDbTableTool } from './tools/preview-db-table.tool';
 import { CreateRelationshipTool } from './tools/create-relationship.tool';
 import { DeleteRelationshipTool } from './tools/delete-relationship.tool';
 import { ExtractAvcReportTool } from './tools/extract-avc-report.tool';
+import { IngestDocumentTool } from './tools/ingest-document.tool';
 import { LLM_CLIENT, LlmClient } from './llm/llm-client.interface';
 import { DeepSeekLlmClient } from './llm/deepseek-llm-client';
 import { ResilientLlmClient } from './llm/resilient-llm-client';
@@ -58,6 +59,7 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
     CreateRelationshipTool,
     DeleteRelationshipTool,
     ExtractAvcReportTool,
+    IngestDocumentTool,
     {
       provide: AGENT_TOOLS,
       useFactory: (...tools: AgentTool[]): AgentTool[] => tools,
@@ -66,7 +68,7 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
         CreateObjectTypeTool, UpdateObjectTypeTool, DeleteObjectTypeTool,
         ImportDataTool, TestDbConnectionTool, CreateConnectorTool,
         ListDbTablesTool, PreviewDbTableTool, CreateRelationshipTool, DeleteRelationshipTool,
-        ExtractAvcReportTool,
+        ExtractAvcReportTool, IngestDocumentTool,
       ],
     },
     {

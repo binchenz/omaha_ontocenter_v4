@@ -11,6 +11,7 @@ import { ImportEngine, UPLOAD_DIR } from '../agent/sdk/import-engine.service';
 import { FileParserService } from '../agent/tools/file-parser.service';
 import { AvcTemplateExtractor } from '../research/avc-template-extractor';
 import { MarketMetricImporter } from '../research/market-metric-importer.service';
+import { DocumentIngestionService, DocumentMetadata } from '../research/document-ingestion.service';
 
 export interface OntologySchema {
   types: Array<{
@@ -55,6 +56,7 @@ export class CoreSdkService {
     private readonly fileParser: FileParserService,
     private readonly avcExtractor: AvcTemplateExtractor,
     private readonly marketMetricImporter: MarketMetricImporter,
+    private readonly documentIngestion: DocumentIngestionService,
   ) {}
 
   // --- Schema ---
@@ -404,5 +406,20 @@ export class CoreSdkService {
       brandShares: shareRows.length,
       imported: metricResult.imported + shareResult.imported,
     };
+  }
+
+  /**
+   * Ingest a research document (PDF) into retrievable chunks (ADR-0042 §2, §5). Gated on
+   * `data.ingest` — like every write method here, the capability check is an explicit call.
+   * Confirmation is at the document level: the caller supplies 品类/机构/季度 once; chunking
+   * and embedding then run automatically.
+   */
+  async ingestDocument(
+    actor: CurrentUserType,
+    params: { fileId: string; originalName: string; metadata: DocumentMetadata },
+  ) {
+    assertCapability(actor, 'data', 'ingest');
+    const filePath = path.join(UPLOAD_DIR, params.fileId);
+    return this.documentIngestion.ingest(actor.tenantId, filePath, params.originalName, params.metadata);
   }
 }

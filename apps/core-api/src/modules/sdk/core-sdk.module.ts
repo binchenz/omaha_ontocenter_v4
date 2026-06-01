@@ -11,11 +11,23 @@ import { ReverseInferenceService } from './reverse-inference.service';
 import { ReverseInferenceController } from './reverse-inference.controller';
 import { AvcTemplateExtractor } from '../research/avc-template-extractor';
 import { MarketMetricImporter } from '../research/market-metric-importer.service';
+import { DocumentTextExtractor } from '../research/document-text-extractor';
+import { Chunker } from '../research/chunker';
+import { DocumentIngestionService } from '../research/document-ingestion.service';
+import { EMBEDDING_CLIENT } from '../research/embedding/embedding-client.interface';
+import { ArkEmbeddingClient } from '../research/embedding/ark-embedding-client';
+import { BLOB_STORE, BLOB_DIR, LocalBlobStore } from '../research/blob-store';
 
 @Module({
   imports: [OntologyModule, QueryModule],
   controllers: [ReverseInferenceController],
-  providers: [CoreSdkService, TypeResolver, ConnectorClient, ImportEngine, FileParserService, DbIntrospectionService, ReverseInferenceService, AvcTemplateExtractor, MarketMetricImporter],
+  providers: [
+    CoreSdkService, TypeResolver, ConnectorClient, ImportEngine, FileParserService,
+    DbIntrospectionService, ReverseInferenceService, AvcTemplateExtractor, MarketMetricImporter,
+    DocumentTextExtractor, Chunker, DocumentIngestionService,
+    { provide: EMBEDDING_CLIENT, useClass: ArkEmbeddingClient },
+    { provide: BLOB_STORE, useFactory: () => new LocalBlobStore(BLOB_DIR) },
+  ],
   exports: [CoreSdkService, TypeResolver, DbIntrospectionService, ReverseInferenceService],
 })
 export class CoreSdkModule {}
