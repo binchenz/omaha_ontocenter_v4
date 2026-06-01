@@ -88,3 +88,44 @@ describe('AvcTemplateExtractor.detectVariant', () => {
   });
 });
 
+describe('AvcTemplateExtractor.extractBrandShares — 2-5 brand × price-band grid', () => {
+  let extractor: AvcTemplateExtractor;
+  beforeAll(() => {
+    extractor = new AvcTemplateExtractor();
+  });
+
+  const fit = fs.existsSync(FIXTURE) ? it : it.skip;
+
+  fit('reads a known brand overall share from the 整体 column', async () => {
+    const rows = await extractor.extractBrandShares(FIXTURE, '电饭煲');
+    const cell = rows.find((r) => r.brand === '苏泊尔' && r.priceBand === '整体');
+    expect(cell!.value).toBeCloseTo(0.2685, 3);
+  });
+
+  fit('reads a known brand share within a specific price band', async () => {
+    const rows = await extractor.extractBrandShares(FIXTURE, '电饭煲');
+    const meidi = rows.find((r) => r.brand === '美的' && r.priceBand === '200-300');
+    expect(meidi!.value).toBeCloseTo(0.07, 3);
+    const xiaomi = rows.find((r) => r.brand === '小米' && r.priceBand === '400-500');
+    expect(xiaomi!.value).toBeCloseTo(0.0066, 3);
+  });
+
+  fit('skips the 整体市场 total row (it is the denominator, not a brand)', async () => {
+    const rows = await extractor.extractBrandShares(FIXTURE, '电饭煲');
+    expect(rows.some((r) => r.brand === '整体市场')).toBe(false);
+  });
+
+  fit('stamps every row with the normalized category and emits real brands', async () => {
+    const rows = await extractor.extractBrandShares(FIXTURE, '电饭煲');
+    expect(rows.every((r) => r.category === '电饭煲')).toBe(true);
+    const brands = new Set(rows.map((r) => r.brand));
+    expect(brands.has('小米')).toBe(true);
+    expect(brands.has('美的')).toBe(true);
+  });
+
+  fit('rejects an unknown category', async () => {
+    await expect(extractor.extractBrandShares(FIXTURE, '扫地机器人')).rejects.toThrow();
+  });
+});
+
+

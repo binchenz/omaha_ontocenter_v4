@@ -392,10 +392,17 @@ export class CoreSdkService {
   async extractAvcReport(actor: CurrentUserType, params: { fileId: string; category: string }) {
     assertCapability(actor, 'data', 'ingest');
     const filePath = path.join(UPLOAD_DIR, params.fileId);
-    const rows = await this.avcExtractor.extract(filePath, params.category);
-    const result = await this.marketMetricImporter.import(actor.tenantId, rows);
+    const metricRows = await this.avcExtractor.extract(filePath, params.category);
+    const shareRows = await this.avcExtractor.extractBrandShares(filePath, params.category);
+    const metricResult = await this.marketMetricImporter.import(actor.tenantId, metricRows);
+    const shareResult = await this.marketMetricImporter.importBrandShares(actor.tenantId, shareRows);
     this.typeResolver.invalidate(actor.tenantId);
     this.invalidateSchemaSummary(actor.tenantId);
-    return { ...result, metrics: rows.length };
+    return {
+      objectType: metricResult.objectType,
+      metrics: metricRows.length,
+      brandShares: shareRows.length,
+      imported: metricResult.imported + shareResult.imported,
+    };
   }
 }
