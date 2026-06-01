@@ -12,6 +12,7 @@ import { FileParserService } from '../agent/tools/file-parser.service';
 import { AvcTemplateExtractor } from '../research/avc-template-extractor';
 import { MarketMetricImporter } from '../research/market-metric-importer.service';
 import { DocumentIngestionService, DocumentMetadata } from '../research/document-ingestion.service';
+import { SemanticSearchService } from '../research/semantic-search.service';
 
 export interface OntologySchema {
   types: Array<{
@@ -57,6 +58,7 @@ export class CoreSdkService {
     private readonly avcExtractor: AvcTemplateExtractor,
     private readonly marketMetricImporter: MarketMetricImporter,
     private readonly documentIngestion: DocumentIngestionService,
+    private readonly semanticSearch: SemanticSearchService,
   ) {}
 
   // --- Schema ---
@@ -421,5 +423,22 @@ export class CoreSdkService {
     assertCapability(actor, 'data', 'ingest');
     const filePath = path.join(UPLOAD_DIR, params.fileId);
     return this.documentIngestion.ingest(actor.tenantId, filePath, params.originalName, params.metadata);
+  }
+
+  /**
+   * Semantic retrieval over research-document chunks (ADR-0042 §2) — a read path on the
+   * consume surface. Tenant-scoped by the caller's identity; no write gate (reading is the
+   * consume-role's own capability). Returns cited chunks for the Agent to synthesize from.
+   */
+  async searchResearch(
+    actor: CurrentUserType,
+    params: { query: string; category?: string; priceBand?: string; k?: number },
+  ) {
+    return this.semanticSearch.search(
+      actor.tenantId,
+      params.query,
+      { category: params.category, priceBand: params.priceBand },
+      params.k ?? 6,
+    );
   }
 }

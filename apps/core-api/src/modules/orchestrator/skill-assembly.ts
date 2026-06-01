@@ -9,7 +9,7 @@ import { SURFACE, isDesignTimeUser } from '@omaha/shared-types';
  */
 
 const SURFACE_SKILLS: Record<string, string[]> = {
-  [SURFACE.CONSUME]: ['query'],
+  [SURFACE.CONSUME]: ['query', 'research_qa'],
   [SURFACE.MAINTAIN]: ['ontology_design'],
   [SURFACE.CREATE]: ['ontology_design', 'data_ingestion'],
   [SURFACE.PIPELINE]: ['data_ingestion'],

@@ -14,6 +14,7 @@ import { MarketMetricImporter } from '../research/market-metric-importer.service
 import { DocumentTextExtractor } from '../research/document-text-extractor';
 import { Chunker } from '../research/chunker';
 import { DocumentIngestionService } from '../research/document-ingestion.service';
+import { SemanticSearchService } from '../research/semantic-search.service';
 import { EMBEDDING_CLIENT } from '../research/embedding/embedding-client.interface';
 import { ArkEmbeddingClient } from '../research/embedding/ark-embedding-client';
 import { BLOB_STORE, BLOB_DIR, LocalBlobStore } from '../research/blob-store';
@@ -24,7 +25,7 @@ import { BLOB_STORE, BLOB_DIR, LocalBlobStore } from '../research/blob-store';
   providers: [
     CoreSdkService, TypeResolver, ConnectorClient, ImportEngine, FileParserService,
     DbIntrospectionService, ReverseInferenceService, AvcTemplateExtractor, MarketMetricImporter,
-    DocumentTextExtractor, Chunker, DocumentIngestionService,
+    DocumentTextExtractor, Chunker, DocumentIngestionService, SemanticSearchService,
     { provide: EMBEDDING_CLIENT, useClass: ArkEmbeddingClient },
     { provide: BLOB_STORE, useFactory: () => new LocalBlobStore(BLOB_DIR) },
   ],

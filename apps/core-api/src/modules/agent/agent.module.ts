@@ -23,6 +23,7 @@ import { CreateRelationshipTool } from './tools/create-relationship.tool';
 import { DeleteRelationshipTool } from './tools/delete-relationship.tool';
 import { ExtractAvcReportTool } from './tools/extract-avc-report.tool';
 import { IngestDocumentTool } from './tools/ingest-document.tool';
+import { SemanticSearchTool } from './tools/semantic-search.tool';
 import { LLM_CLIENT, LlmClient } from './llm/llm-client.interface';
 import { DeepSeekLlmClient } from './llm/deepseek-llm-client';
 import { ResilientLlmClient } from './llm/resilient-llm-client';
@@ -31,6 +32,7 @@ import { AgentSkill } from './skills/skill.interface';
 import { QuerySkill } from './skills/query.skill';
 import { DataIngestionSkill } from './skills/data-ingestion.skill';
 import { OntologyDesignSkill } from './skills/ontology-design.skill';
+import { ResearchQaSkill } from './skills/research-qa.skill';
 import { AgentBootstrap } from './agent.bootstrap';
 import { PlanSummarizer } from './plan-summarizer.service';
 import { EvalsService } from './evals.service';
@@ -60,6 +62,7 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
     DeleteRelationshipTool,
     ExtractAvcReportTool,
     IngestDocumentTool,
+    SemanticSearchTool,
     {
       provide: AGENT_TOOLS,
       useFactory: (...tools: AgentTool[]): AgentTool[] => tools,
@@ -68,12 +71,12 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
         CreateObjectTypeTool, UpdateObjectTypeTool, DeleteObjectTypeTool,
         ImportDataTool, TestDbConnectionTool, CreateConnectorTool,
         ListDbTablesTool, PreviewDbTableTool, CreateRelationshipTool, DeleteRelationshipTool,
-        ExtractAvcReportTool, IngestDocumentTool,
+        ExtractAvcReportTool, IngestDocumentTool, SemanticSearchTool,
       ],
     },
     {
       provide: AGENT_SKILLS,
-      useFactory: (): AgentSkill[] => [new QuerySkill(), new DataIngestionSkill(), new OntologyDesignSkill()],
+      useFactory: (): AgentSkill[] => [new QuerySkill(), new DataIngestionSkill(), new OntologyDesignSkill(), new ResearchQaSkill()],
     },
     {
       provide: OrchestratorService,
