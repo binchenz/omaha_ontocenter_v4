@@ -35,6 +35,10 @@ const MONTH_PATTERN = /^\d\d\.\d\d$/;
 const SECTION_TITLE_PATTERN = /^2-5-\d/;
 /** Column D holds the brand name in the 2-5 grid. */
 const BRAND_COLUMN = 4;
+/** Column E holds the per-row metric sub-label in the 2-1 sheet. */
+const METRIC_SUBLABEL_COLUMN = 5;
+/** Column C holds the section title in the 2-5 sheet. */
+const SECTION_TITLE_COLUMN = 3;
 /** The total row (the share denominator), not a brand — skipped. */
 const TOTAL_ROW_LABEL = '整体市场';
 /** The header label for the all-bands-combined column. */
@@ -55,17 +59,66 @@ export type AvcVariant = 'full' | 'essence';
  */
 export class AvcTemplateExtractor {
   async extract(filePath: string, rawCategory: string): Promise<MarketMetricRow[]> {
-    const category = normalizeCategory(rawCategory);
-    if (!category) {
-      // The unjoinable-island guard (ADR-0042 §3): an unknown 品类 cannot join to anything.
-      throw new Error(`Unknown 品类 "${rawCategory}" — not in the category vocabulary.`);
-    }
+    const category = this.requireCategory(rawCategory);
+    const workbook = await this.load(filePath);
+    return this.extractMetrics(workbook, category, path.basename(filePath));
+  }
 
+  async extractBrandShares(filePath: string, rawCategory: string): Promise<BrandShareRow[]> {
+    const category = this.requireCategory(rawCategory);
+    const workbook = await this.load(filePath);
+    return this.extractShares(workbook, category, path.basename(filePath));
+  }
+
+  /** Extract both metric and brand-share rows from a single workbook load (ADR-0042 §4). */
+  async extractAll(
+    filePath: string,
+    rawCategory: string,
+  ): Promise<{ metrics: MarketMetricRow[]; brandShares: BrandShareRow[] }> {
+    const category = this.requireCategory(rawCategory);
+    const workbook = await this.load(filePath);
+    const sourceReport = path.basename(filePath);
+    return {
+      metrics: this.extractMetrics(workbook, category, sourceReport),
+      brandShares: this.extractShares(workbook, category, sourceReport),
+    };
+  }
+
+  /**
+   * Detect which of the two known AVC layouts a file uses. The full 数据报告 carries the
+   * TOP-机型 / platform-breakdown sheets that the 综合分析精华版 strips out, so their
+   * presence distinguishes the variants. Extraction itself is offset-agnostic and does not
+   * need the variant, but ingestion records it and an unrecognized layout fails loudly.
+   */
+  async detectVariant(filePath: string): Promise<AvcVariant> {
+    const workbook = await this.load(filePath);
+    if (!workbook.getWorksheet(SIZE_TREND_SHEET)) {
+      throw new Error(
+        `Unrecognized AVC layout in ${path.basename(filePath)}: missing "${SIZE_TREND_SHEET}".`,
+      );
+    }
+    return workbook.getWorksheet(FULL_VARIANT_SHEET) ? 'full' : 'essence';
+  }
+
+  private async load(filePath: string): Promise<ExcelJS.Workbook> {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
+    return workbook;
+  }
+
+  /** The unjoinable-island guard (ADR-0042 §3): an unknown 品类 cannot join to anything. */
+  private requireCategory(rawCategory: string): string {
+    const category = normalizeCategory(rawCategory);
+    if (!category) {
+      throw new Error(`Unknown 品类 "${rawCategory}" — not in the category vocabulary.`);
+    }
+    return category;
+  }
+
+  private extractMetrics(workbook: ExcelJS.Workbook, category: string, sourceReport: string): MarketMetricRow[] {
     const sheet = workbook.getWorksheet(SIZE_TREND_SHEET);
     if (!sheet) {
-      throw new Error(`AVC sheet "${SIZE_TREND_SHEET}" not found in ${path.basename(filePath)}.`);
+      throw new Error(`AVC sheet "${SIZE_TREND_SHEET}" not found in ${sourceReport}.`);
     }
 
     const monthColumns = this.findMonthColumns(sheet);
@@ -73,10 +126,9 @@ export class AvcTemplateExtractor {
       throw new Error(`No month columns found in "${SIZE_TREND_SHEET}" — unrecognized layout.`);
     }
 
-    const sourceReport = path.basename(filePath);
     const rows: MarketMetricRow[] = [];
     sheet.eachRow((row) => {
-      const subLabel = this.cellText(row.getCell(5).value); // col E: per-row metric sub-label
+      const subLabel = this.cellText(row.getCell(METRIC_SUBLABEL_COLUMN).value);
       if (!CORE_METRICS.includes(subLabel)) return;
       for (const { col, month } of monthColumns) {
         const value = this.numericValue(row.getCell(col).value);
@@ -89,40 +141,16 @@ export class AvcTemplateExtractor {
   }
 
   /**
-   * Detect which of the two known AVC layouts a file uses. The full 数据报告 carries the
-   * TOP-机型 / platform-breakdown sheets that the 综合分析精华版 strips out, so their
-   * presence distinguishes the variants. Extraction itself is offset-agnostic and does not
-   * need the variant, but ingestion records it and an unrecognized layout fails loudly.
-   */
-  async detectVariant(filePath: string): Promise<AvcVariant> {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
-    if (!workbook.getWorksheet(SIZE_TREND_SHEET)) {
-      throw new Error(
-        `Unrecognized AVC layout in ${path.basename(filePath)}: missing "${SIZE_TREND_SHEET}".`,
-      );
-    }
-    return workbook.getWorksheet(FULL_VARIANT_SHEET) ? 'full' : 'essence';
-  }
-
-  /**
    * Extract the brand × price-band retail-share grid (ADR-0042 §4, sheet 2-5). The sheet
    * stacks many sub-sections (分价格段 / 分加热方式 / …), each with two horizontal blocks
    * (本期市场 / 本年累计); this reads only the first 分价格段...零售额 section and its current-
    * period block. Anchored on the section title and the band-header row (located by its
    * price-band cells), not hardcoded coordinates, so it survives the variant row offsets.
    */
-  async extractBrandShares(filePath: string, rawCategory: string): Promise<BrandShareRow[]> {
-    const category = normalizeCategory(rawCategory);
-    if (!category) {
-      throw new Error(`Unknown 品类 "${rawCategory}" — not in the category vocabulary.`);
-    }
-
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
+  private extractShares(workbook: ExcelJS.Workbook, category: string, sourceReport: string): BrandShareRow[] {
     const sheet = workbook.getWorksheet(BRAND_COMPETITION_SHEET);
     if (!sheet) {
-      throw new Error(`AVC sheet "${BRAND_COMPETITION_SHEET}" not found in ${path.basename(filePath)}.`);
+      throw new Error(`AVC sheet "${BRAND_COMPETITION_SHEET}" not found in ${sourceReport}.`);
     }
 
     const sectionRow = this.findPriceBandSectionRow(sheet);
@@ -142,18 +170,18 @@ export class AvcTemplateExtractor {
       }
     }
     if (!headerRow) {
-      throw new Error(`No price-band header row found under the 分价格段 section in ${path.basename(filePath)}.`);
+      throw new Error(`No price-band header row found under the 分价格段 section in ${sourceReport}.`);
     }
 
-    const sourceReport = path.basename(filePath);
     const rows: BrandShareRow[] = [];
     for (let r = headerRow + 1; r <= sheet.rowCount; r++) {
-      const title = this.cellText(sheet.getRow(r).getCell(3).value);
+      const row = sheet.getRow(r);
+      const title = this.cellText(row.getCell(SECTION_TITLE_COLUMN).value);
       if (SECTION_TITLE_PATTERN.test(title)) break; // reached the next sub-section
-      const brand = this.cellText(sheet.getRow(r).getCell(BRAND_COLUMN).value);
+      const brand = this.cellText(row.getCell(BRAND_COLUMN).value);
       if (!brand || brand === TOTAL_ROW_LABEL) continue; // 整体市场 is the denominator, not a brand
       for (const { col, band } of bandColumns) {
-        const value = this.numericValue(sheet.getRow(r).getCell(col).value);
+        const value = this.numericValue(row.getCell(col).value);
         if (value !== null) {
           rows.push({ category, brand, priceBand: band, period: '本期市场', metric: 'share', value, sourceReport });
         }
@@ -165,7 +193,7 @@ export class AvcTemplateExtractor {
   /** Find the first 分价格段...零售额 section title row (col C). */
   private findPriceBandSectionRow(sheet: ExcelJS.Worksheet): number {
     for (let r = 1; r <= sheet.rowCount; r++) {
-      const title = this.cellText(sheet.getRow(r).getCell(3).value);
+      const title = this.cellText(sheet.getRow(r).getCell(SECTION_TITLE_COLUMN).value);
       if (SECTION_TITLE_PATTERN.test(title) && title.includes('分价格段') && title.includes('零售额')) {
         return r;
       }

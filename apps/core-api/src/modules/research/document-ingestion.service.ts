@@ -46,8 +46,12 @@ export class DocumentIngestionService {
       throw new Error(`Unknown 品类 "${meta.category}" — not in the category vocabulary.`);
     }
 
-    const mediaRef = await this.blobStore.store(await fs.readFile(filePath), originalName);
-    const pages = await this.extractor.extract(filePath);
+    // Read the PDF once; storing the original and extracting its text are independent.
+    const bytes = await fs.readFile(filePath);
+    const [mediaRef, pages] = await Promise.all([
+      this.blobStore.store(bytes, originalName),
+      this.extractor.extract(bytes),
+    ]);
     const chunks = this.chunker.chunk(pages, { size: CHUNK_SIZE, overlap: CHUNK_OVERLAP });
     const embeddings = chunks.length > 0 ? await this.embedding.embedPassages(chunks.map((c) => c.text)) : [];
 

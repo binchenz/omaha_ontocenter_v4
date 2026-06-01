@@ -22,7 +22,7 @@ export class MarketMetricImporter {
   ) {}
 
   async import(tenantId: string, rows: MarketMetricRow[]): Promise<ImportResult> {
-    await this.ensureType(tenantId);
+    await this.ensureObjectType(tenantId, MARKET_METRIC_DEF);
     const instances: InstanceUpsert[] = rows.map((r) => ({
       externalId: `${r.category}_${r.month}_${r.metric}`,
       label: `${r.category} ${r.month} ${r.metric}`,
@@ -38,7 +38,7 @@ export class MarketMetricImporter {
   }
 
   async importBrandShares(tenantId: string, rows: BrandShareRow[]): Promise<ImportResult> {
-    await this.ensureBrandShareType(tenantId);
+    await this.ensureObjectType(tenantId, BRAND_SHARE_DEF);
     const instances: InstanceUpsert[] = rows.map((r) => ({
       externalId: `${r.category}_${r.brand}_${r.priceBand}_${r.period}`,
       label: `${r.category} ${r.brand} ${r.priceBand}`,
@@ -55,49 +55,46 @@ export class MarketMetricImporter {
     return this.importEngine.importInstances(tenantId, BRAND_SHARE_TYPE, instances);
   }
 
-  /** Create the market_metric Object Type if absent (idempotent). */
-  private async ensureType(tenantId: string): Promise<void> {
+  /** Create an Object Type if absent (idempotent) — the single ensure path for both AVC types. */
+  private async ensureObjectType(
+    tenantId: string,
+    def: Parameters<OntologyService['createObjectType']>[1] & { name: string },
+  ): Promise<void> {
     const existing = await this.prisma.objectType.findFirst({
-      where: { tenantId, name: MARKET_METRIC_TYPE },
+      where: { tenantId, name: def.name },
       select: { id: true },
     });
     if (existing) return;
-    await this.ontologyService.createObjectType(tenantId, {
-      name: MARKET_METRIC_TYPE,
-      label: '市场指标',
-      description: 'AVC 月度监测的市场规模指标（零售额/零售量/零售均价等），按品类与月份',
-      properties: [
-        { name: 'category', label: '品类', type: 'string', filterable: true },
-        { name: 'month', label: '月份', type: 'string', filterable: true, sortable: true },
-        { name: 'metric', label: '指标', type: 'string', filterable: true },
-        { name: 'value', label: '数值', type: 'number', sortable: true },
-        { name: 'sourceReport', label: '来源报告', type: 'string' },
-      ],
-      derivedProperties: [],
-    });
-  }
-
-  /** Create the brand_share Object Type if absent (idempotent). */
-  private async ensureBrandShareType(tenantId: string): Promise<void> {
-    const existing = await this.prisma.objectType.findFirst({
-      where: { tenantId, name: BRAND_SHARE_TYPE },
-      select: { id: true },
-    });
-    if (existing) return;
-    await this.ontologyService.createObjectType(tenantId, {
-      name: BRAND_SHARE_TYPE,
-      label: '品牌份额',
-      description: 'AVC 月度监测的分价格段品牌零售份额，按品类、品牌、价格段',
-      properties: [
-        { name: 'category', label: '品类', type: 'string', filterable: true },
-        { name: 'brand', label: '品牌', type: 'string', filterable: true },
-        { name: 'priceBand', label: '价格段', type: 'string', filterable: true },
-        { name: 'period', label: '周期', type: 'string', filterable: true },
-        { name: 'metric', label: '指标', type: 'string', filterable: true },
-        { name: 'value', label: '份额', type: 'number', sortable: true },
-        { name: 'sourceReport', label: '来源报告', type: 'string' },
-      ],
-      derivedProperties: [],
-    });
+    await this.ontologyService.createObjectType(tenantId, def);
   }
 }
+
+const MARKET_METRIC_DEF = {
+  name: MARKET_METRIC_TYPE,
+  label: '市场指标',
+  description: 'AVC 月度监测的市场规模指标（零售额/零售量/零售均价等），按品类与月份',
+  properties: [
+    { name: 'category', label: '品类', type: 'string' as const, filterable: true },
+    { name: 'month', label: '月份', type: 'string' as const, filterable: true, sortable: true },
+    { name: 'metric', label: '指标', type: 'string' as const, filterable: true },
+    { name: 'value', label: '数值', type: 'number' as const, sortable: true },
+    { name: 'sourceReport', label: '来源报告', type: 'string' as const },
+  ],
+  derivedProperties: [],
+};
+
+const BRAND_SHARE_DEF = {
+  name: BRAND_SHARE_TYPE,
+  label: '品牌份额',
+  description: 'AVC 月度监测的分价格段品牌零售份额，按品类、品牌、价格段',
+  properties: [
+    { name: 'category', label: '品类', type: 'string' as const, filterable: true },
+    { name: 'brand', label: '品牌', type: 'string' as const, filterable: true },
+    { name: 'priceBand', label: '价格段', type: 'string' as const, filterable: true },
+    { name: 'period', label: '周期', type: 'string' as const, filterable: true },
+    { name: 'metric', label: '指标', type: 'string' as const, filterable: true },
+    { name: 'value', label: '份额', type: 'number' as const, sortable: true },
+    { name: 'sourceReport', label: '来源报告', type: 'string' as const },
+  ],
+  derivedProperties: [],
+};

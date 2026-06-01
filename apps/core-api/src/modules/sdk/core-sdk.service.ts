@@ -396,10 +396,14 @@ export class CoreSdkService {
   async extractAvcReport(actor: CurrentUserType, params: { fileId: string; category: string }) {
     assertCapability(actor, 'data', 'ingest');
     const filePath = path.join(UPLOAD_DIR, params.fileId);
-    const metricRows = await this.avcExtractor.extract(filePath, params.category);
-    const shareRows = await this.avcExtractor.extractBrandShares(filePath, params.category);
-    const metricResult = await this.marketMetricImporter.import(actor.tenantId, metricRows);
-    const shareResult = await this.marketMetricImporter.importBrandShares(actor.tenantId, shareRows);
+    const { metrics: metricRows, brandShares: shareRows } = await this.avcExtractor.extractAll(
+      filePath,
+      params.category,
+    );
+    const [metricResult, shareResult] = await Promise.all([
+      this.marketMetricImporter.import(actor.tenantId, metricRows),
+      this.marketMetricImporter.importBrandShares(actor.tenantId, shareRows),
+    ]);
     this.typeResolver.invalidate(actor.tenantId);
     this.invalidateSchemaSummary(actor.tenantId);
     return {

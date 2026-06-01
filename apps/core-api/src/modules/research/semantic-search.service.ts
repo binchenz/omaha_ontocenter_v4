@@ -62,7 +62,6 @@ export class SemanticSearchService {
     params.push(vectorLiteral);
     const vecParam = `$${params.length}::vector`;
     params.push(k);
-    const limitParam = `$${params.length}`;
 
     const sql = `
       SELECT c.text, c.category, c.price_band AS "priceBand", c.page,
@@ -73,7 +72,7 @@ export class SemanticSearchService {
       JOIN research_documents d ON d.id = c.document_id
       WHERE ${conditions.join(' AND ')}
       ORDER BY c.embedding <=> ${vecParam}
-      LIMIT ${limitParam}
+      LIMIT $${params.length}
     `;
 
     const rows = await this.prisma.$queryRawUnsafe<Array<{
