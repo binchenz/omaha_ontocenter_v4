@@ -6,6 +6,7 @@ dist/
 .superpowers/
 uploads/
 blobs/
+test-fixtures/
 .DS_Store
 .claude/
 scripts/test-results/

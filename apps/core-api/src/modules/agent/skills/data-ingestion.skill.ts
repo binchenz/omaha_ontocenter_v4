@@ -3,7 +3,7 @@ import { AgentSkill, SkillContext } from './skill.interface';
 export class DataIngestionSkill implements AgentSkill {
   name = 'data_ingestion';
   description = '数据接入：帮助用户上传文件或连接数据库，自动推断数据结构，创建对象类型并导入数据。';
-  tools = ['parse_file', 'create_object_type', 'import_data', 'test_db_connection', 'list_db_tables', 'preview_db_table', 'create_connector'];
+  tools = ['parse_file', 'create_object_type', 'import_data', 'test_db_connection', 'list_db_tables', 'preview_db_table', 'create_connector', 'extract_avc_report'];
 
   systemPrompt(_context: SkillContext): string {
     return `## 数据接入能力
@@ -24,6 +24,10 @@ export class DataIngestionSkill implements AgentSkill {
 4. 调用 list_db_tables 列出可用表
 5. 用户选择后调用 preview_db_table 预览
 6. 按文件导入流程的步骤 2-5 继续
+
+### AVC 市场监测报告导入
+AVC（奥维云网）线上市场月度监测报告是高度模板化的交叉表 Excel，普通 parse_file 无法正确解析。
+当用户上传的是 AVC 报告时，不要走文件导入流程，直接调用 extract_avc_report，传入 fileId 和报告品类（如 电饭煲、空气炸锅、净水器）。它会自动抽取市场规模指标并导入为市场指标对象，无需手动 create_object_type。导入后用户即可用 query/aggregate 查询份额与趋势。
 
 ### Schema 推断规则
 - 列值全为数字 → number 类型，标记 filterable

@@ -9,6 +9,8 @@ import { TypeResolver } from '../agent/sdk/type-resolver.service';
 import { ConnectorClient } from '../agent/connector/connector-client.service';
 import { ImportEngine, UPLOAD_DIR } from '../agent/sdk/import-engine.service';
 import { FileParserService } from '../agent/tools/file-parser.service';
+import { AvcTemplateExtractor } from '../research/avc-template-extractor';
+import { MarketMetricImporter } from '../research/market-metric-importer.service';
 
 export interface OntologySchema {
   types: Array<{
@@ -51,6 +53,8 @@ export class CoreSdkService {
     private readonly connectorClient: ConnectorClient,
     private readonly importEngine: ImportEngine,
     private readonly fileParser: FileParserService,
+    private readonly avcExtractor: AvcTemplateExtractor,
+    private readonly marketMetricImporter: MarketMetricImporter,
   ) {}
 
   // --- Schema ---
@@ -376,5 +380,22 @@ export class CoreSdkService {
       externalIdColumn: params.externalIdColumn,
       labelColumn: params.labelColumn,
     });
+  }
+
+  /**
+   * Ingest an AVC monthly market-monitoring spreadsheet (ADR-0042 §4): parse the bounded
+   * AVC template into market-metric rows, then upsert them via the single write path. Gated
+   * on `data.ingest` — like every write method here, the capability check is an explicit
+   * call (no structural guard, by the request-scope constraint in the write-authz ADR), so
+   * any new write method MUST add its own assertCapability.
+   */
+  async extractAvcReport(actor: CurrentUserType, params: { fileId: string; category: string }) {
+    assertCapability(actor, 'data', 'ingest');
+    const filePath = path.join(UPLOAD_DIR, params.fileId);
+    const rows = await this.avcExtractor.extract(filePath, params.category);
+    const result = await this.marketMetricImporter.import(actor.tenantId, rows);
+    this.typeResolver.invalidate(actor.tenantId);
+    this.invalidateSchemaSummary(actor.tenantId);
+    return { ...result, metrics: rows.length };
   }
 }
