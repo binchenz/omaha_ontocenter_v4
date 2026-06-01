@@ -45,6 +45,10 @@ describe('CoreSdkService', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any, // avcExtractor
+      {} as any, // marketMetricImporter
+      {} as any, // documentIngestion
+      {} as any, // semanticSearch
     );
   });
 

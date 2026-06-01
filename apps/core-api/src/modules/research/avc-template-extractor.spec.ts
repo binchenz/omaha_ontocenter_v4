@@ -2,6 +2,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { AvcTemplateExtractor } from './avc-template-extractor';
 
+// Each test reloads a ~1.2MB real AVC workbook; under full-suite parallelism the
+// Excel parse exceeds jest's 5s default, so give this suite a wider budget.
+jest.setTimeout(30000);
+
 const FIXTURE = path.join(__dirname, '../../../test-fixtures/avc/dianfanbao-full.xlsx');
 const hasFixture = fs.existsSync(FIXTURE);
 // The real AVC sample is client-private and not committed; skip (don't fail) when absent.
