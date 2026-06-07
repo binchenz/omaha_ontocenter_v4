@@ -107,6 +107,8 @@ describe('Derived Property v2 — isPaidAt (e2e)', () => {
     await viewManager.refresh(tenantId, 'exists_probe_payment');
   });
 
+  // Returns the order's externalId — the canonical parent reference children
+  // store under the relation name (ADR-0044), not the UUID id.
   async function seedOrder(tid: string, ext: string, amount: number): Promise<string> {
     const row = await prisma.objectInstance.create({
       data: {
@@ -119,13 +121,13 @@ describe('Derived Property v2 — isPaidAt (e2e)', () => {
       },
     });
     seededIds.push(row.id);
-    return row.id;
+    return ext;
   }
 
   async function seedPayment(
     tid: string,
     ext: string,
-    orderId: string,
+    orderExternalId: string,
     status: string,
     paidAt: string,
     amount: number,
@@ -137,7 +139,7 @@ describe('Derived Property v2 — isPaidAt (e2e)', () => {
         externalId: ext,
         label: ext,
         properties: { status, paidAt, amount },
-        relationships: { exists_probe_orderId: orderId },
+        relationships: { payments: orderExternalId },
       },
     });
     seededIds.push(row.id);

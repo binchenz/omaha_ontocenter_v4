@@ -1,0 +1,44 @@
+# ── Stage 1: Install dependencies ─────────────────────────────────────────────
+FROM node:20-slim AS deps
+
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+WORKDIR /app
+
+# Copy workspace root manifests
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+
+# Copy package manifests for web + its workspace dependency
+COPY apps/web/package.json apps/web/
+COPY packages/shared-types/package.json packages/shared-types/
+
+# Install all dependencies (dev needed for build)
+RUN pnpm install --frozen-lockfile
+
+# ── Stage 2: Build ────────────────────────────────────────────────────────────
+FROM deps AS build
+
+# Copy source
+COPY packages/shared-types/ packages/shared-types/
+COPY apps/web/ apps/web/
+COPY turbo.json ./
+
+# Build shared-types first, then web (turbo handles order)
+RUN pnpm turbo build --filter=@omaha/web...
+
+# ── Stage 3: Runtime ──────────────────────────────────────────────────────────
+FROM node:20-slim AS runtime
+
+WORKDIR /app
+
+# Copy Next.js standalone output
+COPY --from=build /app/apps/web/.next/standalone ./
+COPY --from=build /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build /app/apps/web/public ./apps/web/public
+
+ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
+EXPOSE 3000
+
+WORKDIR /app/apps/web
+CMD ["node", "server.js"]

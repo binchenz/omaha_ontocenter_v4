@@ -56,6 +56,9 @@ describe('DocumentIngestionService', () => {
       chunkInserts.push(args);
       return 1;
     }),
+    // Atomic ingest (#3): document + chunk writes run inside one interactive transaction.
+    // The fake runs the callback against the same mocks, so writes still land on the spies.
+    $transaction: jest.fn(async (fn: any) => fn(mockPrisma)),
   };
 
   beforeAll(async () => {
@@ -105,24 +108,36 @@ describe('DocumentIngestionService', () => {
     });
   });
 
-  it('persists one chunk row per chunk, carrying page anchor and embedding', async () => {
+  it('persists all chunks in a single batched INSERT, carrying page anchors and embeddings', async () => {
     const result = await service.ingest('t1', tmpPdf, 'report.pdf', { category: '净水器' });
-    // The two short pages each fit in one chunk → 2 chunk inserts.
+    // The two short pages each fit in one chunk → result reports 2 chunks.
     expect(result.chunks).toBe(2);
-    expect(chunkInserts).toHaveLength(2);
-    // Args after the SQL string: tenantId, documentId, category, text, page, vectorLiteral.
-    const [, tenantId, documentId, category, text, page, vector] = chunkInserts[0];
+    // Batch INSERT: one $executeRawUnsafe call for all chunks (not N individual calls).
+    expect(chunkInserts).toHaveLength(1);
+    // Layout: [sql, tenantId, docId, cat1, text1, page1, vec1, cat2, text2, page2, vec2]
+    const [sql, tenantId, docId, cat1, text1, page1, vec1, , text2, page2] = chunkInserts[0];
+    expect(sql).toContain('INSERT INTO "document_chunks"');
     expect(tenantId).toBe('t1');
-    expect(documentId).toBe('doc-1');
-    expect(category).toBe('净水器');
-    expect(text).toContain('龙头颜值');
-    expect(page).toBe(1);
-    expect(vector).toMatch(/^\[.*\]$/); // pgvector literal
+    expect(docId).toBe('doc-1');
+    expect(cat1).toBe('净水器');
+    expect(text1).toContain('龙头颜值');
+    expect(page1).toBe(1);
+    expect(vec1).toMatch(/^\[.*\]$/); // pgvector literal
+    expect(text2).toContain('滤芯');
+    expect(page2).toBe(2);
   });
 
-  it('preserves the page anchor of the second page on its chunk', async () => {
+  it('writes the document and its chunks inside one transaction', async () => {
     await service.ingest('t1', tmpPdf, 'report.pdf', { category: '净水器' });
-    const pages = chunkInserts.map((args) => args[5]);
-    expect(pages).toEqual([1, 2]);
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects (no orphaned document) when the batch chunk insert fails', async () => {
+    // Batch INSERT blows up; with writes inside a transaction the whole ingest rejects
+    // so Postgres rolls the document row back rather than leaving it orphaned.
+    mockPrisma.$executeRawUnsafe.mockRejectedValueOnce(new Error('insert failed'));
+    await expect(
+      service.ingest('t1', tmpPdf, 'report.pdf', { category: '净水器' }),
+    ).rejects.toThrow('insert failed');
   });
 });

@@ -21,10 +21,13 @@ export const BLOB_STORE = Symbol('BLOB_STORE');
 
 /** Local-disk BlobStore: one file per blob under `baseDir`, keyed by an opaque reference. */
 export class LocalBlobStore implements BlobStore {
-  constructor(private readonly baseDir: string) {}
+  private readonly ready: Promise<void>;
+  constructor(private readonly baseDir: string) {
+    this.ready = fs.mkdir(this.baseDir, { recursive: true }).then(() => undefined);
+  }
 
   async store(content: Buffer, originalName: string): Promise<string> {
-    await fs.mkdir(this.baseDir, { recursive: true });
+    await this.ready;
     const ref = `${randomUUID()}${path.extname(originalName)}`;
     await fs.writeFile(this.resolve(ref), content);
     return ref;

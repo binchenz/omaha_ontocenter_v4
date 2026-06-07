@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '@omaha/db';
 import { EmbeddingClient, EMBEDDING_CLIENT } from './embedding/embedding-client.interface';
+import { toVectorLiteral } from './pgvector-util';
 
 /** Where a retrieved chunk came from, so an answer can cite "据 <机构> <季度> 报告第 N 页". */
 export interface ChunkProvenance {
@@ -47,9 +48,11 @@ export class SemanticSearchService {
     k: number,
   ): Promise<ScoredChunk[]> {
     const queryVec = await this.embedding.embedQuery(query);
-    const vectorLiteral = `[${queryVec.join(',')}]`;
+    const vectorLiteral = toVectorLiteral(queryVec);
 
-    const conditions = ['c.tenant_id = $1'];
+    // tenant_id is a uuid column; bind the text param with an explicit cast (Postgres won't
+    // implicitly coerce uuid = text). Mirrors the ::uuid casts on the ingestion insert path.
+    const conditions = ['c.tenant_id = $1::uuid'];
     const params: unknown[] = [tenantId];
     if (filters.category) {
       params.push(filters.category);
@@ -63,15 +66,20 @@ export class SemanticSearchService {
     const vecParam = `$${params.length}::vector`;
     params.push(k);
 
+    // Compute the cosine distance once in the inner query; ORDER BY references the alias so
+    // Postgres doesn't evaluate the expression twice per row.
     const sql = `
-      SELECT c.text, c.category, c.price_band AS "priceBand", c.page,
-             c.document_id AS "documentId", d.title, d.agency, d.quarter,
-             d.media_ref AS "mediaRef",
-             c.embedding <=> ${vecParam} AS distance
-      FROM document_chunks c
-      JOIN research_documents d ON d.id = c.document_id
-      WHERE ${conditions.join(' AND ')}
-      ORDER BY c.embedding <=> ${vecParam}
+      SELECT text, category, "priceBand", page, "documentId", title, agency, quarter, "mediaRef", distance
+      FROM (
+        SELECT c.text, c.category, c.price_band AS "priceBand", c.page,
+               c.document_id AS "documentId", d.title, d.agency, d.quarter,
+               d.media_ref AS "mediaRef",
+               c.embedding <=> ${vecParam} AS distance
+        FROM document_chunks c
+        JOIN research_documents d ON d.id = c.document_id
+        WHERE ${conditions.join(' AND ')}
+      ) sub
+      ORDER BY distance
       LIMIT $${params.length}
     `;
 

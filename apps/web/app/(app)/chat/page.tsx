@@ -5,6 +5,7 @@ import { MessageList } from '@/components/chat/MessageList';
 import { InputBar } from '@/components/chat/InputBar';
 import { ConversationSidebar } from '@/components/chat/ConversationSidebar';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ChartRenderer, ChartSpec } from '@/components/chart';
 
 interface AgentEvent {
   type: 'text' | 'tool_call' | 'tool_result' | 'confirmation_request' | 'system_prompt' | 'error' | 'done';
@@ -48,8 +49,9 @@ export default function ChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [currentToolCall, setCurrentToolCall] = useState<string | null>(null);
   const [resultPanel, setResultPanel] = useState<unknown>(null);
+  const [chartPanel, setChartPanel] = useState<ChartSpec | null>(null);
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
-  const [panelTab, setPanelTab] = useState<'result' | 'prompt'>('result');
+  const [panelTab, setPanelTab] = useState<'result' | 'chart' | 'prompt'>('result');
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [attachedFile, setAttachedFile] = useState<{ fileId: string; name: string; size: number } | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -198,7 +200,16 @@ export default function ChatPage() {
   const handleEvent = (event: AgentEvent, setContent: (s: string) => void) => {
     switch (event.type) {
       case 'tool_call': setCurrentToolCall(`正在调用 ${event.name}...`); break;
-      case 'tool_result': setCurrentToolCall(null); setResultPanel(event.data); setPanelTab('result'); break;
+      case 'tool_result':
+        setCurrentToolCall(null);
+        if (event.name === 'render_chart') {
+          setChartPanel(event.data as ChartSpec);
+          setPanelTab('chart');
+        } else {
+          setResultPanel(event.data);
+          setPanelTab('result');
+        }
+        break;
       case 'text': setContent(event.content ?? ''); break;
       case 'system_prompt': setSystemPrompt(event.content ?? ''); break;
       case 'confirmation_request':
@@ -306,12 +317,17 @@ export default function ChatPage() {
       <div className="w-[480px] border-l border-gray-200 overflow-y-auto bg-gray-50 hidden lg:block">
         <div className="px-4 py-2 border-b border-gray-100 flex gap-1">
           <TabButton active={panelTab === 'result'} onClick={() => setPanelTab('result')}>查询结果</TabButton>
+          <TabButton active={panelTab === 'chart'} onClick={() => setPanelTab('chart')}>图表{chartPanel ? '' : ' ·'}</TabButton>
           <TabButton active={panelTab === 'prompt'} onClick={() => setPanelTab('prompt')}>提示词{systemPrompt ? '' : ' ·'}</TabButton>
         </div>
         <div className="p-4">
           {panelTab === 'result' ? (
             resultPanel ? <ResultTable data={resultPanel} /> : (
               <p className="text-sm text-gray-400 text-center mt-10">查询结果将显示在这里</p>
+            )
+          ) : panelTab === 'chart' ? (
+            chartPanel ? <ChartRenderer spec={chartPanel} /> : (
+              <p className="text-sm text-gray-400 text-center mt-10">Agent 生成的图表将显示在这里</p>
             )
           ) : (
             systemPrompt ? (

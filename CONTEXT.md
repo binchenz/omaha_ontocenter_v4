@@ -67,16 +67,16 @@ The single module that emits the `FROM object_instances WHERE tenant_id = ? AND 
 _Avoid_: Instance reader, Instance query helper
 
 **Action**:
-A named, controlled operation a user (or an AI agent on their behalf) can execute on Object Instances. Declared per Object Type in the Ontology with an input schema, preconditions (DSL predicates), required permission, and a handler. The MVP lifecycle is `Discover → Validate → Authorize → Preview → Confirm → Execute → Audit`.
+A named, controlled operation a user (or an AI agent on their behalf) can execute on a single Object Instance. Declared per Object Type in the Ontology with typed parameters, a DSL precondition, and declarative **Effects**. The MVP lifecycle is `Discover → Validate Precondition → Preview (dry-run) → Confirm → Execute → Audit`. Actions are first-class Ontology citizens — the Agent discovers available Actions via `get_ontology_schema` and triggers them via `execute_action`. Scope is ontology-internal: field writes + relationship mutations + object creation, all within one transaction. No external API calls in v1. See `docs/adr/0048-ontology-expressiveness-actions-computed-graph.md`.
 _Avoid_: Command, Mutation, Operation
 
-**Action Handler**:
-The code that implements an Action. Pure function `(input, context) → ActionPlan`. Never writes to the database directly; the commit engine does. See `docs/adr/0004-action-preview-dry-run.md`.
-_Avoid_: Action body, Action logic
+**Action Effect**:
+A single declarative step within an Action's execution. Four kinds: `set_field` (update a property value), `create_relationship` (link to another Object), `delete_relationship` (unlink), `create_object` (instantiate a new Object Type). Effects are interpreted sequentially by the ActionExecutor into `ObjectEdit[]` and delegated to `ApplyService` — they are data, not code. The list of Effects is what the user sees in the confirmation preview.
+_Avoid_: Side effect, Handler, Mutation step
 
-**ActionPlan**:
-The structured, serializable description of what an Action will do — intended writes and (V1.1) external calls. Produced by dry-run during Preview; frozen and re-submitted at Execute. The user confirms this exact artifact.
-_Avoid_: Diff, Change set
+**Action Parameter**:
+A typed input that the caller must supply when triggering an Action. Types: `string`, `number`, `date`, `boolean`, `objectRef` (reference to another Object Instance by type). Parameters flow into Effects via `{ fromParam: 'paramName' }` bindings. An `objectRef` parameter is the mechanism for relationship-creating Actions ("assign to which sales rep?").
+_Avoid_: Argument, Input field
 
 **Preview** (of an Action):
 A dry-run invocation of an Action Handler that produces an ActionPlan, persists it as an `ActionPreview` row, and returns a `previewId` plus a hash of the plan. Required before Execute.
@@ -87,12 +87,16 @@ A tenant-configured adapter that pulls raw rows from an external source (CSV, Ex
 _Avoid_: Data source, Integration
 
 **Dataset**:
-A tenant-owned, persistent, versioned snapshot of tabular data — the unit of data that Pipelines transform and Mappings consume. Every Dataset has a declared schema and a lineage record (which Connector or Pipeline step produced it). Two kinds: **raw** (produced directly by a Connector) and **clean** (produced by a Pipeline transform step). Object Types bind to a clean Dataset, not to a Connector source table directly. Datasets are the platform's answer to the data-quality problem: dirty source data is cleaned in a Pipeline before it ever reaches Object Instances.
+A tenant-owned, persistent, versioned snapshot of tabular data — the unit of data that Pipelines transform and Mappings consume. Every Dataset has a declared schema and a lineage record (which Connector or Pipeline step produced it). Discriminated by an explicit `kind` column: **raw** (produced directly by a Connector) or **clean** (produced by a Pipeline Run, or by a caller that pre-cleans data before ingestion). Object Types bind to a clean Dataset, not to a Connector source table directly. Datasets are immutable snapshots — each Connector refresh or Pipeline Run produces a new versioned row (`@@unique([tenantId, name, version])`), never mutating previous versions. The Sync Job guard hard-fails on `kind !== 'clean'`. Datasets are the platform's answer to the data-quality problem: dirty source data is cleaned in a Pipeline before it ever reaches Object Instances.
 _Avoid_: Table, Staging table, Intermediate result
 
 **Pipeline**:
-A tenant-configured, declarative DAG of transform steps that produces a clean **Dataset** from one or more raw Datasets. Each step is a named, reusable transform (normalise free-text, deduplicate, join, compute column). The Pipeline is the platform's T layer — it is where the OPC encodes data-cleaning rules that would otherwise be hand-written scripts re-done on every maintenance visit. Lineage is recorded at the step level: any field in a clean Dataset can be traced back through the Pipeline to its source column. Pipelines are design-time artifacts (OPC-authored, workbench-managed); they run automatically when a Sync Job refreshes the upstream raw Dataset.
+A tenant-configured, declarative DAG of transform steps that produces a clean **Dataset** from one or more raw Datasets. Each step is a named, reusable transform (normalise free-text, deduplicate, join, compute column). The Pipeline is the platform's T layer — it is where the OPC encodes data-cleaning rules that would otherwise be hand-written scripts re-done on every maintenance visit. Lineage is recorded at the step level: any field in a clean Dataset can be traced back through the Pipeline to its source column. Pipelines are design-time artifacts (OPC-authored, workbench-managed); they run automatically when the upstream raw Dataset is marked ready. A Pipeline binds to a **Connector** (input) and targets one **Object Type** (output); multiple Pipelines may share a Connector (one per Object Type). Steps execute in-memory; only the final result is materialised as a new clean Dataset (immutable lineage — raw is never mutated). See `docs/adr/0045-pipeline-architecture-immutable-lineage.md`.
 _Avoid_: ETL script, Transform job, dbt model
+
+**Pipeline Run**:
+A single execution of a **Pipeline**. Triggered reactively by the `DataPipelineOrchestrator` when a raw Dataset is marked ready. Reads all rows from the input raw Dataset, executes Pipeline steps in-memory sequentially, and writes the final result as a new clean Dataset (immutable — each run produces a new versioned snapshot, named `${pipeline.name}_clean`). Has its own pg-boss queue (`pipeline-run`), independent retry/status from Sync Jobs. On success, the orchestrator auto-enqueues a Sync Job on the output clean Dataset. On failure, records structured error details; permanent failures do not retry.
+_Avoid_: Pipeline execution, Transform run, Pipeline job
 
 **Mapping**:
 A per-Object-Type declaration that binds an Object Type to a clean **Dataset** and maps Dataset columns to Object Type properties and relationships. Owns the sync strategy (`full` or `incremental`). A Mapping no longer points at a Connector source table directly — the Dataset is the stable, clean interface between the data layer and the ontology layer.
@@ -103,7 +107,7 @@ A declarative, code-defined description of how to materialise one Object Type fr
 _Avoid_: IngestPass, Recipe (standalone)
 
 **Sync Job**:
-One execution of a Mapping. Reads from the Mapping's bound clean **Dataset** and upserts Object Instances. A `full` Sync Job is a world snapshot (upsert + soft-delete of missing rows); an `incremental` Sync Job pulls rows past a watermark and never detects deletes. When the upstream Pipeline has not yet run, the Sync Job reads the most recently materialised Dataset snapshot. See `docs/adr/0006-sync-model.md`.
+One execution of a Mapping against a specific clean **Dataset** version. Carries both `datasetId` (which snapshot to read) and `mappingId` (how to map columns → properties) explicitly. Reads Dataset rows, applies the Mapping's `propertyMappings`, and upserts Object Instances via ImportEngine (the single write path, ADR-0040). All-or-nothing: if any row fails validation the entire batch is rejected. Runs on its own pg-boss queue (`sync-job`), separate from the Pipeline transform queue. Transient errors retry (3×, exponential backoff); permanent errors (validation, schema) fail immediately. The trigger chain is: Pipeline completes → orchestrator enqueues Sync Job on the output clean Dataset. Direct-clean callers (no Pipeline) enqueue explicitly. See `docs/adr/0045-pipeline-architecture-immutable-lineage.md`.
 _Avoid_: Import, Run, Ingestion job
 
 ### Agent Layer
@@ -157,6 +161,50 @@ _Avoid_: Deploy, Release, Commit
 **Accuracy Eval**:
 A reusable, productized batch probe (generalizing the ad-hoc N=8 probe of ADR-0029) that runs a set of representative natural-language questions against a Draft's Agent and scores whether the generated Query Plans are correct — the OPC's objective go/no-go evidence before Publish. Modeled on Palantir's AIP Evals.
 _Avoid_: Probe (that was the throwaway script), Test, Benchmark
+
+### Market Intelligence (纯米, ADR-0042)
+
+The domain language for the market-research application built for prospect 纯米科技 (Chunmi). Two assets are joined on a declared **品类/价格段 spine** (category / price-band), with **no NER** — the spine is confirmed, never guessed. The ontology here is **decision-first**: its object grain is chosen to answer a real decision chain (trend → share-decline → price-band attribution → competitor-new-product), not to mirror the source spreadsheet tab-by-tab.
+
+**AVC Report**:
+A monthly online-market monitoring spreadsheet from 奥维云网 (AVC), one per (品类, report-month). Comes in two **Coverage** variants. The provenance source for all structured market objects; never itself an Object Type (it is provenance, per ADR-0042).
+_Avoid_: Excel, Workbook, Source file
+
+**Coverage** (of an AVC Report):
+How deep a given (品类, month) report goes. **full** (数据报告, 32 sheets) carries the model/SKU layer (2-7) and new-product layer (2-9); **essence** (精华版, 10 sheets) stops at the brand/price-band layer (2-6) — no model layer. Coverage is **per-report, not per-category, and it flips over time**: 空气炸锅/养生壶/料理机 were full at 22.12–23.12 then dropped to essence from 24.12 on — so a category-level Coverage flag would lie. It is stamped on each AVC Report's provenance row (per 品类×月) so the Agent can say "this period is essence-only, drill to SKU needs an earlier full period" instead of misreading 0 model rows as either a data gap or a real zero.
+_Avoid_: Tier, Level, Detail
+
+**Market Metric** (`market_metric`):
+The market-size star object — (品类, month, metric, value), extracted from sheet 2-1. The coarsest grain; a time series because months are pivoted across 2-1's columns.
+_Avoid_: Size row, Sales row
+
+**Brand Share** (`brand_share`):
+The brand-competition star object — (品类, brand, price-band, month, metric=share, value), extracted from sheet 2-5. AVC computes share against the **whole market** at its own price-band cuts; one report = one month's snapshot, so a trend is built by stamping each report with its cover month and stacking periods.
+_Avoid_: Competition row, Share table
+
+**Model Metric** (`model_metric`):
+The finest-grain star object — one TOP-100 model/SKU per (品类, model, brand) carrying its own per-month 销额份额/销量份额, **零售均价**, 加热方式, 上市日期, extracted from sheet 2-7. The object that makes the decision chain answerable: drill to the SKU whose share fell, band it by its own 均价, and read 上市日期 to tell a new entrant from an incumbent. **Three-star coexistence** (ADR-0042 amendment): Model Metric does NOT replace Brand Share — the two are different sampling universes (TOP-100 sample vs whole-market), so brand/band share is never re-derived by summing models; each star binds directly to its own sheet, and roll-ups happen in the query layer.
+_Avoid_: SKU row, TOP model, deriving brand share from models
+
+**Price-band attribution** (model ↔ brand-share):
+A model's **零售均价** is stored as a continuous value, NOT pre-bucketed into a band. To answer "which price-band fell" → "which SKU in that band fell", the Agent takes the band's `[min,max]` interval from the Brand Share side and filters models at query time (`均价 >= min AND 均价 < max`). This keeps ADR-0042's "do not reconcile to one canonical band set" intact — no side fixes a canonical segmentation; either side's interval can filter the other because **价格段 is an interval, not a label** (see `parsePriceBand`). 净水器 and 电饭煲 have wildly different AVC cuts, so freezing one set would be wrong.
+_Avoid_: bucketing models into bands at ingest, a canonical band set
+
+**Brand Normalizer**:
+A pure function `normalizeBrand(raw: string): string | null` that maps variant spellings of a brand name (e.g. "小米"/"Xiaomi"/"小米科技") to a single canonical form, returning `null` for unknown brands. Applied at ingest time on `brand_share.brand` and `model_metric.brand` so that cross-star joins at query time are stable. Same structural pattern as `normalizeCategory`. Without this, brand-dimension alignment between Brand Share and Model Metric is silent — two rows representing the same brand will never join.
+_Avoid_: brand alias table, fuzzy match at query time
+
+**Field Path**:
+A dot-separated traversal expression `relationName.fieldName` (e.g. `order_legs.deliveryMode`) that crosses one Relationship hop to read a property on a related Object Type. At most 1 hop deep (enforced at parse time). Compiled by the DSL compiler into a scalar subquery — the `path` AST node in `@omaha/dsl`. All DSL binding points (user filters, permission predicates, derived properties, pipeline transforms) automatically gain cross-relationship capability because they all route through the same compiler. One cross-relationship path per aggregate groupBy in v1; filters support multiple paths already. Canonical instance-link convention: `relationships: { <relationName>: <target external_id> }` (ADR-0044 §2). Implemented 2026-06-06.
+_Avoid_: dot-path (use Field Path), join hint, cross-table filter
+
+**Coverage Gate**:
+A query-time check that joins the `avc_report` provenance row for the requested (品类, period) before returning Market Metric, Brand Share, or Model Metric results. If no matching AVC Report exists the query fails explicitly rather than returning an empty set. If coverage is `essence` and the question requires the model layer (2-7), the Agent surfaces "this period is essence-only" before answering. Prevents silent zero-rows from being misread as real zeros or data gaps.
+_Avoid_: silent empty result, missing-data assumption
+
+**New entrant** (a model that is "new this period"):
+NOT a stored object or flag — a **derived judgement** over Model Metric's **上市日期**: a model is a new entrant relative to a report month when `上市日期 ∈ [报告月 − N, 报告月]` (N tunable, e.g. last 3 months). AVC ships its own pre-judged "本期新品" sheet (2-9), but we deliberately do NOT extract it: 上市日期 already lives on every 2-7 model row, so "is it new" is a Derived Property (computed, not stored — consistent with the platform's Derived Property principle), the window is explainable and tunable (AVC's window is an opaque black box), and it stays consistent across full periods rather than depending on 2-9's presence. Requirement ④ ("did a competitor launch a new product in some band and grab share") is then one query over Model Metric: `上市日期 ∈ last-N AND 均价 ∈ band-interval AND share rising`.
+_Avoid_: a new_model object, an isNewThisPeriod stored flag, extracting sheet 2-9
 
 ## Relationships
 

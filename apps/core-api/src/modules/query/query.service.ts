@@ -15,6 +15,7 @@ import {
   type AggregateOrderBy,
 } from './query-planner.service';
 import { OntologyViewLoader } from '../ontology/ontology-view-loader.service';
+import { ProvenanceGate } from './provenance-gate.service';
 import { toInstanceDto } from '../../common/to-instance-dto';
 import type { QueryFilter } from '@omaha/shared-types';
 
@@ -60,6 +61,7 @@ export class QueryService {
     private readonly permissionResolver: PermissionResolver,
     private readonly planner: QueryPlannerService,
     private readonly viewLoader: OntologyViewLoader,
+    private readonly provenanceGate: ProvenanceGate,
   ) {}
 
   private get queryTimeoutMs(): number {
@@ -120,6 +122,9 @@ export class QueryService {
     const pageSize = Math.min(req.pageSize ?? 20, 100);
     const skip = (page - 1) * pageSize;
 
+    const verdict = await this.provenanceGate.evaluate(user.tenantId, req.objectType, req.filters);
+    if (verdict.error) this.throwProvenanceError(req.objectType, verdict.error);
+
     const planned = await this.planner.plan({
       tenantId: user.tenantId,
       objectType: req.objectType,
@@ -139,7 +144,7 @@ export class QueryService {
     const total = Number(countRows[0]?.count ?? 0);
 
     const includes = await this.resolveIncludes(user.tenantId, req.objectType, req.include ?? []);
-    const includedByParent = await this.fetchIncludes(user, rows.map((r) => r.id), includes);
+    const includedByParent = await this.fetchIncludes(user, rows.map((r) => r.externalId), includes);
 
     const data = rows.map((inst) => {
       // toInstanceDto seals the mask-before-select ordering: visibility first,
@@ -152,7 +157,7 @@ export class QueryService {
 
       const relationships: Record<string, unknown> = {};
       for (const inc of includes) {
-        relationships[inc.name] = includedByParent[inst.id]?.[inc.name] ?? [];
+        relationships[inc.name] = includedByParent[inst.externalId]?.[inc.name] ?? [];
       }
 
       return {
@@ -193,6 +198,7 @@ export class QueryService {
         totalPages: Math.ceil(total / pageSize) || 0,
         objectType: req.objectType,
         ...(planned.sortFallbackReason && { sortFallbackReason: planned.sortFallbackReason }),
+        ...(verdict.warnings.length > 0 && { warnings: verdict.warnings }),
       },
     };
   }
@@ -220,6 +226,11 @@ export class QueryService {
       'read',
       req.objectType,
     );
+
+    // Coverage Gate (ADR-0044): same pre-flight as queryObjects — aggregating a
+    // model-layer star over an essence period must warn, not silently return 0.
+    const verdict = await this.provenanceGate.evaluate(user.tenantId, req.objectType, req.filters);
+    if (verdict.error) this.throwProvenanceError(req.objectType, verdict.error);
 
     // Cross-relationship groupBy ("relation.field") groups by a field on a
     // RELATED type; that field must be gated by the related type's own
@@ -306,7 +317,9 @@ export class QueryService {
       nextPageToken,
       totalGroupsEstimate,
     };
-    if (planned.warnings.length > 0) response.warnings = planned.warnings;
+    if (planned.warnings.length > 0 || verdict.warnings.length > 0) {
+      response.warnings = [...planned.warnings, ...verdict.warnings];
+    }
     return response;
   }
 
@@ -314,31 +327,43 @@ export class QueryService {
     tenantId: string,
     objectType: string,
     include: string[],
-  ): Promise<Array<{ name: string; targetType: string; foreignKey: string }>> {
+  ): Promise<Array<{ name: string; targetType: string; storageKey: string }>> {
     if (!include.length) return [];
-    const loaded = await this.viewLoader.loadWithTargetType(tenantId, objectType);
-    if (!loaded) return [];
-    const { view, relationTargets } = loaded;
-    const out: Array<{ name: string; targetType: string; foreignKey: string }> = [];
+    const view = await this.viewLoader.load(tenantId, objectType);
+    if (!view) return [];
+    const out: Array<{ name: string; targetType: string; storageKey: string }> = [];
     for (const name of include) {
       const rel = view.relations[name];
-      const target = relationTargets[name];
-      if (!rel || !target) {
+      if (!rel) {
         throw new BadRequestException(`Unknown relationship in include: ${name}`);
       }
-      out.push({ name, targetType: target, foreignKey: rel.foreignKey });
+      // v1 include fetches the many-side children of a to-one parent. The
+      // relation runs source(one) --> target(many); the many side holds the FK,
+      // storing the parent's external_id under the relation name. Including from
+      // the source/one side means currentType==source → fkSide='other' (the
+      // other/child side holds the key). The reverse (fkSide='self': this row is
+      // the many side pointing at its one parent) is a to-one lookup — a
+      // different shape — so reject rather than emit wrong rows.
+      if (rel.fkSide !== 'other') {
+        throw new BadRequestException({
+          code: 'INCLUDE_DIRECTION_UNSUPPORTED',
+          relation: name,
+          hint: `include '${name}' from '${objectType}' is only supported toward the child (many) side in v1.`,
+        });
+      }
+      out.push({ name, targetType: rel.otherType, storageKey: rel.storageKey });
     }
     return out;
   }
 
   private async fetchIncludes(
     user: CurrentUserType,
-    parentIds: string[],
-    includes: Array<{ name: string; targetType: string; foreignKey: string }>,
+    parentExternalIds: string[],
+    includes: Array<{ name: string; targetType: string; storageKey: string }>,
   ): Promise<Record<string, Record<string, unknown[]>>> {
-    if (!parentIds.length || !includes.length) return {};
+    if (!parentExternalIds.length || !includes.length) return {};
     const out: Record<string, Record<string, unknown[]>> = {};
-    for (const id of parentIds) out[id] = {};
+    for (const id of parentExternalIds) out[id] = {};
 
     for (const inc of includes) {
       // Resolve the CHILD type's permission: yields both the row-level
@@ -349,7 +374,7 @@ export class QueryService {
 
       const scope = parentScope({ tenantId: user.tenantId, objectType: inc.targetType });
       const scoped = new ScopedWhere(scope, { keepFrom: true })
-        .raw('(relationships->>?) = ANY(?::text[])', inc.foreignKey, parentIds)
+        .raw('(relationships->>?) = ANY(?::text[])', inc.storageKey, parentExternalIds)
         .predicates(childRes.predicates);
       const { fromWhere, params } = scoped.build();
       const sql =
@@ -359,9 +384,10 @@ export class QueryService {
         fromWhere;
       const children = await this.prisma.$queryRawUnsafe<RawInstanceRow[]>(sql, ...params);
       for (const c of children) {
-        const parentId = (c.relationships as Record<string, unknown> | null)?.[inc.foreignKey] as string | undefined;
-        if (!parentId) continue;
-        const bucket = out[parentId];
+        // Canonical convention: child stores { <storageKey>: <parent externalId> }.
+        const parentKey = (c.relationships as Record<string, unknown> | null)?.[inc.storageKey] as string | undefined;
+        if (!parentKey) continue;
+        const bucket = out[parentKey];
         if (!bucket) continue;
         if (!bucket[inc.name]) bucket[inc.name] = [];
         bucket[inc.name].push({
@@ -377,5 +403,12 @@ export class QueryService {
       }
     }
     return out;
+  }
+
+  /** Throw a structured BadRequestException when the Coverage Gate reports an error. */
+  private throwProvenanceError(objectType: string, code: string): never {
+    throw new BadRequestException({
+      error: { code, message: `No AVC report covers the requested scope for '${objectType}'.`, hint: 'This (品类, 周期) was never ingested — distinct from a real zero. Ingest the report or widen the period.' },
+    });
   }
 }

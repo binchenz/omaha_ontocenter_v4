@@ -149,11 +149,11 @@ describe('Scenario: Ontology evolution + relationship lifecycle (e2e)', () => {
     seededInstanceIds.push(alpha.id, beta.id);
 
     const orderData = [
-      { externalId: 'EVO-O-1', customerId: alpha.id, orderNo: 'A-001', totalAmount: 10000 },
-      { externalId: 'EVO-O-2', customerId: alpha.id, orderNo: 'A-002', totalAmount: 25000 },
-      { externalId: 'EVO-O-3', customerId: alpha.id, orderNo: 'A-003', totalAmount: 15000 },
-      { externalId: 'EVO-O-4', customerId: beta.id, orderNo: 'B-001', totalAmount: 5000 },
-      { externalId: 'EVO-O-5', customerId: beta.id, orderNo: 'B-002', totalAmount: 8000 },
+      { externalId: 'EVO-O-1', customerExtId: alpha.externalId, orderNo: 'A-001', totalAmount: 10000 },
+      { externalId: 'EVO-O-2', customerExtId: alpha.externalId, orderNo: 'A-002', totalAmount: 25000 },
+      { externalId: 'EVO-O-3', customerExtId: alpha.externalId, orderNo: 'A-003', totalAmount: 15000 },
+      { externalId: 'EVO-O-4', customerExtId: beta.externalId, orderNo: 'B-001', totalAmount: 5000 },
+      { externalId: 'EVO-O-5', customerExtId: beta.externalId, orderNo: 'B-002', totalAmount: 8000 },
     ];
     for (const od of orderData) {
       const row = await prisma.objectInstance.create({
@@ -161,7 +161,7 @@ describe('Scenario: Ontology evolution + relationship lifecycle (e2e)', () => {
           tenantId, objectType: 'evo_order',
           externalId: od.externalId, label: od.orderNo,
           properties: { orderNo: od.orderNo, totalAmount: od.totalAmount },
-          relationships: { evo_customerId: od.customerId },
+          relationships: { orders: od.customerExtId },
         },
       });
       seededInstanceIds.push(row.id);

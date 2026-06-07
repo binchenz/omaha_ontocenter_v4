@@ -1,7 +1,12 @@
 import { Module } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
-import { CoreSdkModule } from '../sdk/core-sdk.module';
 import { ConversationModule } from '../conversation/conversation.module';
+import { QueryModule } from '../query/query.module';
+import { OntologySdkModule } from '../ontology/ontology-sdk.module';
+import { ResearchModule } from '../research/research.module';
+import { ConnectorSdkModule } from './connector/connector-sdk.module';
+import { AgentSdkModule } from './sdk/agent-sdk.module';
+import { ActionModule } from '../action/action.module';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { AgentController } from './agent.controller';
 import { FileController } from './file.controller';
@@ -24,6 +29,8 @@ import { DeleteRelationshipTool } from './tools/delete-relationship.tool';
 import { ExtractAvcReportTool } from './tools/extract-avc-report.tool';
 import { IngestDocumentTool } from './tools/ingest-document.tool';
 import { SemanticSearchTool } from './tools/semantic-search.tool';
+import { CreateActionTool } from '../action/tools/create-action.tool';
+import { ExecuteActionTool } from '../action/tools/execute-action.tool';
 import { LLM_CLIENT, LlmClient } from './llm/llm-client.interface';
 import { DeepSeekLlmClient } from './llm/deepseek-llm-client';
 import { ResilientLlmClient } from './llm/resilient-llm-client';
@@ -40,7 +47,16 @@ import { EvalsController } from './evals.controller';
 import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
 
 @Module({
-  imports: [CoreSdkModule, ConversationModule, MulterModule.register({ dest: './uploads' })],
+  imports: [
+    QueryModule,
+    OntologySdkModule,
+    ResearchModule,
+    ConnectorSdkModule,
+    AgentSdkModule,
+    ConversationModule,
+    ActionModule,
+    MulterModule.register({ dest: './uploads' }),
+  ],
   controllers: [AgentController, FileController, EvalsController],
   providers: [
     { provide: LLM_CLIENT, useFactory: () => new ResilientLlmClient(new DeepSeekLlmClient()) },
@@ -72,6 +88,7 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
         ImportDataTool, TestDbConnectionTool, CreateConnectorTool,
         ListDbTablesTool, PreviewDbTableTool, CreateRelationshipTool, DeleteRelationshipTool,
         ExtractAvcReportTool, IngestDocumentTool, SemanticSearchTool,
+        CreateActionTool, ExecuteActionTool,
       ],
     },
     {

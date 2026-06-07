@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { CoreSdkService } from '../../sdk/core-sdk.service';
+import { ResearchSdk } from '../../research/research.sdk';
 
 @Injectable()
 export class ExtractAvcReportTool implements AgentTool {
@@ -14,10 +14,11 @@ export class ExtractAvcReportTool implements AgentTool {
       category: { type: 'string', description: '报告所属品类（如 电饭煲、空气炸锅、净水器）' },
     },
     required: ['fileId', 'category'],
+    additionalProperties: false,
   };
   requiresConfirmation = true;
 
-  constructor(private readonly sdk: CoreSdkService) {}
+  constructor(private readonly sdk: ResearchSdk) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
     return this.sdk.extractAvcReport(context.user, {

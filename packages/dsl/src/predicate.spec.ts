@@ -12,7 +12,7 @@ function fixtureView(): OntologyView {
     stringFields: new Set(['city']),
     filterableFields: new Set(['totalAmount', 'city']),
     sortableFields: new Set(['totalAmount']),
-    relations: { payments: { foreignKey: 'orderId' } },
+    relations: { payments: { storageKey: 'payments', otherType: 'payment', fkSide: 'other' } },
     derivedProperties: new Map(),
   };
 }

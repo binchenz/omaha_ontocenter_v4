@@ -5,7 +5,6 @@ import { assertTenantOwnership } from '../../common/helpers/assert-tenant-owners
 interface CreateMappingInput {
   objectTypeId: string;
   connectorId: string;
-  tableName: string;
   propertyMappings: Record<string, unknown>;
   relationshipMappings?: Record<string, unknown>;
 }
@@ -36,7 +35,6 @@ export class MappingService {
         tenantId,
         objectTypeId: dto.objectTypeId,
         connectorId: dto.connectorId,
-        tableName: dto.tableName,
         propertyMappings: dto.propertyMappings as unknown as Prisma.InputJsonValue,
         relationshipMappings: (dto.relationshipMappings ?? {}) as unknown as Prisma.InputJsonValue,
       },

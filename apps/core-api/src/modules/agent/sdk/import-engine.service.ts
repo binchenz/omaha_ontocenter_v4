@@ -97,6 +97,9 @@ export class ImportEngine {
     }
 
     let imported = 0;
+    // A single batch can be hundreds of upserts (e.g. an AVC brand × price-band grid), which
+    // overruns Prisma's 5s default interactive-transaction timeout; raise it so large real-world
+    // reports import atomically rather than dying mid-batch.
     await this.prisma.$transaction(async (tx: any) => {
       for (const inst of instances) {
         await tx.objectInstance.upsert({
@@ -122,7 +125,7 @@ export class ImportEngine {
         });
         imported++;
       }
-    });
+    }, { timeout: 30_000 });
 
     return { imported, skipped: 0, objectType: objectTypeName };
   }

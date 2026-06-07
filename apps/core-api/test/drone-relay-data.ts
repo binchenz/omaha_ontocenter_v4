@@ -168,8 +168,8 @@ export function generateData(tenantId: string): GeneratedData {
         customerDistrict: customer.properties.district,
       },
       relationships: {
-        merchant_orders: merchant.id,
-        customer_orders: customer.id,
+        merchant_orders: merchant.externalId,
+        customer_orders: customer.externalId,
       },
     });
 
@@ -203,8 +203,8 @@ export function generateData(tenantId: string): GeneratedData {
           stationName: station.properties.name,
         },
         relationships: {
-          order_legs: orderId,
-          station_legs: station.id,
+          order_legs: orderNo,
+          station_legs: station.externalId,
         },
       });
 
@@ -229,8 +229,8 @@ export function generateData(tenantId: string): GeneratedData {
           stationName: station.properties.name,
         },
         relationships: {
-          order_legs: orderId,
-          station_legs: station.id,
+          order_legs: orderNo,
+          station_legs: station.externalId,
         },
       });
     } else {
@@ -253,7 +253,7 @@ export function generateData(tenantId: string): GeneratedData {
           carrier: rider.properties.name,
           stationName: '',
         },
-        relationships: { order_legs: orderId },
+        relationships: { order_legs: orderNo },
       });
     }
   }

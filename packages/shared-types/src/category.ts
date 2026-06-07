@@ -25,11 +25,13 @@ const CANONICAL_CATEGORIES: readonly string[] = [
 
 /**
  * Aliases that name a canonical category by a different word. AVC files the 破壁机 sheet
- * under 食品料理机; both are the same category.
+ * under 食品料理机, and the microwave sheet under the finer 台式单功能微波炉; each names an
+ * existing canonical 品类.
  */
 const CATEGORY_ALIASES: Readonly<Record<string, string>> = {
   破壁机: '食品料理机',
   料理机: '食品料理机',
+  台式单功能微波炉: '微波炉',
 };
 
 const CANONICAL_SET = new Set(CANONICAL_CATEGORIES);
@@ -50,6 +52,17 @@ export function normalizeCategory(raw: string): string | null {
   if (!trimmed) return null;
   if (CANONICAL_SET.has(trimmed)) return trimmed;
   return CATEGORY_ALIASES[trimmed] ?? null;
+}
+
+/**
+ * Validate and normalize a raw category string, throwing if it is not in the vocabulary.
+ * The single entry-gate guard — all callers that need a validated 品类 should use this
+ * rather than duplicating the normalizeCategory-then-throw pattern.
+ */
+export function requireCategory(raw: string): string {
+  const c = normalizeCategory(raw);
+  if (!c) throw new Error(`Unknown 品类 "${raw}" — not in the category vocabulary.`);
+  return c;
 }
 
 export interface PriceBand {

@@ -5,7 +5,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { ConversationService } from '../conversation/conversation.service';
-import { CoreSdkService } from '../sdk/core-sdk.service';
+import { OntologySdk } from '../ontology/ontology.sdk';
 import { SseAgentRunner } from './sse/sse-agent-runner.service';
 import { PlanSummarizer } from './plan-summarizer.service';
 import { ChatDto } from './dto/chat.dto';
@@ -17,7 +17,7 @@ export class AgentController {
     private readonly orchestrator: OrchestratorService,
     private readonly conversationService: ConversationService,
     private readonly sseRunner: SseAgentRunner,
-    private readonly sdk: CoreSdkService,
+    private readonly sdk: OntologySdk,
     private readonly planSummarizer: PlanSummarizer,
   ) {}
 

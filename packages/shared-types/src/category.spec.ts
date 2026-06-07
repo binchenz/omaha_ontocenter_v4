@@ -12,6 +12,8 @@ describe('normalizeCategory', () => {
     expect(normalizeCategory('破壁机')).toBe('食品料理机');
     // 料理机 is the short form of the same canonical category.
     expect(normalizeCategory('料理机')).toBe('食品料理机');
+    // AVC files the microwave sheet under the finer "台式单功能微波炉"; it is a 微波炉.
+    expect(normalizeCategory('台式单功能微波炉')).toBe('微波炉');
   });
 
   it('tolerates surrounding whitespace and full-width spaces', () => {

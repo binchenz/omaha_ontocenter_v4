@@ -7,10 +7,16 @@ import { PageText } from './chunker';
  * Accepts either a path or an already-read Buffer so a caller that also needs the bytes (e.g.
  * to store the original) reads the file only once.
  */
+// pdfjs-dist is ESM-only; cache the import so repeated calls don't pay the module-load cost.
+let pdfjsPromise: Promise<typeof import('pdfjs-dist/legacy/build/pdf.mjs')> | undefined;
+function getPdfjs() {
+  pdfjsPromise ??= import('pdfjs-dist/legacy/build/pdf.mjs');
+  return pdfjsPromise;
+}
+
 export class DocumentTextExtractor {
   async extract(source: string | Buffer): Promise<PageText[]> {
-    // pdfjs-dist is ESM-only; load it dynamically so the CommonJS build can consume it.
-    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const pdfjs = await getPdfjs();
     const bytes = Buffer.isBuffer(source)
       ? source
       : await (await import('fs/promises')).readFile(source);

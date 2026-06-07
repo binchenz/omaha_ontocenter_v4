@@ -108,9 +108,10 @@ describe('OrchestratorService', () => {
       events.push(event);
     }
 
-    expect(events).toHaveLength(2);
-    expect(events[0]).toMatchObject({ type: 'text', content: '你好！有什么可以帮你的？' });
-    expect(events[1].type).toBe('done');
+    expect(events).toHaveLength(3);
+    expect(events[0]).toMatchObject({ type: 'system_prompt' });
+    expect(events[1]).toMatchObject({ type: 'text', content: '你好！有什么可以帮你的？' });
+    expect(events[2].type).toBe('done');
   });
 
   it('includes conversation history in LLM messages', async () => {
@@ -130,7 +131,8 @@ describe('OrchestratorService', () => {
       events.push(event);
     }
 
-    expect(events[0]).toMatchObject({ type: 'text', content: '好的，按销售额降序排列。' });
+    expect(events[0]).toMatchObject({ type: 'system_prompt' });
+    expect(events[1]).toMatchObject({ type: 'text', content: '好的，按销售额降序排列。' });
     const roles = llm.lastMessages.map(m => m.role);
     expect(roles).toEqual(['system', 'user', 'assistant', 'user']);
     expect(llm.lastMessages[1].content).toBe('找出华东地区的客户');

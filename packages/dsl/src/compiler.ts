@@ -1,8 +1,7 @@
 import { Ast, CompareOp, ArithOp, AggregateOp } from './parser';
+import type { RelationInfo } from './ontology-view';
 
-export interface RelationInfo {
-  foreignKey: string;
-}
+export type { RelationInfo };
 
 export interface CompileContext {
   numericFields: Set<string>;
@@ -43,7 +42,7 @@ function emit(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scope): s
         `EXISTS (SELECT 1 FROM object_instances child ` +
         `WHERE child.tenant_id = object_instances.tenant_id ` +
         `AND child.deleted_at IS NULL ` +
-        `AND (child.relationships->>'${rel.foreignKey}') = object_instances.id::text ` +
+        `AND ${relJoin(rel, 'object_instances')} ` +
         `AND ${predicate})`
       );
     }
@@ -51,6 +50,7 @@ function emit(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scope): s
     // expressions like `sum orders.totalAmount` (used as a SELECT fragment by
     // QueryPlanner.compileFilter) can compile standalone. See issue #61.
     case 'ident':
+    case 'path':
     case 'param':
     case 'number':
     case 'string':
@@ -70,7 +70,25 @@ function emitValue(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scop
       if (ctx.numericFields.has(ast.name)) return `(${scope}->>'${ast.name}')::numeric`;
       if (ctx.booleanFields?.has(ast.name)) return `((${scope}->>'${ast.name}')::boolean)`;
       return `(${scope}->>'${ast.name}')`;
-    case 'param': {
+    case 'path': {
+      const rel = ctx.relations?.[ast.relation];
+      if (!rel) throw new Error(`Unknown relation in path: ${ast.relation}`);
+      // Scalar subquery resolving one field on the related type (ADR-0044).
+      if (rel.fkSide === 'other') {
+        return (
+          `(SELECT (other.properties->>'${ast.field}') FROM object_instances other ` +
+          `WHERE other.tenant_id = object_instances.tenant_id ` +
+          `AND other.deleted_at IS NULL ` +
+          `AND (other.relationships->>'${rel.storageKey}') = object_instances.external_id LIMIT 1)`
+        );
+      }
+      return (
+        `(SELECT (other.properties->>'${ast.field}') FROM object_instances other ` +
+        `WHERE other.tenant_id = object_instances.tenant_id ` +
+        `AND other.deleted_at IS NULL ` +
+        `AND other.external_id = (object_instances.relationships->>'${rel.storageKey}') LIMIT 1)`
+      );
+    }    case 'param': {
       if (!ctx.params || !(ast.name in ctx.params)) throw new Error(`Missing parameter: ${ast.name}`);
       params.push(ctx.params[ast.name]);
       return `$${params.length}`;
@@ -93,7 +111,7 @@ function emitValue(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scop
         `(SELECT COUNT(*)::numeric FROM object_instances child ` +
         `WHERE child.tenant_id = object_instances.tenant_id ` +
         `AND child.deleted_at IS NULL ` +
-        `AND (child.relationships->>'${rel.foreignKey}') = object_instances.id::text)`
+        `AND ${relJoin(rel, 'object_instances')})`
       );
     }
     case 'aggregate': {
@@ -104,7 +122,7 @@ function emitValue(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scop
         `COALESCE((SELECT ${op}((child.properties->>'${ast.field}')::numeric) FROM object_instances child ` +
         `WHERE child.tenant_id = object_instances.tenant_id ` +
         `AND child.deleted_at IS NULL ` +
-        `AND (child.relationships->>'${rel.foreignKey}') = object_instances.id::text), 0)`
+        `AND ${relJoin(rel, 'object_instances')}), 0)`
       );
     }
     default:
@@ -114,4 +132,21 @@ function emitValue(ast: Ast, ctx: CompileContext, params: unknown[], scope: Scop
 
 function sqlOp(op: CompareOp): string {
   return op === '=' ? '=' : op === '!=' ? '<>' : op;
+}
+
+/**
+ * Join condition for a correlated subquery aliased `child` that traverses one
+ * relationship hop from `object_instances` (ADR-0044). The canonical link is
+ * `relationships: { <storageKey>: <other side's external_id> }`.
+ *
+ * - fkSide='self'  : the parent row holds the FK → child is the *other* type,
+ *     `object_instances.relationships->>'<key>' = child.external_id`
+ * - fkSide='other' : the child row holds the FK pointing back at the parent,
+ *     `child.relationships->>'<key>' = object_instances.external_id`
+ */
+function relJoin(rel: RelationInfo, table = 'object_instances'): string {
+  if (rel.fkSide === 'self') {
+    return `(${table}.relationships->>'${rel.storageKey}') = child.external_id`;
+  }
+  return `(child.relationships->>'${rel.storageKey}') = ${table}.external_id`;
 }

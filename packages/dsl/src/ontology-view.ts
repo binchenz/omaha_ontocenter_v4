@@ -4,6 +4,23 @@ export interface OntologyDerivedPropertyView {
   params?: Array<{ name: string; type: 'datetime' | 'decimal' | 'string' | 'int' | 'boolean' }>;
 }
 
+/**
+ * One relationship out of (or into) the current Object Type, resolved for
+ * traversal (ADR-0044). The canonical instance-link convention is
+ * `relationships: { <storageKey>: <other side's external_id> }`, where
+ * `storageKey` is the relation NAME (unique per `(tenant, sourceType, name)`).
+ *
+ * - `fkSide: 'self'`  — the current type's rows physically hold the FK:
+ *     `object_instances.relationships->>'<storageKey>' = other.external_id`
+ * - `fkSide: 'other'` — the related type's rows hold the FK pointing back:
+ *     `other.relationships->>'<storageKey>' = object_instances.external_id`
+ */
+export interface RelationInfo {
+  storageKey: string;
+  otherType: string;
+  fkSide: 'self' | 'other';
+}
+
 export interface OntologyView {
   tenantId: string;
   objectType: string;
@@ -15,7 +32,7 @@ export interface OntologyView {
   filterableFields: Set<string>;
   sortableFields: Set<string>;
 
-  relations: Record<string, { foreignKey: string }>;
+  relations: Record<string, RelationInfo>;
   derivedProperties: Map<string, OntologyDerivedPropertyView>;
 
   /**

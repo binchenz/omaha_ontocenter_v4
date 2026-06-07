@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { CoreSdkService } from '../../sdk/core-sdk.service';
+import { QueryService } from '../../query/query.service';
 
 @Injectable()
 export class AggregateObjectsTool implements AgentTool {
@@ -28,16 +28,18 @@ export class AggregateObjectsTool implements AgentTool {
             operator: { type: 'string', enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in'] },
             value: {},
           },
+          required: ['field', 'operator', 'value'],
+          additionalProperties: false,
         },
-        description: '过滤条件数组（同 query_objects）。注意边界含/不含：“大于/高于/超过 X”用 gt（不含 X），“至少/不少于/不超过 X”等用 gte/lte（含 X）。',
+        description: '过滤条件数组（同 query_objects）。注意边界含/不含：”大于/高于/超过 X”用 gt（不含 X），”至少/不少于/不超过 X”等用 gte/lte（含 X）。',
       },
       groupBy: {
         type: 'array',
         items: { type: 'string' },
         description: [
           '按这些字段分组。每个字段必须是 filterable 的；json/array 类型字段（如 tags）不可分组，会返回 PROPERTY_NOT_GROUPABLE，此时改用 query_objects 的 search 参数。',
-          '跨关系分组：当要分组的字段在【关联对象】上而不在当前对象上时，用 "关系名.字段名" 的点路径。关系名见 get_ontology_schema 输出的"关系："行（格式 A→B(关系名)）。',
-          '通用示例（假想 schema）：若 schema 显示 store→order(store_orders)，要把 order 按它所属 store 的 region 分组，写 groupBy: ["store_orders.region"]，而不是 ["region"]（region 不在 order 上）。请把这个模式套用到当前 schema 的实际关系名和字段上。',
+          '跨关系分组：当要分组的字段在【关联对象】上而不在当前对象上时，用 “关系名.字段名” 的点路径。关系名见 get_ontology_schema 输出的”关系：”行（格式 A→B(关系名)）。',
+          '通用示例（假想 schema）：若 schema 显示 store→order(store_orders)，要把 order 按它所属 store 的 region 分组，写 groupBy: [“store_orders.region”]，而不是 [“region”]（region 不在 order 上）。请把这个模式套用到当前 schema 的实际关系名和字段上。',
         ].join('\n'),
       },
       metrics: {
@@ -45,12 +47,13 @@ export class AggregateObjectsTool implements AgentTool {
         minItems: 1,
         items: {
           type: 'object',
-          required: ['kind', 'alias'],
           properties: {
             kind: { type: 'string', enum: ['count', 'countDistinct', 'sum', 'avg', 'min', 'max'] },
             field: { type: 'string', description: 'sum/avg/min/max/countDistinct 必填；count 不要传' },
             alias: { type: 'string', description: '返回值里这个 metric 的 key 名（用户友好的简短英文，如 n / avg_score / total_chars）' },
           },
+          required: ['kind', 'field', 'alias'],
+          additionalProperties: false,
         },
         description: '指标数组，至少 1 项。',
       },
@@ -59,26 +62,28 @@ export class AggregateObjectsTool implements AgentTool {
         maxItems: 1,
         items: {
           type: 'object',
-          required: ['kind', 'by', 'direction'],
           properties: {
             kind: { type: 'string', enum: ['metric', 'groupKey'] },
             by: { type: 'string', description: 'kind=metric 时填 alias；kind=groupKey 时填字段名' },
             direction: { type: 'string', enum: ['asc', 'desc'] },
           },
+          required: ['kind', 'by', 'direction'],
+          additionalProperties: false,
         },
         description: '排序，目前只支持单个键。不指定时返回顺序未定义。',
       },
       maxGroups: { type: 'number', description: '默认 100，硬上限 500（超出会自动 clamp 并发 warning）' },
       pageToken: { type: 'string', description: '用上一次响应的 nextPageToken 翻页' },
     },
-    required: ['objectType', 'metrics'],
+    required: ['objectType', 'filters', 'groupBy', 'metrics', 'orderBy', 'maxGroups', 'pageToken'],
+    additionalProperties: false,
   };
   requiresConfirmation = false;
 
-  constructor(private readonly sdk: CoreSdkService) {}
+  constructor(private readonly queryService: QueryService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
-    return this.sdk.aggregateObjects(context.user as any, {
+    return this.queryService.aggregateObjects(context.user as any, {
       objectType: args.objectType as string,
       filters: args.filters as any[],
       groupBy: args.groupBy as string[],

@@ -4,11 +4,11 @@ export interface PageText {
   text: string;
 }
 
-/** A text chunk to embed, carrying the page it came from. */
-export interface Chunk {
-  page: number;
-  text: string;
-}
+/**
+ * A text chunk to embed, carrying the page it came from.
+ * Structurally identical to PageText — aliased for semantic clarity at call sites.
+ */
+export type Chunk = PageText;
 
 export interface ChunkOptions {
   /** Maximum characters per chunk. */

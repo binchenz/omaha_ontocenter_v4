@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { CoreSdkService } from '../../sdk/core-sdk.service';
+import { ResearchSdk } from '../../research/research.sdk';
 
 @Injectable()
 export class IngestDocumentTool implements AgentTool {
@@ -17,11 +17,12 @@ export class IngestDocumentTool implements AgentTool {
       quarter: { type: 'string', description: '报告周期（如 2025Q2），可选' },
       title: { type: 'string', description: '报告标题，可选' },
     },
-    required: ['fileId', 'originalName', 'category'],
+    required: ['fileId', 'originalName', 'category', 'agency', 'quarter', 'title'],
+    additionalProperties: false,
   };
   requiresConfirmation = true;
 
-  constructor(private readonly sdk: CoreSdkService) {}
+  constructor(private readonly sdk: ResearchSdk) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
     return this.sdk.ingestDocument(context.user, {

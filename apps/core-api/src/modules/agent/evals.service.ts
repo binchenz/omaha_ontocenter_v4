@@ -8,7 +8,7 @@ import {
   type PlanComparison,
 } from '@omaha/shared-types';
 import { OrchestratorService, AgentEvent } from '../orchestrator/orchestrator.service';
-import { CoreSdkService } from '../sdk/core-sdk.service';
+import { OntologySdk } from '../ontology/ontology.sdk';
 import { PlanSummarizer } from './plan-summarizer.service';
 
 export interface CapturedPlan {
@@ -68,7 +68,7 @@ export class EvalsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly orchestrator: OrchestratorService,
-    private readonly sdk: CoreSdkService,
+    private readonly sdk: OntologySdk,
     private readonly planSummarizer: PlanSummarizer,
   ) {}
 

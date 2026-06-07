@@ -113,3 +113,51 @@ describe('ScopedWhere', () => {
     expect(params).toEqual(['t1', 'order', '%foo%', 10, 'open']);
   });
 });
+
+// ADR-0043 §3: price-band attribution is a query-time interval predicate over the continuous
+// avgPrice field — models are never pre-bucketed into a band label at ingest.
+describe('model_metric price-band interval attribution (ADR-0043 §3)', () => {
+  const modelScope = parentScope({ tenantId: 't1', objectType: 'model_metric' });
+
+  const modelView = (): OntologyView => ({
+    tenantId: 't1',
+    objectType: 'model_metric',
+    numericFields: new Set(['avgPrice', 'valueShare', 'volumeShare']),
+    booleanFields: new Set(),
+    stringFields: new Set(['category', 'brand', 'model', 'heating', 'launchDate', 'month', 'reservation', 'sourceReport']),
+    filterableFields: new Set(['category', 'brand', 'model', 'heating', 'launchDate', 'month', 'avgPrice', 'valueShare', 'volumeShare']),
+    sortableFields: new Set(['avgPrice', 'valueShare', 'volumeShare', 'month']),
+    relations: {},
+    derivedProperties: new Map(),
+  });
+
+  it('compiles parsePriceBand({min,max}) into a ::numeric range predicate — no label stored', () => {
+    // parsePriceBand('400-500') → {min:400, max:500}; band membership is [min, max]
+    const filters: QueryFilter[] = [
+      { field: 'avgPrice', operator: 'gte', value: 400 },
+      { field: 'avgPrice', operator: 'lte', value: 500 },
+    ];
+    const { where, params } = new ScopedWhere(modelScope)
+      .filters(filters, modelView(), 'model_metric')
+      .build();
+    expect(where).toContain(`(properties->>'avgPrice')::numeric >= $3`);
+    expect(where).toContain(`(properties->>'avgPrice')::numeric <= $4`);
+    expect(params).toEqual(['t1', 'model_metric', 400, 500]);
+  });
+
+  it('open-ended band (≥2000, max=null) compiles to a single gte predicate', () => {
+    const filters: QueryFilter[] = [
+      { field: 'avgPrice', operator: 'gte', value: 2000 },
+    ];
+    const { where, params } = new ScopedWhere(modelScope)
+      .filters(filters, modelView(), 'model_metric')
+      .build();
+    expect(where).toContain(`(properties->>'avgPrice')::numeric >= $3`);
+    expect(params).toContain(2000);
+  });
+
+  it('model_metric view has no priceBand field — avgPrice is the continuous value (not pre-bucketed)', () => {
+    expect(modelView().filterableFields.has('priceBand')).toBe(false);
+    expect(modelView().numericFields.has('avgPrice')).toBe(true);
+  });
+});

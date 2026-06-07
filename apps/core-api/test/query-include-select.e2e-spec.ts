@@ -102,7 +102,7 @@ describe('Query include/select (e2e)', () => {
           externalId: ext,
           label: ext,
           properties: { amount, status },
-          relationships: { incl_probe_orderId: orderId },
+          relationships: { payments: 'INC-O-1' },
         },
       });
       seededIds.push(row.id);

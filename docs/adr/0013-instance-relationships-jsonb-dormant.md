@@ -1,5 +1,18 @@
 # `objectInstance.relationships` jsonb is dormant
 
+**Status: SUPERSEDED by ADR-0044 (2026-06-06)**
+
+Both triggers have fired. The `relationships` JSONB column is now actively read by:
+1. The **include** mechanism (`query.service.ts fetchIncludes`) — walks `relationships->>'<relationName>'` to fetch related instances in one round-trip.
+2. The **cross-relationship aggregate** planner (`query-planner.service.ts buildCrossRelSql`) — JOINs on `relationships->>'<relationName>' = parent.external_id`.
+3. The **Field Path** filter/compiler (`compiler.ts` path node + `scoped-where.ts`) — scalar subqueries traverse `relationships` for cross-relation filtering.
+
+The canonical storage convention (ADR-0044 §2): `{ <relationName>: <target external_id> }`.
+
+---
+
+*Original text below for historical context:*
+
 The `relationships` jsonb column on `object_instances` is declared in the schema and written by the import path, but **no read path in `core-api` currently consults it**. Cross-object queries today either re-issue a separate query keyed on the related object's `external_id`, or rely on the agent stitching results across turns.
 
 This is a gap registry, not a decision: the column is intentional and we expect to read it eventually. Recording the gap so a future engineer doesn't either (a) assume it's load-bearing and design around it, or (b) "clean up an unused column" and break the import contract.

@@ -1,11 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import { PrismaService } from '@omaha/db';
-import { normalizeCategory } from '@omaha/shared-types';
+import { requireCategory } from '@omaha/shared-types';
 import { DocumentTextExtractor } from './document-text-extractor';
 import { Chunker } from './chunker';
 import { EmbeddingClient, EMBEDDING_CLIENT } from './embedding/embedding-client.interface';
 import { BlobStore, BLOB_STORE } from './blob-store';
+import { toVectorLiteral } from './pgvector-util';
 
 /** Document-level metadata confirmed once at ingest (ADR-0042 §5), not per chunk. */
 export interface DocumentMetadata {
@@ -41,10 +42,7 @@ export class DocumentIngestionService {
   ) {}
 
   async ingest(tenantId: string, filePath: string, originalName: string, meta: DocumentMetadata): Promise<IngestResult> {
-    const category = normalizeCategory(meta.category);
-    if (!category) {
-      throw new Error(`Unknown 品类 "${meta.category}" — not in the category vocabulary.`);
-    }
+    const category = requireCategory(meta.category);
 
     // Read the PDF once; storing the original and extracting its text are independent.
     const bytes = await fs.readFile(filePath);
@@ -55,32 +53,40 @@ export class DocumentIngestionService {
     const chunks = this.chunker.chunk(pages, { size: CHUNK_SIZE, overlap: CHUNK_OVERLAP });
     const embeddings = chunks.length > 0 ? await this.embedding.embedPassages(chunks.map((c) => c.text)) : [];
 
-    const document = await this.prisma.researchDocument.create({
-      data: {
-        tenantId,
-        category,
-        agency: meta.agency,
-        quarter: meta.quarter,
-        title: meta.title ?? originalName,
-        mediaRef,
-      },
-    });
+    // Document row + chunk rows are one atomic unit: a chunk-insert failure must roll the
+    // document back, never leave an orphaned ResearchDocument with missing chunks. The blob
+    // and embeddings are computed above, OUTSIDE the transaction — they are slow (disk/network)
+    // and a transaction must stay short; an orphaned blob is benign (the BlobStore-lifecycle gap).
+    const document = await this.prisma.$transaction(async (tx) => {
+      const doc = await tx.researchDocument.create({
+        data: {
+          tenantId,
+          category,
+          agency: meta.agency,
+          quarter: meta.quarter,
+          title: meta.title ?? originalName,
+          mediaRef,
+        },
+      });
 
-    for (let i = 0; i < chunks.length; i++) {
-      // Raw SQL: the embedding column is pgvector, unsupported by the Prisma client.
-      const vectorLiteral = `[${embeddings[i].join(',')}]`;
-      await this.prisma.$executeRawUnsafe(
-        `INSERT INTO "document_chunks"
-           ("id", "tenant_id", "document_id", "category", "text", "page", "embedding")
-         VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6::vector)`,
-        tenantId,
-        document.id,
-        category,
-        chunks[i].text,
-        chunks[i].page,
-        vectorLiteral,
-      );
-    }
+      if (chunks.length > 0) {
+        // Batch all chunks in one INSERT — N round-trips → 1. The embedding column is pgvector
+        // (Unsupported in Prisma), so we hand-build the multi-row VALUES clause.
+        const placeholders = chunks.map((_, i) => {
+          const base = 3 + i * 4; // 3 fixed params: tenantId, docId, category; then 4 per chunk
+          return `(gen_random_uuid(), $1::uuid, $2::uuid, $${base}, $${base + 1}, $${base + 2}, $${base + 3}::vector)`;
+        });
+        const chunkParams: unknown[] = [tenantId, doc.id];
+        for (let i = 0; i < chunks.length; i++) {
+          chunkParams.push(category, chunks[i].text, chunks[i].page, toVectorLiteral(embeddings[i]));
+        }
+        await tx.$executeRawUnsafe(
+          `INSERT INTO "document_chunks" ("id","tenant_id","document_id","category","text","page","embedding") VALUES ${placeholders.join(',')}`,
+          ...chunkParams,
+        );
+      }
+      return doc;
+    });
 
     return { documentId: document.id, chunks: chunks.length };
   }

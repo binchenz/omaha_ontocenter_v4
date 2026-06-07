@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { CoreSdkService } from '../../sdk/core-sdk.service';
+import { ConnectorSdk } from '../connector/connector.sdk';
 
 @Injectable()
 export class ListDbTablesTool implements AgentTool {
@@ -12,10 +12,11 @@ export class ListDbTablesTool implements AgentTool {
       connectorId: { type: 'string', description: '连接器 ID' },
     },
     required: ['connectorId'],
+    additionalProperties: false,
   };
   requiresConfirmation = false;
 
-  constructor(private readonly sdk: CoreSdkService) {}
+  constructor(private readonly sdk: ConnectorSdk) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
     return this.sdk.listDbTables(context.user.tenantId, args.connectorId as string);

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { CoreSdkService } from '../../sdk/core-sdk.service';
+import { ResearchSdk } from '../../research/research.sdk';
 
 @Injectable()
 export class SemanticSearchTool implements AgentTool {
@@ -15,11 +15,12 @@ export class SemanticSearchTool implements AgentTool {
       priceBand: { type: 'string', description: '限定价格段（如 400-699），可选' },
       k: { type: 'number', description: '返回片段数，默认 6' },
     },
-    required: ['query'],
+    required: ['query', 'category', 'priceBand', 'k'],
+    additionalProperties: false,
   };
   requiresConfirmation = false;
 
-  constructor(private readonly sdk: CoreSdkService) {}
+  constructor(private readonly sdk: ResearchSdk) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
     return this.sdk.searchResearch(context.user, {

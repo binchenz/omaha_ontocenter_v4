@@ -112,6 +112,43 @@ function TypeEditor({ type, onChange, onRemove }: { type: SnapshotObjectType; on
             className="text-xs px-2 py-1 rounded border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50"
           >+ 添加字段</button>
 
+          {/* Derived properties */}
+          {(type.derivedProperties?.length > 0) && (
+            <div className="pt-2 border-t border-amber-100 space-y-1">
+              <span className="text-xs text-gray-500 font-medium">派生属性</span>
+              {type.derivedProperties.map((dp, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs py-1">
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-200">派生</span>
+                  <span className="font-medium text-gray-700">{dp.label}</span>
+                  <span className="text-gray-400 font-mono">{dp.name}</span>
+                  <input
+                    value={dp.expression ?? ''}
+                    onChange={(e) => {
+                      const derivedProperties = [...type.derivedProperties];
+                      derivedProperties[i] = { ...dp, expression: e.target.value };
+                      onChange({ ...type, derivedProperties });
+                    }}
+                    placeholder="DSL 表达式，如 sum orders.quantity"
+                    className="flex-1 border border-gray-200 rounded px-2 py-0.5 font-mono text-[11px] text-gray-700"
+                  />
+                  <button
+                    onClick={() => onChange({ ...type, derivedProperties: type.derivedProperties.filter((_, j) => j !== i) })}
+                    className="text-red-400 hover:text-red-600"
+                  >删除</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => {
+              const name = prompt('派生属性名（英文标识）');
+              if (!name) return;
+              const label = prompt('派生属性中文名') ?? name;
+              onChange({ ...type, derivedProperties: [...(type.derivedProperties ?? []), { name, label, type: 'number', expression: '' }] });
+            }}
+            className="text-xs px-2 py-1 rounded border border-dashed border-purple-200 text-purple-500 hover:bg-purple-50"
+          >+ 添加派生属性</button>
+
           {type.externalIdCandidates && type.externalIdCandidates.length > 0 && (
             <div className="pt-2 border-t border-amber-100">
               <label className="text-xs text-gray-500 flex items-center gap-2 flex-wrap">

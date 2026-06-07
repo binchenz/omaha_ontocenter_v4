@@ -173,7 +173,7 @@ describe('Capstone — multi-feature flagship query (e2e)', () => {
             externalId: `${o.ext}-P${k++}`,
             label: `${o.ext}-P`,
             properties: { amount: p.amount, status: p.status, paidAt: p.paidAt },
-            relationships: { cap_probe_orderId: orderId },
+            relationships: { payments: o.ext },
           },
         });
         seededIds.push(row.id);
