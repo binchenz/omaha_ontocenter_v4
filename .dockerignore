@@ -1,0 +1,15 @@
+node_modules
+.git
+.gitignore
+dist
+.llm-debug
+test-fixtures
+*.spec.ts
+*.test.ts
+coverage
+.env
+.env.*
+!.env.example
+deploy/
+.turbo
+.next

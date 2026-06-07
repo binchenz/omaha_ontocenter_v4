@@ -85,3 +85,25 @@ describe('Cycle detection across derived properties', () => {
     expect(bResult.dependencies).toContain('a');
   });
 });
+
+describe('Field path analysis (ADR-0044)', () => {
+  it('accepts a path when the relation is known', () => {
+    const result = analyze("customer.region = 'APAC'", {
+      knownProperties: new Set(['totalAmount']),
+      knownDerivedProperties: new Set(),
+      knownRelations: new Set(['customer']),
+    });
+    expect(result.valid).toBe(true);
+    expect(result.dependencies).toContain('customer');
+  });
+
+  it('rejects a path when the relation is unknown', () => {
+    const result = analyze("ghost.field = 'x'", {
+      knownProperties: new Set(['totalAmount']),
+      knownDerivedProperties: new Set(),
+      knownRelations: new Set(['customer']),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toMatch(/unknown relation.*ghost/i);
+  });
+});

@@ -237,16 +237,19 @@ async function main() {
 
   const customerC001 = await prisma.objectInstance.findUnique({
     where: { tenantId_objectType_externalId: { tenantId: tenant.id, objectType: 'customer', externalId: 'C001' } },
-    select: { id: true },
+    select: { externalId: true },
   });
   const customerC002 = await prisma.objectInstance.findUnique({
     where: { tenantId_objectType_externalId: { tenantId: tenant.id, objectType: 'customer', externalId: 'C002' } },
-    select: { id: true },
+    select: { externalId: true },
   });
 
+  // Canonical instance-link convention (ADR-0044): the FK-holding side stores
+  // { <relationName>: <other side's external_id> }. order is the many side of
+  // `has_orders`, so each order points at its customer by external_id.
   const orders = [
-    { externalId: 'O2024001', label: '订单 O2024001', properties: { orderNo: 'O2024001', orderDate: '2024-03-15', totalAmount: 75000, status: '已完成' }, relationships: { customerId: customerC001!.id } },
-    { externalId: 'O2024002', label: '订单 O2024002', properties: { orderNo: 'O2024002', orderDate: '2024-04-20', totalAmount: 25000, status: '进行中' }, relationships: { customerId: customerC002!.id } },
+    { externalId: 'O2024001', label: '订单 O2024001', properties: { orderNo: 'O2024001', orderDate: '2024-03-15', totalAmount: 75000, status: '已完成' }, relationships: { has_orders: customerC001!.externalId } },
+    { externalId: 'O2024002', label: '订单 O2024002', properties: { orderNo: 'O2024002', orderDate: '2024-04-20', totalAmount: 25000, status: '进行中' }, relationships: { has_orders: customerC002!.externalId } },
   ];
 
   for (const o of orders) {

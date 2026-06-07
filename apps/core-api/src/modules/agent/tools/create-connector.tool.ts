@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { CoreSdkService } from '../../sdk/core-sdk.service';
+import { ConnectorSdk } from '../connector/connector.sdk';
 
 @Injectable()
 export class CreateConnectorTool implements AgentTool {
@@ -18,10 +18,11 @@ export class CreateConnectorTool implements AgentTool {
       database: { type: 'string' },
     },
     required: ['name', 'type', 'host', 'port', 'user', 'password', 'database'],
+    additionalProperties: false,
   };
   requiresConfirmation = true;
 
-  constructor(private readonly sdk: CoreSdkService) {}
+  constructor(private readonly sdk: ConnectorSdk) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
     return this.sdk.createConnector(context.user.tenantId, args as any);

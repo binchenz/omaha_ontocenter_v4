@@ -8,6 +8,7 @@ import { EvalsPanel } from '@/components/ontology/EvalsPanel';
 import { PublishDialog } from '@/components/ontology/PublishDialog';
 import { ReverseInferControl } from '@/components/ontology/ReverseInferControl';
 import { TemplatesPanel } from '@/components/ontology/TemplatesPanel';
+import { OntologyGraph } from '@/components/ontology/OntologyGraph';
 
 function PublishedTypeCard({ type, relationships }: { type: ObjectType; relationships: Relationship[] }) {
   const [open, setOpen] = useState(false);
@@ -79,7 +80,9 @@ function PublishedTypeCard({ type, relationships }: { type: ObjectType; relation
 }
 
 
-export default function OntologyWorkbenchPage() {  const [search, setSearch] = useState('');
+export default function OntologyWorkbenchPage() {
+  const [search, setSearch] = useState('');
+  const [tab, setTab] = useState<'list' | 'graph'>('list');
   const qc = useQueryClient();
 
   const { data: types, isLoading: typesLoading } = useQuery({ queryKey: ['objectTypes'], queryFn: api.listObjectTypes });
@@ -112,13 +115,19 @@ export default function OntologyWorkbenchPage() {  const [search, setSearch] = u
             {draft ? '编辑草稿，验证后一键发布到运行期' : '查看已发布本体；创建草稿以安全地迭代修改'}
           </p>
         </div>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索类型..."
-          className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 w-40"
-        />
+        <div className="flex items-center gap-2">
+          <div className="flex border border-gray-200 rounded-lg overflow-hidden text-xs">
+            <button onClick={() => setTab('list')} className={`px-3 py-1.5 ${tab === 'list' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>列表</button>
+            <button onClick={() => setTab('graph')} className={`px-3 py-1.5 ${tab === 'graph' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'}`}>图谱</button>
+          </div>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索类型..."
+            className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 w-40"
+          />
+        </div>
       </div>
 
       {/* Draft control banner */}
@@ -176,7 +185,9 @@ export default function OntologyWorkbenchPage() {  const [search, setSearch] = u
 
       {typesLoading && <div className="text-center py-12 text-sm text-gray-400">加载中...</div>}
 
-      {draft ? (
+      {tab === 'graph' ? (
+        <OntologyGraph types={types ?? []} relationships={relationships ?? []} />
+      ) : draft ? (
         <DraftEditor key={draft.updatedAt} draft={draft} search={search} />
       ) : (
         <div className="space-y-2">

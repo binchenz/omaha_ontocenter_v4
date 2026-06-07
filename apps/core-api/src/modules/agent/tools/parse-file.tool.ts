@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import * as path from 'path';
 import { AgentTool } from './tool.interface';
-import { CoreSdkService } from '../../sdk/core-sdk.service';
+import { FileParserService } from './file-parser.service';
+import { UPLOAD_DIR } from '../sdk/import-engine.service';
 
 @Injectable()
 export class ParseFileTool implements AgentTool {
@@ -12,12 +14,13 @@ export class ParseFileTool implements AgentTool {
       fileId: { type: 'string', description: '上传文件返回的 fileId' },
     },
     required: ['fileId'],
+    additionalProperties: false,
   };
   requiresConfirmation = false;
 
-  constructor(private readonly sdk: CoreSdkService) {}
+  constructor(private readonly fileParser: FileParserService) {}
 
   async execute(args: Record<string, unknown>): Promise<unknown> {
-    return this.sdk.parseFile(args.fileId as string);
+    return this.fileParser.parse(path.join(UPLOAD_DIR, args.fileId as string));
   }
 }

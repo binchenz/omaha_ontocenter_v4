@@ -16,3 +16,4 @@ export * from './provenance-classifier';
 export * from './reverse-inference-assembler';
 export * from './ontology-template';
 export * from './surface';
+export * from './category';

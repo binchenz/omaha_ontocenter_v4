@@ -1,7 +1,7 @@
 import { INestApplication, ForbiddenException } from '@nestjs/common';
 import request from 'supertest';
 import { PrismaService } from '@omaha/db';
-import { CoreSdkService } from '../src/modules/sdk/core-sdk.service';
+import { OntologySdk } from '../src/modules/ontology/ontology.sdk';
 import { CurrentUser } from '@omaha/shared-types';
 import {
   createTestApp,
@@ -57,8 +57,8 @@ describe('Write authorization at the single TCB (#89, e2e)', () => {
     });
   });
 
-  describe('Agent tool path (CoreSdkService — the Agent must not be a bypass)', () => {
-    let sdk: CoreSdkService;
+  describe('Agent tool path (OntologySdk — the Agent must not be a bypass)', () => {
+    let sdk: OntologySdk;
     let prisma: PrismaService;
 
     const actorFor = async (email: string): Promise<CurrentUser> => {
@@ -80,9 +80,9 @@ describe('Write authorization at the single TCB (#89, e2e)', () => {
     };
 
     beforeAll(async () => {
-      // CoreSdkService transitively depends on the request-scoped PermissionResolver
-      // (via QueryService), so it must be resolved per-context, not fetched as a singleton.
-      sdk = await app.resolve(CoreSdkService);
+      // OntologySdk injects only OntologyService / TypeResolver / Prisma (no request-scoped
+      // PermissionResolver), so it is a plain singleton; resolve() remains safe either way.
+      sdk = await app.resolve(OntologySdk);
       prisma = app.get(PrismaService);
     });
 

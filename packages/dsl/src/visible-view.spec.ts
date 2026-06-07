@@ -10,7 +10,7 @@ function makeView(over: Partial<OntologyView> = {}): OntologyView {
     stringFields: new Set(['status', 'customerName']),
     filterableFields: new Set(['amount', 'status', 'paidAmount', 'customerName']),
     sortableFields: new Set(['amount', 'paidAmount']),
-    relations: { items: { foreignKey: 'OrderId' } },
+    relations: { items: { storageKey: 'items', otherType: 'order_item', fkSide: 'other' } },
     derivedProperties: new Map([
       // isPaid depends on a masked base field (paidAmount)
       ['isPaid', { name: 'isPaid', expression: 'paidAmount >= amount' }],
@@ -102,6 +102,6 @@ describe('projectVisible', () => {
 
   it('leaves relations intact', () => {
     const p = projectVisible(makeView(), new Set(['status']));
-    expect(p.relations).toEqual({ items: { foreignKey: 'OrderId' } });
+    expect(p.relations).toEqual({ items: { storageKey: 'items', otherType: 'order_item', fkSide: 'other' } });
   });
 });

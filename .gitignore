@@ -5,7 +5,10 @@ dist/
 .turbo/
 .superpowers/
 uploads/
+blobs/
+test-fixtures/
 .DS_Store
 .claude/
 scripts/test-results/
 .llm-debug/
+调研及市场数据/

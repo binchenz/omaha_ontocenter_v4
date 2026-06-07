@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { CoreSdkService } from '../../sdk/core-sdk.service';
+import { QueryService } from '../../query/query.service';
 
 @Injectable()
 export class QueryObjectsTool implements AgentTool {
@@ -19,6 +19,8 @@ export class QueryObjectsTool implements AgentTool {
             operator: { type: 'string', enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'in'] },
             value: {},
           },
+          required: ['field', 'operator', 'value'],
+          additionalProperties: false,
         },
         description: '过滤条件数组',
       },
@@ -28,19 +30,22 @@ export class QueryObjectsTool implements AgentTool {
           field: { type: 'string' },
           direction: { type: 'string', enum: ['asc', 'desc'] },
         },
+        required: ['field', 'direction'],
+        additionalProperties: false,
       },
       include: { type: 'array', items: { type: 'string' }, description: '要包含的关联关系名称' },
       page: { type: 'number' },
       pageSize: { type: 'number' },
     },
-    required: ['objectType'],
+    required: ['objectType', 'filters', 'sort', 'include', 'page', 'pageSize'],
+    additionalProperties: false,
   };
   requiresConfirmation = false;
 
-  constructor(private readonly sdk: CoreSdkService) {}
+  constructor(private readonly queryService: QueryService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
-    return this.sdk.queryObjects(context.user as any, {
+    return this.queryService.queryObjects(context.user as any, {
       objectType: args.objectType as string,
       filters: args.filters as any[],
       sort: args.sort as any,

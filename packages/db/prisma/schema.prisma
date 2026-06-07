@@ -23,6 +23,8 @@ model Tenant {
   objectMappings     ObjectMapping[]
   objectInstances    ObjectInstance[]
   syncJobs           SyncJob[]
+  datasets           Dataset[]
+  datasetRows        DatasetRow[]
   conversations      Conversation[]
   skillDefinitions   SkillDefinition[]
   auditLogs          AuditLog[]
@@ -31,6 +33,10 @@ model Tenant {
   actionRuns         ActionRun[]
   ontologyDraft      OntologyDraft?
   evalQuestions      EvalQuestion[]
+  researchDocuments  ResearchDocument[]
+  documentChunks     DocumentChunk[]
+  pipelines          Pipeline[]
+  pipelineRuns       PipelineRun[]
 
   @@map("tenants")
 }
@@ -87,6 +93,7 @@ model ObjectType {
   targetRelations ObjectRelationship[] @relation("TargetType")
   mappings        ObjectMapping[]
   indexes         ObjectTypeIndex[]
+  pipelines       Pipeline[]
 
   @@unique([tenantId, name])
   @@map("object_types")
@@ -139,6 +146,8 @@ model Connector {
   tenant   Tenant          @relation(fields: [tenantId], references: [id])
   mappings ObjectMapping[]
   syncJobs SyncJob[]
+  datasets Dataset[]
+  pipelines Pipeline[]
 
   @@unique([tenantId, name])
   @@map("connectors")
@@ -148,17 +157,17 @@ model ObjectMapping {
   id                   String   @id @default(uuid()) @db.Uuid
   tenantId             String   @map("tenant_id") @db.Uuid
   objectTypeId         String   @map("object_type_id") @db.Uuid
-  connectorId          String   @map("connector_id") @db.Uuid
-  tableName            String   @map("table_name")
+  connectorId          String?  @map("connector_id") @db.Uuid
   propertyMappings     Json     @default("{}") @map("property_mappings")
   relationshipMappings Json     @default("{}") @map("relationship_mappings")
   createdAt            DateTime @default(now()) @map("created_at")
 
-  tenant     Tenant     @relation(fields: [tenantId], references: [id])
-  objectType ObjectType @relation(fields: [objectTypeId], references: [id])
-  connector  Connector  @relation(fields: [connectorId], references: [id])
+  tenant     Tenant      @relation(fields: [tenantId], references: [id])
+  objectType ObjectType  @relation(fields: [objectTypeId], references: [id])
+  connector  Connector?  @relation(fields: [connectorId], references: [id])
+  syncJobs   SyncJob[]
 
-  @@unique([tenantId, objectTypeId, connectorId])
+  @@unique([tenantId, objectTypeId])
   @@map("object_mappings")
 }
 
@@ -184,10 +193,54 @@ model ObjectInstance {
   @@map("object_instances")
 }
 
+/// Materialised, versioned snapshot of raw data from a Connector (ADR-0040 §2).
+/// Dataset rows are the staging layer before SyncJobs write to object_instances.
+model Dataset {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  connectorId String   @map("connector_id") @db.Uuid
+  name        String
+  kind        String   @default("clean")
+  status      String   @default("draft")
+  version     Int      @default(1)
+  rowCount    Int      @default(0) @map("row_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant    Tenant          @relation(fields: [tenantId], references: [id])
+  connector Connector       @relation(fields: [connectorId], references: [id])
+  rows      DatasetRow[]
+  syncJobs  SyncJob[]
+  pipelineRunsAsInput  PipelineRun[] @relation("PipelineRunInput")
+  pipelineRunsAsOutput PipelineRun[] @relation("PipelineRunOutput")
+
+  @@unique([tenantId, name, version])
+  @@map("datasets")
+}
+
+/// One row in a Dataset (ADR-0040 §2). JSONB columns mirror object_instances.properties shape.
+model DatasetRow {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  datasetId String   @map("dataset_id") @db.Uuid
+  rowIndex  Int      @map("row_index")
+  columns   Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  dataset Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, datasetId])
+  @@map("dataset_rows")
+}
+
 model SyncJob {
   id               String    @id @default(uuid()) @db.Uuid
   tenantId         String    @map("tenant_id") @db.Uuid
-  connectorId      String    @map("connector_id") @db.Uuid
+  connectorId      String?   @map("connector_id") @db.Uuid
+  datasetId        String?   @map("dataset_id") @db.Uuid
+  mappingId        String?   @map("mapping_id") @db.Uuid
+  pgBossJobId      String?   @map("pg_boss_job_id")
   status           String    @default("pending")
   startedAt        DateTime? @map("started_at")
   completedAt      DateTime? @map("completed_at")
@@ -196,10 +249,69 @@ model SyncJob {
   errorLog         Json?     @map("error_log")
   createdAt        DateTime  @default(now()) @map("created_at")
 
-  tenant    Tenant    @relation(fields: [tenantId], references: [id])
-  connector Connector @relation(fields: [connectorId], references: [id])
+  tenant    Tenant         @relation(fields: [tenantId], references: [id])
+  connector Connector?     @relation(fields: [connectorId], references: [id])
+  dataset   Dataset?       @relation(fields: [datasetId], references: [id])
+  mapping   ObjectMapping? @relation(fields: [mappingId], references: [id])
 
   @@map("sync_jobs")
+}
+
+model Pipeline {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  name               String
+  connectorId        String   @map("connector_id") @db.Uuid
+  outputObjectTypeId String   @map("output_object_type_id") @db.Uuid
+  status             String   @default("active")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  tenant           Tenant         @relation(fields: [tenantId], references: [id])
+  connector        Connector      @relation(fields: [connectorId], references: [id])
+  outputObjectType ObjectType     @relation(fields: [outputObjectTypeId], references: [id])
+  steps            PipelineStep[]
+  runs             PipelineRun[]
+
+  @@unique([tenantId, connectorId, outputObjectTypeId])
+  @@map("pipelines")
+}
+
+model PipelineStep {
+  id         String   @id @default(uuid()) @db.Uuid
+  pipelineId String   @map("pipeline_id") @db.Uuid
+  order      Int
+  type       String
+  config     Json     @default("{}")
+  name       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@unique([pipelineId, order])
+  @@map("pipeline_steps")
+}
+
+model PipelineRun {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  pipelineId       String    @map("pipeline_id") @db.Uuid
+  inputDatasetId   String    @map("input_dataset_id") @db.Uuid
+  outputDatasetId  String?   @map("output_dataset_id") @db.Uuid
+  status           String    @default("pending")
+  pgBossJobId      String?   @map("pg_boss_job_id")
+  recordsProcessed Int?      @map("records_processed")
+  error            Json?
+  completedAt      DateTime? @map("completed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  pipeline     Pipeline @relation(fields: [pipelineId], references: [id])
+  inputDataset Dataset  @relation("PipelineRunInput", fields: [inputDatasetId], references: [id])
+  outputDataset Dataset? @relation("PipelineRunOutput", fields: [outputDatasetId], references: [id])
+
+  @@map("pipeline_runs")
 }
 
 model Conversation {
@@ -277,10 +389,14 @@ model ActionDefinition {
   tenantId             String   @map("tenant_id") @db.Uuid
   name                 String
   label                String
+  description          String   @default("")
   objectType           String   @map("object_type")
+  parameters           Json     @default("[]")
+  precondition         String?
+  effects              Json     @default("[]")
   inputSchema          Json     @default("{}") @map("input_schema")
   preconditions        Json     @default("[]")
-  permission           String
+  permission           String   @default("object.write")
   requiresConfirmation Boolean  @default(true) @map("requires_confirmation")
   riskLevel            String   @default("low") @map("risk_level")
   createdAt            DateTime @default(now()) @map("created_at")
@@ -387,4 +503,55 @@ model OntologyTemplate {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@map("ontology_templates")
+}
+
+/// A research document ingested into the market-intelligence archive (ADR-0042 §2). The
+/// document is *provenance*, never a star Object Type: it carries the classification spine
+/// (品类/机构/季度) and a reference to the original file in the BlobStore, so a narrative
+/// answer can cite "据 <机构> <季度> 报告第 N 页" and the reader can open the source.
+model ResearchDocument {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  /// Canonical 品类 (CategoryVocabulary) — the join key to AVC market metrics.
+  category  String
+  /// 机构: the research agency that produced the report (e.g. 艾瑞, 奥维云网).
+  agency    String?
+  /// 季度: the reporting period (e.g. 2025Q2), free-text as declared at ingest.
+  quarter   String?
+  title     String?
+  /// BlobStore reference to the original file (so a citation is openable).
+  mediaRef  String   @map("media_ref")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id])
+  chunks DocumentChunk[]
+
+  @@index([tenantId, category])
+  @@map("research_documents")
+}
+
+/// One embedded text chunk of a ResearchDocument (ADR-0042 §2). The enrichment layer hung
+/// on the 品类 spine: semantic retrieval pre-filters by category/price-band, then ranks by
+/// vector distance. The `embedding` column is a pgvector `vector(1024)` (doubao-embedding-
+/// large-text truncated to 1024 dims); Prisma cannot type it, so it is declared Unsupported
+/// and all reads/writes of the vector go through raw SQL.
+model DocumentChunk {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  documentId String   @map("document_id") @db.Uuid
+  /// Canonical 品类 (denormalised from the document) — the semantic-search pre-filter key.
+  category   String
+  /// Optional canonical 价格段 label, when the chunk is about a specific band.
+  priceBand  String?  @map("price_band")
+  text       String
+  /// 1-based page anchor in the source document, for provenance.
+  page       Int
+  embedding  Unsupported("vector(1024)")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id])
+  document ResearchDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, category])
+  @@map("document_chunks")
 }

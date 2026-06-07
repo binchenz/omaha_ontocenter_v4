@@ -18,9 +18,11 @@ export interface ToolCallShape {
 /**
  * Build the `assistant` message that announces a batch of tool calls.
  * `content` is null because the assistant turn is the tool calls themselves.
+ * When thinking mode is active, `reasoningContent` carries the chain-of-thought
+ * that must be round-tripped back to the API on subsequent requests (ADR-0047).
  */
-export function toAssistantToolCallMsg(calls: ToolCallShape[]): LlmMessage {
-  return {
+export function toAssistantToolCallMsg(calls: ToolCallShape[], reasoningContent?: string): LlmMessage {
+  const msg: LlmMessage = {
     role: 'assistant',
     content: null,
     tool_calls: calls.map((c) => ({
@@ -29,6 +31,8 @@ export function toAssistantToolCallMsg(calls: ToolCallShape[]): LlmMessage {
       function: { name: c.name, arguments: JSON.stringify(c.args) },
     })),
   };
+  if (reasoningContent) msg.reasoning_content = reasoningContent;
+  return msg;
 }
 
 /**

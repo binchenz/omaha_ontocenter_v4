@@ -4,6 +4,7 @@ export type AggregateOp = 'sum' | 'avg' | 'min' | 'max';
 
 export type Ast =
   | { kind: 'ident'; name: string }
+  | { kind: 'path'; relation: string; field: string }
   | { kind: 'param'; name: string }
   | { kind: 'number'; value: number }
   | { kind: 'string'; value: string }
@@ -248,6 +249,22 @@ class Parser {
       this.pos++;
       if (t.value === 'true') return { kind: 'bool', value: true };
       if (t.value === 'false') return { kind: 'bool', value: false };
+      // Field path: ident.ident (e.g. customer.region) — only if NOT an
+      // aggregate keyword (those are handled above). Depth limited to 1 hop.
+      if (this.peek()?.kind === 'dot') {
+        const dot = this.pos;
+        this.pos++; // consume dot
+        const fieldTok = this.peek();
+        if (!fieldTok || fieldTok.kind !== 'ident') {
+          throw new Error(`Expected field name after '${t.value}.'`);
+        }
+        this.pos++;
+        // Depth limit: reject a.b.c
+        if (this.peek()?.kind === 'dot') {
+          throw new Error('Field path depth limited to 1 hop');
+        }
+        return { kind: 'path', relation: t.value, field: fieldTok.value };
+      }
       return { kind: 'ident', name: t.value };
     }
     throw new Error(`Unexpected token: ${JSON.stringify(t)}`);

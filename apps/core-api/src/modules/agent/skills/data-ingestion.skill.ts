@@ -3,7 +3,7 @@ import { AgentSkill, SkillContext } from './skill.interface';
 export class DataIngestionSkill implements AgentSkill {
   name = 'data_ingestion';
   description = '数据接入：帮助用户上传文件或连接数据库，自动推断数据结构，创建对象类型并导入数据。';
-  tools = ['parse_file', 'create_object_type', 'import_data', 'test_db_connection', 'list_db_tables', 'preview_db_table', 'create_connector'];
+  tools = ['parse_file', 'create_object_type', 'import_data', 'test_db_connection', 'list_db_tables', 'preview_db_table', 'create_connector', 'extract_avc_report', 'ingest_document'];
 
   systemPrompt(_context: SkillContext): string {
     return `## 数据接入能力
@@ -24,6 +24,13 @@ export class DataIngestionSkill implements AgentSkill {
 4. 调用 list_db_tables 列出可用表
 5. 用户选择后调用 preview_db_table 预览
 6. 按文件导入流程的步骤 2-5 继续
+
+### AVC 市场监测报告导入
+AVC（奥维云网）线上市场月度监测报告是高度模板化的交叉表 Excel，普通 parse_file 无法正确解析。
+当用户上传的是 AVC 报告时，不要走文件导入流程，直接调用 extract_avc_report，传入 fileId 和报告品类（如 电饭煲、空气炸锅、净水器）。它会自动抽取并导入四类对象：market_metric（市场规模指标：零售额/零售量/零售均价，按品类与月份）、brand_share（分价格段品牌零售份额，按品类、品牌、价格段、周期）、model_metric（TOP-100 机型明细：单 SKU 月度份额/均价/上市日期，仅 full 变体报告含此层）、avc_report（报告来源凭证，记录该报告的 coverage=full/essence）。无需手动 create_object_type。导入后用户即可用 query/aggregate 查询份额、趋势与机型钻取（如"小米空气炸锅在 400-500 价格段的份额"或"电饭煲零售额近一年走势"）。
+
+### 调研报告 PDF 导入（语义检索）
+当用户上传的是调研报告 PDF（用户调研、座谈会、人群洞察等叙述性报告，而非 AVC 表格）时，调用 ingest_document。先与用户确认文档级元数据：品类（必填）、机构、季度、标题——只确认这一次，不要逐块确认。它会自动抽取每页文本、切块、向量化并存储，原文件留存以供引用。导入后这些叙述结论可被语义检索（由 consume 侧的 research_qa 技能查询）。
 
 ### Schema 推断规则
 - 列值全为数字 → number 类型，标记 filterable

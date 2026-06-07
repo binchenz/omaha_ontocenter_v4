@@ -108,7 +108,7 @@ describe('DeepSeekLlmClient', () => {
       );
 
       const [url, options] = mockFetch.mock.calls[0];
-      expect(url).toBe('https://api.deepseek.com/chat/completions');
+      expect(url).toBe('https://api.deepseek.com/beta/chat/completions');
       const body = JSON.parse(options.body);
       expect(body.tools).toEqual([{
         type: 'function',

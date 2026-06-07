@@ -1,7 +1,12 @@
 import { Module } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
-import { CoreSdkModule } from '../sdk/core-sdk.module';
 import { ConversationModule } from '../conversation/conversation.module';
+import { QueryModule } from '../query/query.module';
+import { OntologySdkModule } from '../ontology/ontology-sdk.module';
+import { ResearchModule } from '../research/research.module';
+import { ConnectorSdkModule } from './connector/connector-sdk.module';
+import { AgentSdkModule } from './sdk/agent-sdk.module';
+import { ActionModule } from '../action/action.module';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { AgentController } from './agent.controller';
 import { FileController } from './file.controller';
@@ -21,6 +26,11 @@ import { ListDbTablesTool } from './tools/list-db-tables.tool';
 import { PreviewDbTableTool } from './tools/preview-db-table.tool';
 import { CreateRelationshipTool } from './tools/create-relationship.tool';
 import { DeleteRelationshipTool } from './tools/delete-relationship.tool';
+import { ExtractAvcReportTool } from './tools/extract-avc-report.tool';
+import { IngestDocumentTool } from './tools/ingest-document.tool';
+import { SemanticSearchTool } from './tools/semantic-search.tool';
+import { CreateActionTool } from '../action/tools/create-action.tool';
+import { ExecuteActionTool } from '../action/tools/execute-action.tool';
 import { LLM_CLIENT, LlmClient } from './llm/llm-client.interface';
 import { DeepSeekLlmClient } from './llm/deepseek-llm-client';
 import { ResilientLlmClient } from './llm/resilient-llm-client';
@@ -29,6 +39,7 @@ import { AgentSkill } from './skills/skill.interface';
 import { QuerySkill } from './skills/query.skill';
 import { DataIngestionSkill } from './skills/data-ingestion.skill';
 import { OntologyDesignSkill } from './skills/ontology-design.skill';
+import { ResearchQaSkill } from './skills/research-qa.skill';
 import { AgentBootstrap } from './agent.bootstrap';
 import { PlanSummarizer } from './plan-summarizer.service';
 import { EvalsService } from './evals.service';
@@ -36,7 +47,16 @@ import { EvalsController } from './evals.controller';
 import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
 
 @Module({
-  imports: [CoreSdkModule, ConversationModule, MulterModule.register({ dest: './uploads' })],
+  imports: [
+    QueryModule,
+    OntologySdkModule,
+    ResearchModule,
+    ConnectorSdkModule,
+    AgentSdkModule,
+    ConversationModule,
+    ActionModule,
+    MulterModule.register({ dest: './uploads' }),
+  ],
   controllers: [AgentController, FileController, EvalsController],
   providers: [
     { provide: LLM_CLIENT, useFactory: () => new ResilientLlmClient(new DeepSeekLlmClient()) },
@@ -56,6 +76,9 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
     PreviewDbTableTool,
     CreateRelationshipTool,
     DeleteRelationshipTool,
+    ExtractAvcReportTool,
+    IngestDocumentTool,
+    SemanticSearchTool,
     {
       provide: AGENT_TOOLS,
       useFactory: (...tools: AgentTool[]): AgentTool[] => tools,
@@ -64,11 +87,13 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
         CreateObjectTypeTool, UpdateObjectTypeTool, DeleteObjectTypeTool,
         ImportDataTool, TestDbConnectionTool, CreateConnectorTool,
         ListDbTablesTool, PreviewDbTableTool, CreateRelationshipTool, DeleteRelationshipTool,
+        ExtractAvcReportTool, IngestDocumentTool, SemanticSearchTool,
+        CreateActionTool, ExecuteActionTool,
       ],
     },
     {
       provide: AGENT_SKILLS,
-      useFactory: (): AgentSkill[] => [new QuerySkill(), new DataIngestionSkill(), new OntologyDesignSkill()],
+      useFactory: (): AgentSkill[] => [new QuerySkill(), new DataIngestionSkill(), new OntologyDesignSkill(), new ResearchQaSkill()],
     },
     {
       provide: OrchestratorService,

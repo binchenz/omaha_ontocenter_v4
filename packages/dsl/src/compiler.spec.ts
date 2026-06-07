@@ -27,10 +27,10 @@ describe('DSL compiler', () => {
     const ast = parse("exists payments where status = 'Success'");
     const out = compile(ast, {
       numericFields: new Set(),
-      relations: { payments: { foreignKey: 'orderId' } },
+      relations: { payments: { storageKey: 'payments', otherType: 'payment', fkSide: 'other' } },
     });
     expect(out.sql).toContain('EXISTS');
-    expect(out.sql).toContain("relationships->>'orderId'");
+    expect(out.sql).toContain("(child.relationships->>'payments') = object_instances.external_id");
     expect(out.sql).toContain("properties->>'status'");
     expect(out.params).toEqual(['Success']);
   });
@@ -46,10 +46,10 @@ describe('DSL compiler', () => {
     const ast = parse('count payments >= 1');
     const out = compile(ast, {
       numericFields: new Set(),
-      relations: { payments: { foreignKey: 'orderId' } },
+      relations: { payments: { storageKey: 'payments', otherType: 'payment', fkSide: 'other' } },
     });
     expect(out.sql).toContain('COUNT(*)');
-    expect(out.sql).toContain("relationships->>'orderId'");
+    expect(out.sql).toContain("(child.relationships->>'payments') = object_instances.external_id");
     expect(out.params).toEqual([1]);
   });
 
@@ -57,7 +57,7 @@ describe('DSL compiler', () => {
     const ast = parse('sum payments.amount >= totalAmount');
     const out = compile(ast, {
       numericFields: new Set(['totalAmount', 'amount']),
-      relations: { payments: { foreignKey: 'orderId' } },
+      relations: { payments: { storageKey: 'payments', otherType: 'payment', fkSide: 'other' } },
     });
     expect(out.sql).toContain('COALESCE((SELECT SUM');
     expect(out.sql).toContain("(child.properties->>'amount')::numeric");
@@ -79,7 +79,7 @@ describe('DSL compiler', () => {
     const ast = parse('sum orders.totalAmount');
     const out = compile(ast, {
       numericFields: new Set(),
-      relations: { orders: { foreignKey: 'customerId' } },
+      relations: { orders: { storageKey: 'orders', otherType: 'order', fkSide: 'other' } },
     });
     expect(out.sql).toContain('COALESCE((SELECT SUM');
     expect(out.sql).toContain("(child.properties->>'totalAmount')::numeric");
@@ -95,8 +95,32 @@ describe('DSL compiler', () => {
     const ast = parse('count orders');
     const out = compile(ast, {
       numericFields: new Set(),
-      relations: { orders: { foreignKey: 'customerId' } },
+      relations: { orders: { storageKey: 'orders', otherType: 'order', fkSide: 'other' } },
     });
     expect(out.sql).toContain('SELECT COUNT(*)');
+  });
+
+  describe('field path (ADR-0044)', () => {
+    it('compiles path (fkSide=self) as scalar subquery looking up parent', () => {
+      const ast = parse("customer.region = 'APAC'");
+      const out = compile(ast, {
+        numericFields: new Set(),
+        relations: { customer: { storageKey: 'has_orders', otherType: 'customer', fkSide: 'self' } },
+      });
+      expect(out.sql).toContain("other.external_id = (object_instances.relationships->>'has_orders')");
+      expect(out.sql).toContain("(other.properties->>'region')");
+      expect(out.params).toEqual(['APAC']);
+    });
+
+    it('compiles path (fkSide=other) as scalar subquery looking up child', () => {
+      const ast = parse('orders.totalAmount >= 1000');
+      const out = compile(ast, {
+        numericFields: new Set(),
+        relations: { orders: { storageKey: 'orders', otherType: 'order', fkSide: 'other' } },
+      });
+      expect(out.sql).toContain("(other.relationships->>'orders') = object_instances.external_id");
+      expect(out.sql).toContain("(other.properties->>'totalAmount')");
+      expect(out.params).toEqual([1000]);
+    });
   });
 });

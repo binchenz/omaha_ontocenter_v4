@@ -1,5 +1,5 @@
 import { PlanSummarizer } from '../plan-summarizer.service';
-import { OntologySchema } from '../../sdk/core-sdk.service';
+import { OntologySchema } from '../../ontology/ontology.sdk';
 
 const SCHEMA: OntologySchema = {
   types: [
@@ -10,6 +10,7 @@ const SCHEMA: OntologySchema = {
         { name: 'shotCount', type: 'number', label: '镜头数', filterable: true, sortable: true },
       ],
       derivedProperties: [],
+      actions: [],
     },
     {
       name: 'shot', label: '镜头', description: '',
@@ -18,6 +19,7 @@ const SCHEMA: OntologySchema = {
         { name: 'shotSize', type: 'string', label: '景别', filterable: true },
       ],
       derivedProperties: [],
+      actions: [],
     },
   ],
   relationships: [

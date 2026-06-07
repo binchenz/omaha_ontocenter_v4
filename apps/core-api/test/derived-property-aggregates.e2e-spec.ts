@@ -124,10 +124,10 @@ describe('Derived Property v3 — isFullyPaid (e2e)', () => {
       },
     });
     seededIds.push(row.id);
-    return row.id;
+    return ext;
   }
 
-  async function seedPayment(ext: string, orderId: string, amount: number): Promise<void> {
+  async function seedPayment(ext: string, orderExternalId: string, amount: number): Promise<void> {
     const row = await prisma.objectInstance.create({
       data: {
         tenantId,
@@ -135,7 +135,7 @@ describe('Derived Property v3 — isFullyPaid (e2e)', () => {
         externalId: ext,
         label: ext,
         properties: { amount },
-        relationships: { agg_probe_orderId: orderId },
+        relationships: { payments: orderExternalId },
       },
     });
     seededIds.push(row.id);

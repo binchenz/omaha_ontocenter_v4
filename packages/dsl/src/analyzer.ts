@@ -43,6 +43,14 @@ function check(ast: Ast, ctx: CheckCtx, deps: string[], params: string[], errors
         deps.push(ast.name);
       }
       return;
+    case 'path':
+      // Field path (ADR-0044): validate the relation exists; the field on the
+      // other side is not validated here (same as insideRelation for exists).
+      if (ctx.knownRelations && !ctx.knownRelations.has(ast.relation)) {
+        errors.push(`Unknown relation in path: ${ast.relation}`);
+      }
+      if (!deps.includes(ast.relation)) deps.push(ast.relation);
+      return;
     case 'param':
       if (!params.includes(ast.name)) params.push(ast.name);
       return;

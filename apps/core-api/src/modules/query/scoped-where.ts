@@ -51,7 +51,8 @@ export class ScopedWhere {
     if (this.keepFrom) {
       this.pieces.push(scopeFragment.sql);
     } else {
-      this.pieces.push(scopeFragment.sql.replace(/^FROM object_instances WHERE /, ''));
+      // Strip the leading "FROM object_instances WHERE " prefix to yield a bare WHERE fragment.
+      this.pieces.push(scopeFragment.sql.replace(/^FROM \S+ WHERE /, ''));
     }
   }
 
@@ -108,20 +109,21 @@ export class ScopedWhere {
       if (!view) throw new BadRequestException(`Unknown derived property: ${f.derivedProperty}`);
       const def = view.derivedProperties.get(f.derivedProperty);
       if (!def) throw new BadRequestException(`Unknown derived property: ${f.derivedProperty}`);
-      const fragment = compile(parse(def.expression), {
-        numericFields: view.numericFields,
-        booleanFields: view.booleanFields,
-        stringFields: view.stringFields,
-        relations: view.relations,
-        params: f.params ?? {},
-      });
-      // mergeFragment mutates params — call once, reuse for both lhs roles.
-      const remapped = `(${this.mergeFragment(fragment)})`;
-      return this.applyOperator(remapped, f, remapped);
+      return this.compileAstAndApply(parse(def.expression), view, f, f.params);
     }
 
     if (!f.field) {
       throw new BadRequestException('Filter must have either field or derivedProperty');
+    }
+
+    // Field Path (ADR-0044): a dot in the field name signals a cross-relationship
+    // path like "customer.region". Parse via the DSL parser (reuses its validation
+    // and depth-limit logic) and compile through the unified path node.
+    if (f.field.includes('.')) {
+      if (!view) throw new BadRequestException(`Cannot resolve field path without an ontology view`);
+      const pathAst = parse(f.field);
+      if (pathAst.kind !== 'path') throw new BadRequestException(`Invalid field path: ${f.field}`);
+      return this.compileAstAndApply(pathAst, view, f);
     }
 
     if (view && (view.filterableFields.size > 0 || view.visibilityRestricted) && !view.filterableFields.has(f.field)) {
@@ -138,6 +140,19 @@ export class ScopedWhere {
       : `properties->>'${f.field}'`;
     // null checks must read raw jsonb text, not the ::numeric cast.
     return this.applyOperator(lhs, f, `properties->>'${f.field}'`);
+  }
+
+  /** Compile an AST node via the DSL compiler, merge params, apply operator. */
+  private compileAstAndApply(ast: import('@omaha/dsl').Ast, view: OntologyView, f: QueryFilter, params?: Record<string, unknown>): string {
+    const fragment = compile(ast, {
+      numericFields: view.numericFields,
+      booleanFields: view.booleanFields,
+      stringFields: view.stringFields,
+      relations: view.relations,
+      params: params ?? {},
+    });
+    const lhs = `(${this.mergeFragment(fragment)})`;
+    return this.applyOperator(lhs, f, lhs);
   }
 
   /**

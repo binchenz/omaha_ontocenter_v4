@@ -1,0 +1,74 @@
+# ── Stage 1: Install dependencies ─────────────────────────────────────────────
+FROM node:20-slim AS deps
+
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+WORKDIR /app
+
+# Copy workspace root manifests
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+
+# Copy package manifests for workspace packages
+COPY apps/core-api/package.json apps/core-api/
+COPY packages/db/package.json packages/db/
+COPY packages/dsl/package.json packages/dsl/
+COPY packages/shared-types/package.json packages/shared-types/
+
+# Install production + dev dependencies (needed for build)
+RUN pnpm install --frozen-lockfile
+
+# ── Stage 2: Build ────────────────────────────────────────────────────────────
+FROM deps AS build
+
+# Copy source for workspace packages (built first via turbo dependsOn: ^build)
+COPY packages/db/ packages/db/
+COPY packages/dsl/ packages/dsl/
+COPY packages/shared-types/ packages/shared-types/
+COPY apps/core-api/ apps/core-api/
+COPY turbo.json ./
+
+# Generate Prisma client
+RUN pnpm --filter @omaha/db run generate
+
+# Build all packages (turbo handles dependency order)
+RUN pnpm turbo build --filter=@omaha/core-api...
+
+# Prune dev dependencies after build
+RUN pnpm prune --prod
+
+# ── Stage 3: Runtime ──────────────────────────────────────────────────────────
+FROM node:20-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy pruned node_modules
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps/core-api/node_modules ./apps/core-api/node_modules
+COPY --from=build /app/packages/db/node_modules ./packages/db/node_modules
+
+# Copy built outputs
+COPY --from=build /app/apps/core-api/dist ./apps/core-api/dist
+COPY --from=build /app/packages/db/dist ./packages/db/dist
+COPY --from=build /app/packages/db/prisma ./packages/db/prisma
+COPY --from=build /app/packages/dsl/dist ./packages/dsl/dist
+COPY --from=build /app/packages/shared-types/dist ./packages/shared-types/dist
+
+# Copy package.json files (needed for module resolution)
+COPY --from=build /app/package.json ./
+COPY --from=build /app/apps/core-api/package.json ./apps/core-api/
+COPY --from=build /app/packages/db/package.json ./packages/db/
+COPY --from=build /app/packages/dsl/package.json ./packages/dsl/
+COPY --from=build /app/packages/shared-types/package.json ./packages/shared-types/
+
+# Copy generated Prisma client
+COPY --from=build /app/node_modules/.pnpm/@prisma+client*/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
+
+ENV NODE_ENV=production
+EXPOSE 3001
+
+WORKDIR /app/apps/core-api
+CMD ["node", "dist/main.js"]

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { CoreSdkService } from '../../sdk/core-sdk.service';
+import { OntologySdk } from '../../ontology/ontology.sdk';
 
 @Injectable()
 export class CreateRelationshipTool implements AgentTool {
@@ -15,10 +15,11 @@ export class CreateRelationshipTool implements AgentTool {
       cardinality: { type: 'string', enum: ['one-to-one', 'one-to-many', 'many-to-many'], description: '基数' },
     },
     required: ['name', 'sourceType', 'targetType', 'cardinality'],
+    additionalProperties: false,
   };
   requiresConfirmation = true;
 
-  constructor(private readonly sdk: CoreSdkService) {}
+  constructor(private readonly sdk: OntologySdk) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
     return this.sdk.createRelationship(context.user, args as any);

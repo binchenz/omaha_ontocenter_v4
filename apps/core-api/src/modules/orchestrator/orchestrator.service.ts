@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { LlmClient, LlmMessage, ToolDefinition } from '../agent/llm/llm-client.interface';
+import { LlmClient, LlmMessage, LlmOptions, ToolDefinition } from '../agent/llm/llm-client.interface';
 import { toAssistantToolCallMsg, toToolResultMsg } from '../agent/llm/llm-message-mapping';
 import { AgentTool, ToolContext } from '../agent/tools/tool.interface';
 import { AgentSkill, SkillContext } from '../agent/skills/skill.interface';
@@ -132,8 +132,11 @@ export class OrchestratorService {
       }
     }
 
+    // Derive LLM options from the most specific skill (first with llmOptions wins)
+    const skillLlmOptions: LlmOptions | undefined = (input.skills ?? this.skills).find(s => s.llmOptions)?.llmOptions;
+
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
-      const response = await this.llm.chatWithTools(messages, toolDefs);
+      const response = await this.llm.chatWithTools(messages, toolDefs, skillLlmOptions);
 
       if (response.type === 'text') {
         yield { type: 'text', content: response.content };
@@ -142,6 +145,7 @@ export class OrchestratorService {
 
       messages.push(toAssistantToolCallMsg(
         response.calls.map(c => ({ id: c.id, name: c.name, args: c.arguments })),
+        response.reasoning_content,
       ));
 
       for (const call of response.calls) {

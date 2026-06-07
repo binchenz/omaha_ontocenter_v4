@@ -33,6 +33,10 @@ export interface QueryObjectsResponse {
     totalPages: number;
     objectType: string;
     sortFallbackReason?: string;
+    /** Structured advisories from the read path (e.g. Coverage Gate's
+     *  ESSENCE_COVERAGE_MODEL_UNAVAILABLE) — never an error, surfaced so the
+     *  Agent can answer honestly about data coverage. See ADR-0044. */
+    warnings?: string[];
   };
 }
 

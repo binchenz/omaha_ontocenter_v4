@@ -132,4 +132,30 @@ describe('DSL parser', () => {
       right: { kind: 'number', value: 100 },
     });
   });
+
+  describe('field path (ADR-0044)', () => {
+    it('parses relation.field as a path node', () => {
+      const ast = parse('customer.region');
+      expect(ast).toEqual({ kind: 'path', relation: 'customer', field: 'region' });
+    });
+
+    it('parses path in a comparison', () => {
+      const ast = parse("customer.region = 'APAC'");
+      expect(ast).toEqual({
+        kind: 'compare',
+        op: '=',
+        left: { kind: 'path', relation: 'customer', field: 'region' },
+        right: { kind: 'string', value: 'APAC' },
+      });
+    });
+
+    it('rejects depth > 1 (a.b.c)', () => {
+      expect(() => parse('a.b.c')).toThrow(/depth limited to 1 hop/i);
+    });
+
+    it('does not interfere with sum rel.field (aggregate)', () => {
+      const ast = parse('sum orders.totalAmount');
+      expect(ast).toEqual({ kind: 'aggregate', op: 'sum', relation: 'orders', field: 'totalAmount' });
+    });
+  });
 });

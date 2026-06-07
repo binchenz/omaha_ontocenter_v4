@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CoreSdkService, OntologySchema } from '../sdk/core-sdk.service';
+import { OntologySdk, OntologySchema } from '../ontology/ontology.sdk';
 
 /**
  * Back-translates a query/aggregate tool call into a one-line Chinese summary
@@ -14,7 +14,7 @@ import { CoreSdkService, OntologySchema } from '../sdk/core-sdk.service';
 export class PlanSummarizer {
   private readonly logger = new Logger(PlanSummarizer.name);
 
-  constructor(private readonly sdk: CoreSdkService) {}
+  constructor(private readonly sdk: OntologySdk) {}
 
   async summarize(
     tenantId: string,

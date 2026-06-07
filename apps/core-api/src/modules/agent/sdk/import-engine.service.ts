@@ -20,6 +20,13 @@ export interface ImportResult {
   objectType: string;
 }
 
+/** A pre-built instance to upsert: the in-memory equivalent of one parsed file row. */
+export interface InstanceUpsert {
+  externalId: string;
+  label: string;
+  properties: Record<string, unknown>;
+}
+
 @Injectable()
 export class ImportEngine {
   constructor(
@@ -36,19 +43,46 @@ export class ImportEngine {
       return { imported: 0, skipped: 0, objectType: params.objectType };
     }
 
+    const instances: InstanceUpsert[] = rows.map((row, idx) => {
+      const externalId = String(row[params.externalIdColumn] ?? `row_${idx + 1}`);
+      return {
+        externalId,
+        label: String(row[params.labelColumn] ?? externalId),
+        properties: { ...row },
+      };
+    });
+
+    return this.importInstances(tenantId, params.objectType, instances);
+  }
+
+  /**
+   * Upsert pre-built instances into an Object Type through the single write path
+   * (ADR-0040): the allowedValues hard gate, then a transactional batch upsert. Callers
+   * that build instances in memory (e.g. the AVC market-metric importer) reuse this rather
+   * than introducing a second writer. The Object Type must already exist.
+   */
+  async importInstances(
+    tenantId: string,
+    objectTypeName: string,
+    instances: InstanceUpsert[],
+  ): Promise<ImportResult> {
+    if (instances.length === 0) {
+      return { imported: 0, skipped: 0, objectType: objectTypeName };
+    }
+
     // Hard gate: reject the whole batch if any value violates a property's
     // allowedValues. Normalization of dirty source data is an upstream concern;
     // the importer only gates (ADR: Property.allowedValues).
     const objectType = await this.prisma.objectType.findFirst({
-      where: { tenantId, name: params.objectType },
+      where: { tenantId, name: objectTypeName },
       select: { properties: true },
     });
     const propertyDefs = (objectType?.properties ?? []) as unknown as PropertyDefinition[];
     const hasConstraints = propertyDefs.some((p) => p.allowedValues && p.allowedValues.length > 0);
     if (hasConstraints) {
       const violations: Array<AllowedValueViolation & { row: number }> = [];
-      rows.forEach((row, idx) => {
-        for (const v of validateInstanceProperties(row as Record<string, unknown>, propertyDefs)) {
+      instances.forEach((inst, idx) => {
+        for (const v of validateInstanceProperties(inst.properties, propertyDefs)) {
           violations.push({ ...v, row: idx + 1 });
         }
       });
@@ -63,41 +97,36 @@ export class ImportEngine {
     }
 
     let imported = 0;
-
+    // A single batch can be hundreds of upserts (e.g. an AVC brand × price-band grid), which
+    // overruns Prisma's 5s default interactive-transaction timeout; raise it so large real-world
+    // reports import atomically rather than dying mid-batch.
     await this.prisma.$transaction(async (tx: any) => {
-      for (const row of rows) {
-        const externalId = String(row[params.externalIdColumn] ?? `row_${imported + 1}`);
-        const label = String(row[params.labelColumn] ?? externalId);
-        const properties: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(row)) {
-          properties[key] = value;
-        }
-
+      for (const inst of instances) {
         await tx.objectInstance.upsert({
           where: {
             tenantId_objectType_externalId: {
               tenantId,
-              objectType: params.objectType,
-              externalId,
+              objectType: objectTypeName,
+              externalId: inst.externalId,
             },
           },
           create: {
             tenantId,
-            objectType: params.objectType,
-            externalId,
-            label,
-            properties: properties as any,
+            objectType: objectTypeName,
+            externalId: inst.externalId,
+            label: inst.label,
+            properties: inst.properties as any,
             relationships: {},
           },
           update: {
-            label,
-            properties: properties as any,
+            label: inst.label,
+            properties: inst.properties as any,
           },
         });
         imported++;
       }
-    });
+    }, { timeout: 30_000 });
 
-    return { imported, skipped: 0, objectType: params.objectType };
+    return { imported, skipped: 0, objectType: objectTypeName };
   }
 }

@@ -34,7 +34,7 @@ describe('MappingService', () => {
 
   describe('listMappings', () => {
     it('should return all mappings for a tenant', async () => {
-      const mappings = [{ id: 'm1', tableName: 'customers' }];
+      const mappings = [{ id: 'm1', connectorId: 'c1' }];
       prisma.objectMapping.findMany.mockResolvedValue(mappings);
       const result = await service.listMappings('t1');
       expect(result).toEqual(mappings);
@@ -47,7 +47,7 @@ describe('MappingService', () => {
 
   describe('getMapping', () => {
     it('should return mapping by id', async () => {
-      const mapping = { id: 'm1', tenantId: 't1', tableName: 'customers' };
+      const mapping = { id: 'm1', tenantId: 't1', connectorId: 'c1' };
       prisma.objectMapping.findUnique.mockResolvedValue(mapping);
       const result = await service.getMapping('t1', 'm1');
       expect(result).toEqual(mapping);
@@ -61,9 +61,9 @@ describe('MappingService', () => {
 
   describe('createMapping', () => {
     it('should create and return mapping', async () => {
-      const created = { id: 'm1', tenantId: 't1', objectTypeId: 'ot1', connectorId: 'c1', tableName: 'customers', propertyMappings: {}, relationshipMappings: {} };
+      const created = { id: 'm1', tenantId: 't1', objectTypeId: 'ot1', connectorId: 'c1', propertyMappings: {}, relationshipMappings: {} };
       prisma.objectMapping.create.mockResolvedValue(created);
-      const result = await service.createMapping('t1', { objectTypeId: 'ot1', connectorId: 'c1', tableName: 'customers', propertyMappings: {} });
+      const result = await service.createMapping('t1', { objectTypeId: 'ot1', connectorId: 'c1', propertyMappings: {} });
       expect(result).toEqual(created);
     });
   });

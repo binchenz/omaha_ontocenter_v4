@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AgentTool, ToolContext } from './tool.interface';
-import { CoreSdkService } from '../../sdk/core-sdk.service';
+import { OntologySdk } from '../../ontology/ontology.sdk';
 import type { ObjectEdit } from '@omaha/shared-types';
 
 @Injectable()
@@ -31,15 +31,17 @@ export class CreateObjectTypeTool implements AgentTool {
               description: '该 string 字段的合法值枚举（硬约束）。仅低基数受控字段（如状态/等级/类型/关系类型）需要；设置后，导入时不在此列表内的值会被整批拒绝。先和用户确认合法值集合，不要凭数据猜。',
             },
           },
-          required: ['name', 'type', 'label'],
+          required: ['name', 'type', 'label', 'filterable', 'sortable', 'description', 'unit', 'allowedValues'],
+          additionalProperties: false,
         },
       },
     },
-    required: ['name', 'label', 'properties'],
+    required: ['name', 'label', 'description', 'properties'],
+    additionalProperties: false,
   };
   requiresConfirmation = true;
 
-  constructor(private readonly sdk: CoreSdkService) {}
+  constructor(private readonly sdk: OntologySdk) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<ObjectEdit[]> {
     await this.sdk.createObjectType(context.user, args as any);
