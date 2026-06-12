@@ -1,4 +1,4 @@
-import { ChartSpec, SeriesItem } from './types';
+import { SeriesItem } from './types';
 
 /** Shared color palette for chart series. */
 export const COLORS = [

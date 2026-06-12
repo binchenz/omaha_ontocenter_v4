@@ -51,6 +51,7 @@ describe('Reverse-inference + provenance (#71, e2e)', () => {
     // Connector pointing at the SAME dev DB (reverse-inference reads its public schema).
     const cc = app.get(ConnectorClient);
     const url = new URL(process.env.DATABASE_URL!);
+    const encryptedPassword = await cc.encrypt(decodeURIComponent(url.password));
     const connector = await prisma.connector.create({
       data: {
         tenantId,
@@ -60,7 +61,7 @@ describe('Reverse-inference + provenance (#71, e2e)', () => {
           host: url.hostname,
           port: Number(url.port || 5432),
           user: decodeURIComponent(url.username),
-          password: cc.encrypt(decodeURIComponent(url.password)),
+          password: encryptedPassword,
           database: url.pathname.replace(/^\//, ''),
         },
       },

@@ -76,7 +76,7 @@ export function OntologyGraph({ types, relationships }: { types: ObjectType[]; r
             <button onClick={() => setDetail(null)} className="text-gray-400 hover:text-gray-600">✕</button>
           </div>
           <p className="text-gray-400 font-mono">{detail.type.name}</p>
-          {(detail.type as any).description && <p className="text-gray-500">{(detail.type as any).description}</p>}
+          {detail.type.description && <p className="text-gray-500">{detail.type.description}</p>}
 
           <div>
             <p className="font-medium text-gray-700 mb-1">属性 ({detail.type.properties.length})</p>

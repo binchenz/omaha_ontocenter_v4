@@ -7,6 +7,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model SystemSetting {
+  key   String @id
+  value String
+
+  @@map("system_settings")
+}
+
 model Tenant {
   id        String   @id @default(uuid()) @db.Uuid
   name      String

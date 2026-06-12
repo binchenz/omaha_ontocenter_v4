@@ -242,6 +242,16 @@ _Avoid_: a new_model object, an isNewThisPeriod stored flag, extracting sheet 2-
 > **Dev:** "Is the SDK just a wrapper around our existing services?"
 > **Domain expert:** "Yes, but ontology-aware. A **Tool** calls `sdk.queryObjects(...)` — the **SDK** resolves the Object Type from the current Tenant's Ontology, applies permissions, and delegates to QueryService. Tools never touch services directly."
 
+### Open-Source Deployment (ADR-0049)
+
+**Deployment model**: Self-hosted only (v1). Each OPC deploys one instance for one SMB. The codebase's multi-tenancy is preserved but a single Tenant is the default operational unit — OPCs do not need to understand the Tenant concept.
+
+**Setup Wizard**: On first boot (no Tenant seeded), the platform redirects to `/setup`. Two steps: (1) DeepSeek API Key + connectivity test, (2) tenant name + admin email + password. The wizard calls a single `POST /setup/initialize` endpoint that creates the Tenant, seeds the `admin` Role, and creates the first User. After completion, the wizard redirects to `/login`. `JWT_SECRET` is auto-generated at first boot; `DATABASE_URL` is managed via Docker Compose and hidden from the wizard (advanced users can override via `.env`).
+
+**User management**: Admin users can create, delete, and assign Roles to Users from a Settings page — no CLI required. Role _editing_ (changing Permissions) remains CLI/code-level for v1 (high-risk operation). The user creation form in the wizard's final step reuses the same Settings page component.
+
+_Avoid_: multi-tenant onboarding UI (v1 is single-tenant by default), self-service registration (all Users are admin-created)
+
 ## Flagged ambiguities
 
 - "Employee" in PRD §5.1 and §7.6 (`ref: Employee`) — **resolved**: there is no Employee concept; all assignable humans are **User**. Login-disabled Users cover staff who never use the platform.

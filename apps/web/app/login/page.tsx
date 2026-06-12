@@ -7,7 +7,6 @@ import { useAuth } from '@/lib/auth';
 export default function LoginPage() {
   const { login } = useAuth();
   const router = useRouter();
-  const [tenantSlug, setTenantSlug] = useState('demo');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -18,7 +17,7 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await login(tenantSlug, email, password);
+      await login(email, password);
       router.push('/query');
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败');
@@ -41,24 +40,13 @@ export default function LoginPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">租户 ID</label>
-              <input
-                type="text"
-                value={tenantSlug}
-                onChange={e => setTenantSlug(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                placeholder="demo"
-                required
-              />
-            </div>
-            <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">邮箱</label>
               <input
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                placeholder="admin@demo.com"
+                placeholder="admin@example.com"
                 required
               />
             </div>
@@ -87,10 +75,6 @@ export default function LoginPage() {
             </button>
           </form>
         </div>
-
-        <p className="text-center text-xs text-gray-400 mt-4">
-          测试账号：admin@demo.com / admin123
-        </p>
       </div>
     </div>
   );

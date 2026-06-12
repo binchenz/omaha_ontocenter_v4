@@ -26,23 +26,33 @@ pnpm build
 cp .env.example .env
 ```
 
-**Variables that MUST be changed for production (★):**
+**Variables that MUST be set:**
 
 ```bash
 DATABASE_URL=postgresql://<user>:<password>@<host>:5432/ontocenter
-JWT_SECRET=<openssl rand -hex 32>
-CONNECTOR_ENCRYPTION_KEY=<openssl rand -hex 16>   # must be exactly 32 chars
-DEEPSEEK_API_KEY=<production API key>
 NEXT_PUBLIC_API_URL=https://<your-domain>/api
+```
+
+**Secrets (optional):** `JWT_SECRET`, `CONNECTOR_ENCRYPTION_KEY`, and `DEEPSEEK_API_KEY` are generated/collected by the Setup Wizard on first run and stored in the database — no need to set them in `.env`.
+
+Set them explicitly only when:
+- Running multiple replicas that must share the same `JWT_SECRET` (`openssl rand -hex 32`)
+- Pinning `CONNECTOR_ENCRYPTION_KEY` across redeploys (changing it makes existing connector passwords undecryptable)
+
+```bash
+# Only for multi-replica / pinned-secret setups
+JWT_SECRET=<openssl rand -hex 32>
+CONNECTOR_ENCRYPTION_KEY=<openssl rand -hex 16>
 ```
 
 ### 3. Initialize the database
 
 ```bash
 pnpm db:generate
-pnpm --filter @omaha/db prisma migrate deploy
-pnpm db:seed
+pnpm db:migrate:deploy
 ```
+
+The database stays empty after migration — the Setup Wizard initializes it (organization, admin, secrets) on first visit.
 
 ### 4. Start services (PM2)
 
@@ -90,22 +100,9 @@ server {
 
 ```bash
 curl https://your-domain.com/api/health
-
-curl -X POST https://your-domain.com/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@system.local","password":"<password from seed>"}'
 ```
 
-## Reset admin password
-
-```bash
-cd /opt/omaha_ontocenter_v4
-node -e "
-const bcrypt = require('bcrypt');
-bcrypt.hash('new-password', 10).then(h => console.log(h));
-" | xargs -I{} pnpm --filter @omaha/db prisma db execute \
-  --stdin <<< "UPDATE users SET password_hash='{}' WHERE email='admin@system.local';"
-```
+On first visit, https://your-domain.com redirects to the Setup Wizard. Complete initialization in the browser (enter the API key, create the admin account). After the wizard completes, you can log in normally.
 
 ## Update deployment
 
@@ -114,16 +111,16 @@ cd /opt/omaha_ontocenter_v4
 git pull
 pnpm install --frozen-lockfile
 pnpm build
-pnpm --filter @omaha/db prisma migrate deploy
+pnpm db:migrate:deploy
 pm2 restart all
 ```
 
 ## Pre-launch checklist
 
-- [ ] `JWT_SECRET` replaced with a random value
-- [ ] `CONNECTOR_ENCRYPTION_KEY` replaced with a random value
-- [ ] `DEEPSEEK_API_KEY` is the production key
+- [ ] `DATABASE_URL` points to the production database
+- [ ] `NEXT_PUBLIC_API_URL` set to the public domain
 - [ ] HTTPS certificate configured
-- [ ] Nginx `proxy_buffering off` set
+- [ ] Nginx `proxy_buffering off` set (required for SSE streaming)
 - [ ] Database backup strategy in place
 - [ ] PM2 startup configured (`pm2 startup`)
+- [ ] Setup Wizard completed after first visit (API key + admin account)

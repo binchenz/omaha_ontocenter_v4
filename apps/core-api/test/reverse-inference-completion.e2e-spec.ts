@@ -45,6 +45,7 @@ describe('Reverse-inference completion (#74, e2e)', () => {
 
     const cc = app.get(ConnectorClient);
     const url = new URL(process.env.DATABASE_URL!);
+    const encryptedPassword = await cc.encrypt(decodeURIComponent(url.password));
     const connector = await prisma.connector.create({
       data: {
         tenantId,
@@ -54,7 +55,7 @@ describe('Reverse-inference completion (#74, e2e)', () => {
           host: url.hostname,
           port: Number(url.port || 5432),
           user: decodeURIComponent(url.username),
-          password: cc.encrypt(decodeURIComponent(url.password)),
+          password: encryptedPassword,
           database: url.pathname.replace(/^\//, ''),
         },
       },

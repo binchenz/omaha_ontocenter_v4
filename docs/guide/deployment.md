@@ -26,23 +26,33 @@ pnpm build
 cp .env.example .env
 ```
 
-**必须修改的变量（★ 生产环境不能使用默认值）：**
+**必须设置的变量：**
 
 ```bash
 DATABASE_URL=postgresql://<user>:<password>@<host>:5432/ontocenter
-JWT_SECRET=<openssl rand -hex 32>
-CONNECTOR_ENCRYPTION_KEY=<openssl rand -hex 16>   # 必须恰好 32 字符
-DEEPSEEK_API_KEY=<生产 API key>
 NEXT_PUBLIC_API_URL=https://<your-domain>/api
+```
+
+**密钥（可选）：** `JWT_SECRET`、`CONNECTOR_ENCRYPTION_KEY`、`DEEPSEEK_API_KEY` 默认由 Setup 向导首次启动时生成/收集并存入数据库，无需在 `.env` 设置。
+
+仅在以下情况显式设置：
+- 多副本部署需要所有实例共用同一 `JWT_SECRET`（`openssl rand -hex 32`）
+- 需要跨重新部署固定 `CONNECTOR_ENCRYPTION_KEY`（更改后已存连接器密码无法解密）
+
+```bash
+# 仅多副本/固定密钥场景需要
+JWT_SECRET=<openssl rand -hex 32>
+CONNECTOR_ENCRYPTION_KEY=<openssl rand -hex 16>
 ```
 
 ### 3. 初始化数据库
 
 ```bash
 pnpm db:generate
-pnpm --filter @omaha/db prisma migrate deploy
-pnpm db:seed
+pnpm db:migrate:deploy
 ```
+
+数据库迁移完成后保持为空，由 Setup 向导首次访问时初始化（创建组织、管理员、密钥）。
 
 ### 4. 启动服务（PM2）
 
@@ -95,23 +105,9 @@ server {
 ```bash
 # 健康检查
 curl https://your-domain.com/api/health
-
-# 登录
-curl -X POST https://your-domain.com/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@system.local","password":"<seed 中设置的密码>"}'
 ```
 
-## 重置管理员密码
-
-```bash
-cd /opt/omaha_ontocenter_v4
-node -e "
-const bcrypt = require('bcrypt');
-bcrypt.hash('new-password', 10).then(h => console.log(h));
-" | xargs -I{} pnpm --filter @omaha/db prisma db execute \
-  --stdin <<< "UPDATE users SET password_hash='{}' WHERE email='admin@system.local';"
-```
+首次访问 https://your-domain.com 会自动跳转到 Setup 向导，在浏览器里完成初始化（填入 API key、创建管理员账号）。向导完成后即可正常登录。
 
 ## 更新部署
 
@@ -120,16 +116,16 @@ cd /opt/omaha_ontocenter_v4
 git pull
 pnpm install --frozen-lockfile
 pnpm build
-pnpm --filter @omaha/db prisma migrate deploy
+pnpm db:migrate:deploy
 pm2 restart all
 ```
 
 ## 上线前检查清单
 
-- [ ] `JWT_SECRET` 已更换为随机值
-- [ ] `CONNECTOR_ENCRYPTION_KEY` 已更换为随机值
-- [ ] `DEEPSEEK_API_KEY` 使用生产密钥
+- [ ] `DATABASE_URL` 指向生产数据库
+- [ ] `NEXT_PUBLIC_API_URL` 设置为公开域名
 - [ ] HTTPS 证书已配置
-- [ ] Nginx `proxy_buffering off` 已设置
-- [ ] 数据库已备份策略
+- [ ] Nginx `proxy_buffering off` 已设置（SSE 流式输出必须）
+- [ ] 数据库已制定备份策略
 - [ ] PM2 开机自启已配置（`pm2 startup`）
+- [ ] 首次访问后完成 Setup 向导（API key + 管理员账号）
