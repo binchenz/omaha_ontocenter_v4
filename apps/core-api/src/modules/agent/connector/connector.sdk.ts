@@ -17,7 +17,7 @@ export class ConnectorSdk {
     name: string; type: string; host: string; port: number;
     user: string; password: string; database: string;
   }): Promise<{ id: string; name: string; message: string }> {
-    const encryptedPassword = this.connectorClient.encrypt(params.password);
+    const encryptedPassword = await this.connectorClient.encrypt(params.password);
     const connector = await this.prisma.connector.create({
       data: {
         tenantId, name: params.name, type: params.type,

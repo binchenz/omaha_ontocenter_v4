@@ -1,12 +1,14 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import { api, User } from './api';
 
 interface AuthContextType {
   user: User | null;
   token: string | null;
-  login: (tenantSlug: string, email: string, password: string) => Promise<void>;
+  tenantSlug: string | null;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   loading: boolean;
 }
@@ -16,28 +18,38 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [tenantSlug, setTenantSlug] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
-    const stored = localStorage.getItem('token');
-    if (stored) {
-      setToken(stored);
-      api.me()
-        .then(setUser)
-        .catch(() => { localStorage.removeItem('token'); })
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+    (async () => {
+      try {
+        const status = await api.setupStatus();
+        if (!status.initialized) {
+          if (pathname !== '/setup') router.replace('/setup');
+          return;
+        }
+        setTenantSlug(status.slug ?? null);
+        if (pathname === '/setup') { router.replace('/login'); return; }
+        const stored = localStorage.getItem('token');
+        if (stored) {
+          setToken(stored);
+          const me = await api.me().catch(() => { localStorage.removeItem('token'); return null; });
+          if (me) setUser(me);
+        }
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
-  const login = async (tenantSlug: string, email: string, password: string) => {
+  const login = async (email: string, password: string) => {
+    if (!tenantSlug) throw new Error('系统尚未初始化，请刷新页面');
     const res = await api.login(tenantSlug, email, password);
     localStorage.setItem('token', res.accessToken);
     setToken(res.accessToken);
-    // The login response carries only a partial user (no permissions); fetch the
-    // full CurrentUser so the client always holds the permission list that drives
-    // surface assembly (ADR-0041).
     setUser(await api.me());
   };
 
@@ -48,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, token, tenantSlug, login, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );
@@ -59,3 +71,4 @@ export function useAuth() {
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 }
+

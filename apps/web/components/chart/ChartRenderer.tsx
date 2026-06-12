@@ -54,7 +54,7 @@ function ChartBody({ spec }: { spec: ChartSpec }) {
       case 'radar':
         return <RadarChartView spec={spec} />;
       default:
-        return <div className="text-sm text-gray-500">不支持的图表类型: {(spec as any).type}</div>;
+        return <div className="text-sm text-gray-500">不支持的图表类型: {(spec as ChartSpec).type}</div>;
     }
   } catch (e) {
     return (

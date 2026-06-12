@@ -6,11 +6,13 @@
     "build": "turbo build",
     "test": "turbo test",
     "lint": "turbo lint",
-    "db:generate": "pnpm --filter @omaha/db prisma generate",
-    "db:migrate": "pnpm --filter @omaha/db prisma migrate dev",
-    "db:push": "pnpm --filter @omaha/db prisma db push",
-    "db:seed": "pnpm --filter @omaha/db seed",
-    "setup": "pnpm install && pnpm db:generate && pnpm db:migrate && pnpm db:seed"
+    "db:generate": "pnpm --filter @omaha/db run generate",
+    "db:migrate": "pnpm --filter @omaha/db run migrate",
+    "db:migrate:deploy": "pnpm --filter @omaha/db run migrate:deploy",
+    "db:push": "pnpm --filter @omaha/db run push",
+    "db:seed": "pnpm --filter @omaha/db run seed",
+    "setup": "pnpm install && pnpm db:generate && pnpm db:migrate",
+    "setup:demo": "pnpm setup && pnpm db:seed"
   },
   "devDependencies": {
     "turbo": "^2.4.0"

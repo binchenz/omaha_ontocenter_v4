@@ -1,7 +1,6 @@
 'use client';
 
 import { ChartSpec } from './types';
-import { COLORS } from './chart-utils';
 
 export function HeatmapView({ spec }: { spec: ChartSpec }) {
   const matrix = spec.matrix;

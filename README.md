@@ -30,8 +30,10 @@ An ontology-driven data platform where business users query, manage, and integra
 git clone https://github.com/binchenz/omaha_ontocenter_v4.git
 cd omaha_ontocenter_v4
 cp .env.example .env
-# 编辑 .env，填入 DEEPSEEK_API_KEY / Edit .env and set DEEPSEEK_API_KEY
 ```
+
+> DeepSeek API key 不必现在填 —— 首次启动的 Setup 向导里会引导你填入并测试连接。
+> No need to set the DeepSeek API key now — the first-run Setup Wizard will guide you through entering and testing it.
 
 ### 2. 启动数据库 / Start database
 
@@ -45,9 +47,9 @@ docker-compose up -d
 pnpm setup
 ```
 
-这条命令会依次执行：安装依赖 → 生成 Prisma client → 运行数据库迁移 → 初始化种子数据。
+这条命令会依次执行：安装依赖 → 生成 Prisma client → 运行数据库迁移。数据库此时为空。
 
-This runs: install dependencies → generate Prisma client → run migrations → seed initial data.
+This runs: install dependencies → generate Prisma client → run migrations. The database starts empty.
 
 ### 4. 启动应用 / Start the app
 
@@ -58,7 +60,41 @@ pnpm dev
 - 前端 / Frontend: http://localhost:3000
 - API: http://localhost:3001
 
-### 5. 加载演示数据（可选）/ Load demo data (optional)
+### 5. 首次访问：Setup 向导 / First visit: Setup Wizard
+
+打开 http://localhost:3000 ，因为数据库为空，会自动跳转到 `/setup` 向导：
+
+1. 填入 DeepSeek API key 并测试连接
+2. 创建你的组织、管理员邮箱和密码
+
+向导完成后即可用刚创建的管理员账号登录，并开始接入你自己的数据。
+
+Open http://localhost:3000 — since the database is empty, you'll be redirected to the `/setup` wizard:
+
+1. Enter your DeepSeek API key and test the connection
+2. Create your organization, admin email, and password
+
+After the wizard completes, log in with the admin account you just created and start ingesting your own data.
+
+---
+
+## 想先看 Demo？/ Want to see a demo first?
+
+如果你只是想体验平台能力，而不是接入自己的数据，可以加载内置的电商演示租户：
+
+If you just want to explore the platform rather than ingest your own data, load the built-in e-commerce demo tenant:
+
+```bash
+pnpm setup:demo   # 等同于 pnpm setup，但额外加载 demo 租户 / same as pnpm setup, plus demo tenant
+pnpm dev
+```
+
+登录 / Login: `admin@demo.com` / `admin123`
+
+> Demo 租户与 Setup 向导相互独立：加载了 demo 数据后，平台视为已初始化，向导不再显示。两条路二选一。
+> The demo tenant and the Setup Wizard are independent: once demo data is loaded, the platform is considered initialized and the wizard no longer appears. Pick one path.
+
+### 更多演示数据 / Additional demo datasets
 
 ```bash
 cd scripts
@@ -103,6 +139,7 @@ pnpm tsx demo-drama/demo-ingestion.ts # 驱动 Agent 完成对话式接入
 | [外部 Agent 集成](docs/integrations/ontocenter-skill/SKILL.md) | [Agent Integration](docs/adr/0021-mcp-server-external-agent-integration.md) |
 | [领域词汇表](CONTEXT.md) | [Domain Glossary](CONTEXT.md) |
 | [架构决策记录](docs/adr/) | [Architecture Decision Records](docs/adr/) |
+| [贡献指南](CONTRIBUTING.md) | [Contributing](CONTRIBUTING.md) |
 
 ---
 

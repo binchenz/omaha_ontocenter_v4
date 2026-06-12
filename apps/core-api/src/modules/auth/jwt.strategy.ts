@@ -3,14 +3,17 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '@omaha/db';
 import { JwtPayload, CurrentUser, RolePermission } from '@omaha/shared-types';
-import { JWT_SECRET, JWT_STRATEGY } from './auth.constants';
+import { JWT_STRATEGY } from './auth.constants';
+import { resolveJwtSecret } from './jwt-secret.resolver';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, JWT_STRATEGY) {
   constructor(private readonly prisma: PrismaService) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      secretOrKey: JWT_SECRET,
+      secretOrKeyProvider: (_req: unknown, _rawJwt: unknown, done: (err: unknown, secret: string) => void) => {
+        resolveJwtSecret(prisma).then((s) => done(null, s)).catch((e) => done(e, ''));
+      },
     });
   }
 

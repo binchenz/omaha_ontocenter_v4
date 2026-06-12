@@ -71,4 +71,4 @@ ENV NODE_ENV=production
 EXPOSE 3001
 
 WORKDIR /app/apps/core-api
-CMD ["node", "dist/main.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy --schema /app/packages/db/prisma/schema.prisma && node dist/main.js"]

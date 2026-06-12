@@ -5,7 +5,7 @@ function makeHarness() {
     connector: { create: jest.fn().mockResolvedValue({ id: 'c1', name: 'my-db' }) },
   };
   const fakeClient: any = {
-    encrypt: jest.fn((s: string) => `enc(${s})`),
+    encrypt: jest.fn(async (s: string) => `enc(${s})`),
     query: jest.fn(),
     getConnection: jest.fn(),
   };

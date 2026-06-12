@@ -96,6 +96,25 @@ export const api = {
 
   applyTemplate: (id: string) =>
     request<{ types: number; questionsAdded: number }>(`/ontology/templates/${id}/apply`, { method: 'POST' }),
+
+  // --- Setup (ADR-0049) ---
+  setupStatus: () => request<{ initialized: boolean; slug?: string }>('/setup/status'),
+
+  setupTestLlm: (apiKey: string) =>
+    request<{ ok: boolean; error?: string }>('/setup/test-llm', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+
+  setupInitialize: (body: { tenantName: string; adminEmail: string; adminPassword: string; apiKey: string }) =>
+    request<void>('/setup/initialize', { method: 'POST', body: JSON.stringify(body) }),
+
+  // --- User management (ADR-0049) ---
+  listUsers: () => request<UserRecord[]>('/users'),
+
+  createUser: (body: { name: string; email: string; password: string; roleId: string }) =>
+    request<UserRecord>('/users', { method: 'POST', body: JSON.stringify(body) }),
+
+  deleteUser: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
+
+  listRoles: () => request<RoleRecord[]>('/permissions/roles'),
 };
 
 // Types
@@ -124,6 +143,7 @@ export interface ObjectType {
   id: string;
   name: string;
   label: string;
+  description?: string;
   properties: PropertyDefinition[];
   derivedProperties: DerivedPropertyDefinition[];
   version: number;
@@ -301,4 +321,18 @@ export interface TemplateSummary {
   typeCount: number;
   questionCount: number;
   createdAt: string;
+}
+
+export interface UserRecord {
+  id: string;
+  name: string;
+  email: string;
+  roleId: string;
+  roleName: string;
+}
+
+export interface RoleRecord {
+  id: string;
+  name: string;
+  permissions: string[];
 }

@@ -15,8 +15,10 @@ import { DatasetModule } from './modules/dataset/dataset.module';
 import { PipelineModule } from './modules/pipeline/pipeline.module';
 import { HealthModule } from './modules/health/health.module';
 import { ActionModule } from './modules/action/action.module';
+import { SetupModule } from './modules/setup/setup.module';
+import { UsersModule } from './modules/users/users.module';
 
 @Module({
-  imports: [PrismaModule, LoggerModule, AuthModule, TenantModule, OntologyModule, ConnectorModule, MappingModule, PermissionModule, QueryModule, AgentModule, SdkModule, ApplyModule, DatasetModule, PipelineModule, HealthModule, ActionModule],
+  imports: [PrismaModule, LoggerModule, AuthModule, TenantModule, OntologyModule, ConnectorModule, MappingModule, PermissionModule, QueryModule, AgentModule, SdkModule, ApplyModule, DatasetModule, PipelineModule, HealthModule, ActionModule, SetupModule, UsersModule],
 })
 export class AppModule {}

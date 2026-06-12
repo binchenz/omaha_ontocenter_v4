@@ -5,6 +5,9 @@ describe('ConnectorClient', () => {
     connector: {
       findFirst: jest.fn(),
     },
+    systemSetting: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
   };
 
   let client: ConnectorClient;
@@ -15,17 +18,17 @@ describe('ConnectorClient', () => {
   });
 
   describe('encrypt/decrypt round-trip', () => {
-    it('decrypts what was encrypted', () => {
+    it('decrypts what was encrypted', async () => {
       const original = 'my-secret-password-123!@#';
-      const encrypted = client.encrypt(original);
-      const decrypted = client.decrypt(encrypted);
+      const encrypted = await client.encrypt(original);
+      const decrypted = await client.decrypt(encrypted);
       expect(decrypted).toBe(original);
     });
 
-    it('produces different ciphertext each time (random IV)', () => {
+    it('produces different ciphertext each time (random IV)', async () => {
       const text = 'same-password';
-      const a = client.encrypt(text);
-      const b = client.encrypt(text);
+      const a = await client.encrypt(text);
+      const b = await client.encrypt(text);
       expect(a).not.toBe(b);
     });
   });
@@ -38,7 +41,7 @@ describe('ConnectorClient', () => {
     });
 
     it('returns connector config with decrypted password', async () => {
-      const encrypted = client.encrypt('secret');
+      const encrypted = await client.encrypt('secret');
       mockPrisma.connector.findFirst.mockResolvedValue({
         id: 'conn-1',
         type: 'postgresql',
