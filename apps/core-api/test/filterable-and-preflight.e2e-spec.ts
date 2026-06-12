@@ -1,30 +1,17 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { PrismaClient } from '@omaha/db';
-import { createTestApp, loginAsAdmin } from './test-helpers';
+import { createTestApp, ensureTestTenant, cleanupTestTenant, loginAsTestTenantAdmin } from './test-helpers';
 
 describe('Filterable enforcement + derived-property preflight (e2e)', () => {
   let app: INestApplication;
   let token: string;
-  let prisma: PrismaClient;
-  let tenantId: string;
   let objectTypeId: string;
 
   beforeAll(async () => {
     app = await createTestApp();
-    token = await loginAsAdmin(app);
-    prisma = new PrismaClient();
-
-    const me = await request(app.getHttpServer())
-      .get('/auth/me')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    tenantId = me.body.tenantId;
-
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM object_types WHERE tenant_id = $1::uuid AND name = 'flag_probe_widget'`,
-      tenantId,
-    );
+    await ensureTestTenant(app);
+    await cleanupTestTenant(app); // clear any leftovers from a crashed prior run before seeding
+    token = await loginAsTestTenantAdmin(app);
 
     const ot = await request(app.getHttpServer())
       .post('/ontology/types')
@@ -42,12 +29,7 @@ describe('Filterable enforcement + derived-property preflight (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (objectTypeId) {
-      await request(app.getHttpServer())
-        .delete(`/ontology/types/${objectTypeId}`)
-        .set('Authorization', `Bearer ${token}`);
-    }
-    await prisma.$disconnect();
+    await cleanupTestTenant(app);
     await app.close();
   });
 

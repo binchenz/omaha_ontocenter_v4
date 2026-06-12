@@ -1,7 +1,13 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { PrismaClient } from '@omaha/db';
-import { createTestApp } from './test-helpers';
+import {
+  createTestApp,
+  ensureTestTenant,
+  cleanupTestTenant,
+  loginAsTestTenantAdmin,
+  TEST_TENANT_SLUG,
+} from './test-helpers';
 import { ViewManagerService } from '../src/modules/ontology/view-manager.service';
 
 describe('Permission DSL + audit (e2e)', () => {
@@ -19,13 +25,12 @@ describe('Permission DSL + audit (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
+    await ensureTestTenant(app);
+    await cleanupTestTenant(app);
     prisma = new PrismaClient();
     viewManager = app.get(ViewManagerService);
 
-    const adminLogin = await request(app.getHttpServer())
-      .post('/auth/login')
-      .send({ email: 'admin@demo.com', password: 'admin123', tenantSlug: 'demo' });
-    adminToken = adminLogin.body.accessToken;
+    adminToken = await loginAsTestTenantAdmin(app);
 
     const me = await request(app.getHttpServer())
       .get('/auth/me')
@@ -35,18 +40,11 @@ describe('Permission DSL + audit (e2e)', () => {
     adminUserId = me.body.id;
 
     await prisma.$executeRawUnsafe(
-      `DELETE FROM object_instances WHERE tenant_id = $1::uuid AND object_type = 'perm_probe_order'`,
+      `DELETE FROM users WHERE email = 'sales-perm@tenant-test.local'`,
+    );
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM roles WHERE name = 'sales-perm' AND tenant_id = $1::uuid`,
       tenantId,
-    );
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM object_types WHERE tenant_id = $1::uuid AND name = 'perm_probe_order'`,
-      tenantId,
-    );
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM users WHERE email = 'sales-perm@demo.com'`,
-    );
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM roles WHERE name = 'sales-perm'`,
     );
 
     const salesRole = await prisma.role.create({
@@ -68,7 +66,7 @@ describe('Permission DSL + audit (e2e)', () => {
     const sales = await prisma.user.create({
       data: {
         tenantId,
-        email: 'sales-perm@demo.com',
+        email: 'sales-perm@tenant-test.local',
         name: 'Sales Person',
         passwordHash: hash,
         roleId: salesRoleId,
@@ -78,7 +76,7 @@ describe('Permission DSL + audit (e2e)', () => {
 
     const salesLogin = await request(app.getHttpServer())
       .post('/auth/login')
-      .send({ email: 'sales-perm@demo.com', password: 'secret123', tenantSlug: 'demo' });
+      .send({ email: 'sales-perm@tenant-test.local', password: 'secret123', tenantSlug: TEST_TENANT_SLUG });
     salesToken = salesLogin.body.accessToken;
 
     orderTypeId = (
@@ -120,14 +118,8 @@ describe('Permission DSL + audit (e2e)', () => {
   });
 
   afterAll(async () => {
-    for (const id of seededIds) {
-      await prisma.$executeRawUnsafe(`DELETE FROM object_instances WHERE id = $1::uuid`, id);
-    }
-    if (orderTypeId) {
-      await request(app.getHttpServer())
-        .delete(`/ontology/types/${orderTypeId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
-    }
+    // cleanupTestTenant clears types/instances/relationships; users/roles/audit_logs
+    // are not covered by it, so delete the self-created scoped actor explicitly.
     if (salesUserId) {
       await prisma.$executeRawUnsafe(`DELETE FROM audit_logs WHERE actor_id = $1::uuid`, salesUserId);
       await prisma.$executeRawUnsafe(`DELETE FROM users WHERE id = $1::uuid`, salesUserId);
@@ -135,6 +127,7 @@ describe('Permission DSL + audit (e2e)', () => {
     if (salesRoleId) {
       await prisma.$executeRawUnsafe(`DELETE FROM roles WHERE id = $1::uuid`, salesRoleId);
     }
+    await cleanupTestTenant(app);
     await prisma.$disconnect();
     await app.close();
   });

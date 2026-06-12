@@ -1,12 +1,15 @@
 import { INestApplication, ForbiddenException } from '@nestjs/common';
 import request from 'supertest';
-import { PrismaService } from '@omaha/db';
 import { OntologySdk } from '../src/modules/ontology/ontology.sdk';
-import { CurrentUser } from '@omaha/shared-types';
 import {
   createTestApp,
-  loginAsAdmin,
-  loginAsOperator,
+  ensureTestTenant,
+  cleanupTestTenant,
+  loginAsTestTenantAdmin,
+  loginAsTestTenantOperator,
+  getTestTenantActor,
+  TEST_TENANT_ADMIN_EMAIL,
+  TEST_TENANT_OPERATOR_EMAIL,
 } from './test-helpers';
 
 /**
@@ -15,6 +18,10 @@ import {
  * points: the HTTP controller and the Agent tool path. A query-only operator
  * (permissions = object.read/query + action.preview) must be denied; an admin (`*`)
  * must succeed. The Agent must not be a bypass around the gate.
+ *
+ * Runs against the throwaway `tenant_test` (ADR-0050 namespace rule: probes never
+ * touch a real tenant's read path). cleanupTestTenant() removes any types the admin
+ * paths create, so nothing leaks across runs.
  */
 describe('Write authorization at the single TCB (#89, e2e)', () => {
   let app: INestApplication;
@@ -23,11 +30,13 @@ describe('Write authorization at the single TCB (#89, e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    adminToken = await loginAsAdmin(app);
-    operatorToken = await loginAsOperator(app);
+    await ensureTestTenant(app);
+    adminToken = await loginAsTestTenantAdmin(app);
+    operatorToken = await loginAsTestTenantOperator(app);
   });
 
   afterAll(async () => {
+    await cleanupTestTenant(app);
     await app.close();
   });
 
@@ -59,42 +68,22 @@ describe('Write authorization at the single TCB (#89, e2e)', () => {
 
   describe('Agent tool path (OntologySdk — the Agent must not be a bypass)', () => {
     let sdk: OntologySdk;
-    let prisma: PrismaService;
-
-    const actorFor = async (email: string): Promise<CurrentUser> => {
-      const u = await prisma.user.findFirst({
-        where: { email },
-        include: { role: true },
-      });
-      const perms = (u!.role.permissions as unknown as string[]) ?? [];
-      return {
-        id: u!.id,
-        email: u!.email,
-        name: u!.name,
-        tenantId: u!.tenantId,
-        roleId: u!.roleId,
-        roleName: u!.role.name,
-        permissions: perms,
-        permissionRules: perms.map((p) => ({ permission: p })),
-      };
-    };
 
     beforeAll(async () => {
       // OntologySdk injects only OntologyService / TypeResolver / Prisma (no request-scoped
       // PermissionResolver), so it is a plain singleton; resolve() remains safe either way.
       sdk = await app.resolve(OntologySdk);
-      prisma = app.get(PrismaService);
     });
 
     it('denies a query-only operator from creating an Object Type via the SDK', async () => {
-      const operator = await actorFor('ops@demo.com');
+      const operator = await getTestTenantActor(app, TEST_TENANT_OPERATOR_EMAIL);
       await expect(
         sdk.createObjectType(operator, newType()),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('allows an admin to create an Object Type via the SDK', async () => {
-      const admin = await actorFor('admin@demo.com');
+      const admin = await getTestTenantActor(app, TEST_TENANT_ADMIN_EMAIL);
       await expect(sdk.createObjectType(admin, newType())).resolves.toBeDefined();
     });
   });
