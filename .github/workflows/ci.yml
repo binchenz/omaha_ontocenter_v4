@@ -82,3 +82,90 @@ jobs:
           tags: opc-web:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  smoke-test:
+    name: Smoke test (Docker Compose stack)
+    runs-on: ubuntu-latest
+    # Runs after docker-build to ensure images compile before spinning up the stack.
+    # If an e2e job is added later, add it to this needs list.
+    needs: [docker-build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env for Docker Compose
+        working-directory: deploy
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_PASSWORD=ci-test-password
+          JWT_SECRET=ci-test-jwt-secret-for-smoke-test
+          CONNECTOR_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
+          LLM_PROVIDER=deepseek
+          DEEPSEEK_API_KEY=sk-fake-ci-key-not-real
+          NEXT_PUBLIC_API_URL=http://localhost:3001
+          EOF
+
+      - name: Build and start Docker Compose stack
+        working-directory: deploy
+        run: docker compose up -d --build
+
+      - name: Wait for API health check
+        # Poll GET /health until it returns HTTP 200, timeout after 60 seconds.
+        run: |
+          echo "Waiting for API to become healthy..."
+          timeout=60
+          elapsed=0
+          until curl -sf http://localhost:3001/health > /dev/null 2>&1; do
+            if [ "$elapsed" -ge "$timeout" ]; then
+              echo "ERROR: API did not become healthy within ${timeout}s"
+              docker compose -f deploy/docker-compose.yml logs api
+              exit 1
+            fi
+            sleep 2
+            elapsed=$((elapsed + 2))
+          done
+          echo "API is healthy (took ~${elapsed}s)"
+
+      - name: Initialize via setup API
+        # CAVEAT: The DEEPSEEK_API_KEY in the stack is fake, so any later
+        # LLM-dependent operation (chat, the separate POST /setup/test-llm probe)
+        # would fail against the real DeepSeek endpoint. That is fine here:
+        # POST /setup/initialize does NOT call the LLM. It only validates inputs
+        # (tenantName, adminEmail, adminPassword>=6 chars, apiKey) and persists the
+        # tenant, roles, admin user, and settings — so it returns 201 cleanly even
+        # with a mock key. A re-run against an already-initialized stack returns 409.
+        # -w writes the HTTP status on its own trailing line; we do NOT use -f here
+        # so a 409 body is still captured rather than turning into a curl error.
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST http://localhost:3001/setup/initialize \
+            -H "Content-Type: application/json" \
+            -d '{
+              "tenantName": "Demo",
+              "adminEmail": "test@example.com",
+              "adminPassword": "test123",
+              "apiKey": "mock-key-for-ci"
+            }')
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | sed '$d')
+          echo "HTTP $http_code"
+          echo "$body"
+          # 201 = freshly initialized, 409 = already initialized (idempotent re-run).
+          if [ "$http_code" -ne 201 ] && [ "$http_code" -ne 409 ]; then
+            echo "ERROR: Expected 201 or 409, got $http_code"
+            exit 1
+          fi
+
+      - name: Assert system is initialized
+        run: |
+          response=$(curl -sf http://localhost:3001/setup/status)
+          echo "Setup status: $response"
+          if echo "$response" | grep -q '"initialized":true'; then
+            echo "PASS: System reports initialized:true"
+          else
+            echo "ERROR: Expected initialized:true, got: $response"
+            exit 1
+          fi
+
+      - name: Cleanup
+        if: always()
+        working-directory: deploy
+        run: docker compose down -v

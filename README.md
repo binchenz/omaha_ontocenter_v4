@@ -78,23 +78,51 @@ After the wizard completes, log in with the admin account you just created and s
 
 ---
 
-## 想先看 Demo？/ Want to see a demo first?
+## 快速体验 / Quick Demo
 
-如果你只是想体验平台能力，而不是接入自己的数据，可以加载内置的电商演示租户：
+Setup 向导完成后数据库是空的。运行 seed 脚本创建 5 个 Product + 10 个 Order，立刻可以体验自然语言查询：
 
-If you just want to explore the platform rather than ingest your own data, load the built-in e-commerce demo tenant:
+After the Setup Wizard, the database is empty. Run the seed script to create 5 Products + 10 Orders so you can try natural-language queries immediately:
 
 ```bash
-pnpm setup:demo   # 等同于 pnpm setup，但额外加载 demo 租户 / same as pnpm setup, plus demo tenant
-pnpm dev
+pnpm seed:demo
 ```
 
-登录 / Login: `admin@demo.com` / `admin123`
+试试这些查询 / Example queries to try:
 
-> Demo 租户与 Setup 向导相互独立：加载了 demo 数据后，平台视为已初始化，向导不再显示。两条路二选一。
-> The demo tenant and the Setup Wizard are independent: once demo data is loaded, the platform is considered initialized and the wizard no longer appears. Pick one path.
+- "哪个产品卖得最好" / "Which product sells best"
+- "上周的订单总额" / "Last week's order total"
+- "最贵的产品是什么" / "What's the most expensive product"
+- "每个产品的订单数量" / "Order count per product"
 
-### 更多演示数据 / Additional demo datasets
+---
+
+## 接入你自己的数据 / Connect Your Data
+
+平台支持多种数据源接入方式。基本流程：上传文件 → 自动推断 Schema → 确认字段映射 → 同步数据。目前支持的 Connector 类型：CSV、Excel、PostgreSQL、MySQL。
+
+The platform supports multiple data source types. The basic workflow: upload a file → auto-infer schema → confirm field mappings → sync. Supported Connector types: CSV, Excel, PostgreSQL, MySQL.
+
+**步骤 / Steps:**
+
+1. 进入对话界面，告诉 Agent"我想导入数据"并上传 CSV/Excel 文件。
+   Open the chat, tell the Agent "I want to import data" and upload a CSV/Excel file.
+
+2. Agent 自动推断字段类型和本体映射建议，你可以逐一确认或修改。
+   The Agent auto-infers column types and suggests ontology mappings — review and adjust as needed.
+
+3. 确认映射后 Agent 执行同步，数据即刻可用于自然语言查询。
+   After you confirm, the Agent syncs the data — it's immediately queryable via natural language.
+
+> 也可以通过 Connector 配置直接连接 PostgreSQL/MySQL 数据库，Agent 会引导你完成全部步骤。
+> You can also connect directly to a PostgreSQL/MySQL database via the Connector config — the Agent guides you through the entire flow.
+
+---
+
+## 更多演示数据 / Additional Demo Datasets
+
+<details>
+<summary>电商大数据集（200 产品 / 20,000 订单）/ Large e-commerce dataset</summary>
 
 ```bash
 cd scripts
@@ -105,25 +133,30 @@ pnpm tsx demo-ecommerce/seed-signal.ts
 
 登录 / Login: `admin@demo-ecommerce.local` / `demo2026`
 
-#### 短剧拉片分析 / Short Drama Shot Analysis
+</details>
 
-**路径①：确定性 e2e 基线**（固定 schema，供 `drama-query.e2e-spec.ts` 使用）
+<details>
+<summary>短剧拉片分析 / Short Drama Shot Analysis</summary>
+
+**路径①：确定性 e2e 基线**
 
 ```bash
 cd scripts
-pnpm tsx demo-drama/setup.ts   # 建租户 + 本体
-pnpm tsx demo-drama/seed.ts    # 从 HTTP 源灌数据
+pnpm tsx demo-drama/setup.ts
+pnpm tsx demo-drama/seed.ts
 ```
 
-**路径②：对话式接入 demo**（Agent 自动推断 schema 含语义标注，需 `pnpm dev` 运行中）
+**路径②：对话式接入 demo**（需 `pnpm dev` 运行中）
 
 ```bash
 cd scripts
-pnpm tsx demo-drama/stage-to-pg.ts    # HTTP 源 → 本地 PG 临时表
-pnpm tsx demo-drama/demo-ingestion.ts # 驱动 Agent 完成对话式接入
+pnpm tsx demo-drama/stage-to-pg.ts
+pnpm tsx demo-drama/demo-ingestion.ts
 ```
 
 登录 / Login: `admin@demo-drama.local` / `demo2026`
+
+</details>
 
 ---
 
