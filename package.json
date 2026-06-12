@@ -11,6 +11,7 @@
     "db:migrate:deploy": "pnpm --filter @omaha/db run migrate:deploy",
     "db:push": "pnpm --filter @omaha/db run push",
     "db:seed": "pnpm --filter @omaha/db run seed",
+    "seed:demo": "pnpm --filter @omaha/scripts exec tsx seed-demo.ts",
     "setup": "pnpm install && pnpm db:generate && pnpm db:migrate",
     "setup:demo": "pnpm setup && pnpm db:seed"
   },
