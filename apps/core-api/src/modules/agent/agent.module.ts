@@ -7,6 +7,9 @@ import { ResearchModule } from '../research/research.module';
 import { ConnectorSdkModule } from './connector/connector-sdk.module';
 import { AgentSdkModule } from './sdk/agent-sdk.module';
 import { ActionModule } from '../action/action.module';
+import { DataImportModule } from '../data-import/data-import.module';
+import { TransformConfigModule } from '../transform-config/transform-config.module';
+import { PipelineModule } from '../pipeline/pipeline.module';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { AgentController } from './agent.controller';
 import { FileController } from './file.controller';
@@ -29,8 +32,7 @@ import { DeleteRelationshipTool } from './tools/delete-relationship.tool';
 import { ExtractAvcReportTool } from './tools/extract-avc-report.tool';
 import { IngestDocumentTool } from './tools/ingest-document.tool';
 import { SemanticSearchTool } from './tools/semantic-search.tool';
-import { CreateActionTool } from '../action/tools/create-action.tool';
-import { ExecuteActionTool } from '../action/tools/execute-action.tool';
+import { ReadFilePreviewTool } from './tools/read-file-preview.tool';
 import { LLM_CLIENT, LlmClient } from './llm/llm-client.interface';
 import { DeepSeekLlmClient } from './llm/deepseek-llm-client';
 import { ResilientLlmClient } from './llm/resilient-llm-client';
@@ -40,21 +42,36 @@ import { QuerySkill } from './skills/query.skill';
 import { DataIngestionSkill } from './skills/data-ingestion.skill';
 import { OntologyDesignSkill } from './skills/ontology-design.skill';
 import { ResearchQaSkill } from './skills/research-qa.skill';
+import { DataImportSkill } from './skills/data-import.skill';
+import { DataPipelineSkill } from './skills/data-pipeline.skill';
 import { AgentBootstrap } from './agent.bootstrap';
 import { PlanSummarizer } from './plan-summarizer.service';
 import { EvalsService } from './evals.service';
 import { EvalsController } from './evals.controller';
-import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
+import { ToolRegistryModule } from '../tool-registry/tool-registry.module';
+import { AGENT_TOOLS, AGENT_SKILLS } from '../tool-registry/tool-registry.tokens';
+
+const AGENT_OWN_TOOLS = [
+  QueryObjectsTool, AggregateObjectsTool, GetOntologySchemaTool, ParseFileTool,
+  CreateObjectTypeTool, UpdateObjectTypeTool, DeleteObjectTypeTool,
+  ImportDataTool, TestDbConnectionTool, CreateConnectorTool,
+  ListDbTablesTool, PreviewDbTableTool, CreateRelationshipTool, DeleteRelationshipTool,
+  ExtractAvcReportTool, IngestDocumentTool, SemanticSearchTool, ReadFilePreviewTool,
+] as const;
 
 @Module({
   imports: [
+    ToolRegistryModule,
     QueryModule,
     OntologySdkModule,
     ResearchModule,
     ConnectorSdkModule,
     AgentSdkModule,
     ConversationModule,
-    ActionModule,
+    ActionModule,      // marks AGENT_TOOLS (CreateActionTool, ExecuteActionTool)
+    DataImportModule,  // marks AGENT_TOOLS (PreviewImportFileTool, ExecuteImportTool)
+    TransformConfigModule, // marks AGENT_TOOLS (CreateTransformConfigTool, ListTransformConfigsTool)
+    PipelineModule,    // marks AGENT_TOOLS (ConfigurePipelineTool)
     MulterModule.register({ dest: './uploads' }),
   ],
   controllers: [AgentController, FileController, EvalsController],
@@ -62,38 +79,11 @@ import { AGENT_TOOLS, AGENT_SKILLS } from './agent.tokens';
     { provide: LLM_CLIENT, useFactory: () => new ResilientLlmClient(new DeepSeekLlmClient()) },
     ConfirmationGate,
     SseAgentRunner,
-    QueryObjectsTool,
-    AggregateObjectsTool,
-    GetOntologySchemaTool,
-    ParseFileTool,
-    CreateObjectTypeTool,
-    UpdateObjectTypeTool,
-    DeleteObjectTypeTool,
-    ImportDataTool,
-    TestDbConnectionTool,
-    CreateConnectorTool,
-    ListDbTablesTool,
-    PreviewDbTableTool,
-    CreateRelationshipTool,
-    DeleteRelationshipTool,
-    ExtractAvcReportTool,
-    IngestDocumentTool,
-    SemanticSearchTool,
-    {
-      provide: AGENT_TOOLS,
-      useFactory: (...tools: AgentTool[]): AgentTool[] => tools,
-      inject: [
-        QueryObjectsTool, AggregateObjectsTool, GetOntologySchemaTool, ParseFileTool,
-        CreateObjectTypeTool, UpdateObjectTypeTool, DeleteObjectTypeTool,
-        ImportDataTool, TestDbConnectionTool, CreateConnectorTool,
-        ListDbTablesTool, PreviewDbTableTool, CreateRelationshipTool, DeleteRelationshipTool,
-        ExtractAvcReportTool, IngestDocumentTool, SemanticSearchTool,
-        CreateActionTool, ExecuteActionTool,
-      ],
-    },
+    ...AGENT_OWN_TOOLS,
+    ...ToolRegistryModule.providers(...AGENT_OWN_TOOLS),
     {
       provide: AGENT_SKILLS,
-      useFactory: (): AgentSkill[] => [new QuerySkill(), new DataIngestionSkill(), new OntologyDesignSkill(), new ResearchQaSkill()],
+      useFactory: (): AgentSkill[] => [new QuerySkill(), new DataIngestionSkill(), new OntologyDesignSkill(), new ResearchQaSkill(), new DataImportSkill(), new DataPipelineSkill()],
     },
     {
       provide: OrchestratorService,

@@ -4,7 +4,7 @@ import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
 import { assertCapability } from '../../common/helpers/assert-capability';
 import { UPLOAD_DIR } from '../agent/sdk/import-engine.service';
 import { OntologySdk } from '../ontology/ontology.sdk';
-import { AvcTemplateExtractor } from './avc-template-extractor';
+import { AvcConnector } from './avc-connector';
 import { MarketMetricImporter } from './market-metric-importer.service';
 import { DocumentIngestionService, DocumentMetadata } from './document-ingestion.service';
 import { SemanticSearchService } from './semantic-search.service';
@@ -20,27 +20,50 @@ import { SemanticSearchService } from './semantic-search.service';
 export class ResearchSdk {
   constructor(
     private readonly ontologySdk: OntologySdk,
-    private readonly avcExtractor: AvcTemplateExtractor,
+    private readonly avcConnector: AvcConnector,
     private readonly marketMetricImporter: MarketMetricImporter,
     private readonly documentIngestion: DocumentIngestionService,
     private readonly semanticSearch: SemanticSearchService,
   ) {}
 
+  /**
+   * AVC ingest, post-cutover (#175, ADR-0055 Steps 3–5). The three data stars now flow through the
+   * generic Connector + Pipeline path: AvcConnector.fetch() parses the Excel and fans out three raw
+   * Datasets (one per star connector); markReady reactively enqueues each star's PipelineRun, which
+   * produces a clean Dataset that a SyncJob lands into object_instances. Coverage provenance is the
+   * one fact that does NOT flow through Datasets (ADR-0043 §2), so it is written directly here.
+   *
+   * The returned `imported`/`metrics`/... are RAW row counts now queued for async cleaning — not a
+   * synchronous instance count. The reactive chain finishes after this call returns.
+   */
   async extractAvcReport(actor: CurrentUserType, params: { fileId: string; category: string }) {
     assertCapability(actor, 'data', 'ingest');
     const filePath = path.join(UPLOAD_DIR, params.fileId);
-    const extraction = await this.avcExtractor.extractAll(filePath, params.category);
-    const result = await this.marketMetricImporter.importReport(actor.tenantId, extraction);
+
+    // 1. Fan the Excel out into three raw Datasets (reactively triggers the per-star pipelines).
+    const fetched = await this.avcConnector.fetch(actor.tenantId, { filePath, category: params.category });
+
+    // 2. Write the coverage provenance row directly (not Dataset data, ADR-0043 §2).
+    await this.marketMetricImporter.importReportCoverage(actor.tenantId, {
+      sourceReport: fetched.sourceReport,
+      category: fetched.category,
+      period: fetched.period,
+      coverage: fetched.coverage,
+    });
+
     // AVC ingest creates market_metric/brand_share/model_metric/avc_report on first run;
     // flush both the TypeResolver and schema-summary caches so the Agent sees them at once.
     this.ontologySdk.invalidate(actor.tenantId);
+
+    const byStar = Object.fromEntries(fetched.datasets.map((d) => [d.star, d.rowCount]));
     return {
-      objectType: result.objectType,
-      metrics: result.metrics,
-      brandShares: result.brandShares,
-      modelMetrics: result.modelMetrics,
-      coverage: extraction.coverage,
-      imported: result.metrics + result.brandShares + result.modelMetrics,
+      objectType: 'market_metric',
+      metrics: byStar['market_metric'] ?? 0,
+      brandShares: byStar['brand_share'] ?? 0,
+      modelMetrics: byStar['model_metric'] ?? 0,
+      coverage: fetched.coverage,
+      imported: fetched.datasets.reduce((sum, d) => sum + d.rowCount, 0),
+      datasets: fetched.datasets,
     };
   }
 

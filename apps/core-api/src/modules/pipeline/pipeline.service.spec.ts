@@ -1,12 +1,15 @@
 import { PipelineService } from './pipeline.service';
+import { makeTransformConfigServiceMock } from './transform-config.mock';
 
 const T = 'tenant-1';
 
-function make(seed: { pipelines?: any[]; steps?: any[] } = {}) {
+function make(seed: { pipelines?: any[]; steps?: any[]; configs?: any[] } = {}) {
   const pipelines: any[] = seed.pipelines ?? [];
   const steps: any[] = seed.steps ?? [];
+  const configs: any[] = seed.configs ?? [];
   let seq = 0;
   const prisma: any = {
+    $transaction: jest.fn(async (fn: any) => fn(prisma)),
     pipeline: {
       findMany: jest.fn(async ({ where }: any) => pipelines.filter((p) => p.tenantId === where.tenantId)),
       findFirst: jest.fn(async ({ where }: any) =>
@@ -47,7 +50,16 @@ function make(seed: { pipelines?: any[]; steps?: any[] } = {}) {
       }),
     },
   };
-  return { svc: new PipelineService(prisma), pipelines, steps, prisma };
+  // TransformConfigService mock: get() resolves latest version when version omitted (ADR-0054).
+  const { service: transformConfigService, getCalls } = makeTransformConfigServiceMock(configs);
+  return {
+    svc: new PipelineService(prisma, transformConfigService),
+    pipelines,
+    steps,
+    prisma,
+    transformConfigService,
+    getCalls,
+  };
 }
 
 describe('PipelineService', () => {
@@ -78,10 +90,18 @@ describe('PipelineService', () => {
 
   it('adds a step to a pipeline', async () => {
     const { svc, steps } = make({ pipelines: [{ id: 'p1', tenantId: T }] });
-    const s = await svc.addStep(T, 'p1', { order: 1, type: 'filter', config: { column: 'status', value: 'active' } });
+    const s = await svc.addStep(T, 'p1', { order: 1, type: 'filter', config: { field: 'status', operator: 'eq', value: 'active' } });
     expect(s.pipelineId).toBe('p1');
     expect(s.type).toBe('filter');
     expect(steps).toHaveLength(1);
+  });
+
+  it('rejects a step whose config fails its type schema (ADR-0053)', async () => {
+    const { svc, steps } = make({ pipelines: [{ id: 'p1', tenantId: T }] });
+    await expect(
+      svc.addStep(T, 'p1', { order: 1, type: 'filter', config: { field: 'x', operator: 'regex', value: 'y' } }),
+    ).rejects.toThrow('Invalid');
+    expect(steps).toHaveLength(0);
   });
 
   it('lists steps ordered by order', async () => {
@@ -100,5 +120,82 @@ describe('PipelineService', () => {
   it('enforces tenant isolation', async () => {
     const { svc } = make({ pipelines: [{ id: 'p1', tenantId: 'other' }] });
     await expect(svc.getPipeline(T, 'p1')).rejects.toThrow('not found');
+  });
+
+  describe('configurePipeline (#172, atomic create + configRef pinning)', () => {
+    const baseDto = () => ({
+      name: 'clean-avc',
+      connectorId: 'c1',
+      outputObjectTypeId: 'ot1',
+      steps: [
+        { order: 1, type: 'filter', config: { field: 'status', operator: 'eq', value: 'active' } },
+        { order: 2, type: 'rename', config: { mappings: { brand: 'brand_raw' } } },
+      ],
+    });
+
+    it('creates Pipeline + ordered Steps atomically in one call', async () => {
+      const { svc, pipelines, steps } = make();
+      const res = await svc.configurePipeline(T, baseDto());
+      expect(res.pipelineId).toBeDefined();
+      expect(pipelines).toHaveLength(1);
+      expect(steps).toHaveLength(2);
+      expect(steps.map((s) => s.order)).toEqual([1, 2]);
+    });
+
+    it('aborts the whole call when any step config is invalid — nothing persisted', async () => {
+      const { svc, pipelines, steps } = make();
+      const dto = baseDto();
+      (dto.steps[1].config as any) = { mappings: 'not-an-object' };
+      await expect(svc.configurePipeline(T, dto)).rejects.toThrow('Invalid');
+      expect(pipelines).toHaveLength(0);
+      expect(steps).toHaveLength(0);
+    });
+
+    it('pins a compute step configRef to the current latest version when no version given', async () => {
+      const { svc, steps, getCalls } = make({
+        configs: [
+          { tenantId: T, name: 'brands', type: 'brand_mapping', version: 1, config: { mappings: {} } },
+          { tenantId: T, name: 'brands', type: 'brand_mapping', version: 3, config: { mappings: {} } },
+        ],
+      });
+      const dto = baseDto();
+      dto.steps.push({
+        order: 3,
+        type: 'compute',
+        config: { function: 'normalize_brand', inputField: 'brand_raw', outputField: 'brand', configRef: 'brands' },
+      } as any);
+      await svc.configurePipeline(T, dto);
+      const computeStep = steps.find((s) => s.type === 'compute')!;
+      expect((computeStep.config as any).configVersion).toBe(3);
+      expect(getCalls).toContainEqual([T, 'brands', undefined]);
+    });
+
+    it('preserves an explicit compute configVersion (no re-pin)', async () => {
+      const { svc, steps, transformConfigService } = make({
+        configs: [{ tenantId: T, name: 'brands', type: 'brand_mapping', version: 9, config: { mappings: {} } }],
+      });
+      const dto = baseDto();
+      dto.steps.push({
+        order: 3,
+        type: 'compute',
+        config: { function: 'normalize_brand', inputField: 'brand_raw', outputField: 'brand', configRef: 'brands', configVersion: 2 },
+      } as any);
+      await svc.configurePipeline(T, dto);
+      const computeStep = steps.find((s) => s.type === 'compute')!;
+      expect((computeStep.config as any).configVersion).toBe(2);
+      expect(transformConfigService.get).not.toHaveBeenCalled();
+    });
+
+    it('autoActivate=false creates the Pipeline in draft', async () => {
+      const { svc } = make();
+      const res = await svc.configurePipeline(T, { ...baseDto(), autoActivate: false });
+      expect(res.status).toBe('draft');
+    });
+
+    it('autoActivate=true creates the Pipeline active', async () => {
+      const { svc } = make();
+      const res = await svc.configurePipeline(T, { ...baseDto(), autoActivate: true });
+      expect(res.status).toBe('active');
+    });
   });
 });

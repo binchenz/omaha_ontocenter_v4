@@ -17,8 +17,11 @@ import { HealthModule } from './modules/health/health.module';
 import { ActionModule } from './modules/action/action.module';
 import { SetupModule } from './modules/setup/setup.module';
 import { UsersModule } from './modules/users/users.module';
+import { PendingActionModule } from './modules/pending-action/pending-action.module';
+import { TransformConfigModule } from './modules/transform-config/transform-config.module';
+import { ToolRegistryModule } from './modules/tool-registry/tool-registry.module';
 
 @Module({
-  imports: [PrismaModule, LoggerModule, AuthModule, TenantModule, OntologyModule, ConnectorModule, MappingModule, PermissionModule, QueryModule, AgentModule, SdkModule, ApplyModule, DatasetModule, PipelineModule, HealthModule, ActionModule, SetupModule, UsersModule],
+  imports: [ToolRegistryModule, PrismaModule, LoggerModule, AuthModule, TenantModule, OntologyModule, ConnectorModule, MappingModule, PermissionModule, QueryModule, AgentModule, SdkModule, ApplyModule, DatasetModule, PipelineModule, HealthModule, ActionModule, SetupModule, UsersModule, PendingActionModule, TransformConfigModule],
 })
 export class AppModule {}

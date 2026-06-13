@@ -16,45 +16,13 @@
 import { INestApplication } from '@nestjs/common';
 import { PrismaClient } from '@omaha/db';
 import request from 'supertest';
-import { createTestApp, postSse, runWithRetry, SseEvent } from './test-helpers';
+import { createTestApp, postSse, runWithRetry, SseEvent, getArgs, toolCalls, textContent, toolResult } from './test-helpers';
 
 const TENANT_SLUG = 'demo';
 const ADMIN_EMAIL = 'admin@demo.com';
 const ADMIN_PASSWORD = 'admin123';
 
 jest.setTimeout(300_000);
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function toolCalls(events: SseEvent[], objectType?: string): SseEvent[] {
-  return events.filter(
-    (e) =>
-      e.type === 'tool_call' &&
-      (e.name === 'query_objects' || e.name === 'aggregate_objects') &&
-      (objectType === undefined || getArgs(e).objectType === objectType),
-  );
-}
-
-function getArgs(event: SseEvent): Record<string, unknown> {
-  if (typeof event.arguments === 'string') return JSON.parse(event.arguments as string);
-  if (typeof event.args === 'string') return JSON.parse(event.args as string);
-  return ((event.arguments ?? event.args ?? {}) as Record<string, unknown>);
-}
-
-function textContent(events: SseEvent[]): string {
-  return (events.find((e) => e.type === 'text') as any)?.content ?? '';
-}
-
-function toolResult(events: SseEvent[], objectType: string): unknown {
-  const call = toolCalls(events, objectType)[0] as any;
-  if (!call) return undefined;
-  const result = events.find(
-    (e) => e.type === 'tool_result' && (e as any).id === call.id,
-  ) as any;
-  return result?.data;
-}
 
 // ---------------------------------------------------------------------------
 // Suite

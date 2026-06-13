@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@omaha/db';
 import { OntologyService } from '../ontology/ontology.service';
-import { ImportEngine, ImportResult, InstanceUpsert } from '../agent/sdk/import-engine.service';
+import { ImportEngine, ImportResult } from '../agent/sdk/import-engine.service';
 import { MarketMetricRow, BrandShareRow, ModelMetricRow, AvcVariant } from './avc-template-extractor';
 import { DatasetService } from '../dataset/dataset.service';
 import { SyncJobService } from '../dataset/sync-job.service';
@@ -10,26 +10,6 @@ export const MARKET_METRIC_TYPE = 'market_metric';
 export const BRAND_SHARE_TYPE = 'brand_share';
 export const MODEL_METRIC_TYPE = 'model_metric';
 export const AVC_REPORT_TYPE = 'avc_report';
-
-// ── Row-to-instance mappers (single source of truth per star type) ─────────────
-
-const toMetricInstance = (r: MarketMetricRow): InstanceUpsert => ({
-  externalId: `${r.category}_${r.month}_${r.metric}`,
-  label: `${r.category} ${r.month} ${r.metric}`,
-  properties: { category: r.category, month: r.month, metric: r.metric, value: r.value, sourceReport: r.sourceReport },
-});
-
-const toBrandShareInstance = (r: BrandShareRow): InstanceUpsert => ({
-  externalId: `${r.category}_${r.brand}_${r.priceBand}_${r.period}`,
-  label: `${r.category} ${r.brand} ${r.priceBand}`,
-  properties: { category: r.category, brand: r.brand, priceBand: r.priceBand, period: r.period, metric: r.metric, value: r.value, sourceReport: r.sourceReport },
-});
-
-const toModelMetricInstance = (r: ModelMetricRow): InstanceUpsert => ({
-  externalId: `${r.category}_${r.model}_${r.month}`,
-  label: `${r.brand} ${r.model} ${r.month}`,
-  properties: { category: r.category, model: r.model, brand: r.brand, heating: r.heating, launchDate: r.launchDate, reservation: r.reservation, month: r.month, valueShare: r.valueShare, volumeShare: r.volumeShare, avgPrice: r.avgPrice, sourceReport: r.sourceReport },
-});
 
 /** The per-report provenance fact (ADR-0043 §2): coverage flips per report, so it is stamped here. */
 export interface AvcReportProvenance {
@@ -62,6 +42,8 @@ export interface AvcReportExtraction {
  */
 @Injectable()
 export class MarketMetricImporter {
+  private readonly logger = new Logger(MarketMetricImporter.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly ontologyService: OntologyService,
@@ -70,74 +52,34 @@ export class MarketMetricImporter {
     private readonly syncJobService: SyncJobService,
   ) {}
 
+  /**
+   * Post-cutover (#175, ADR-0055 Steps 3–5): the three data stars (market_metric / brand_share /
+   * model_metric) now flow through the generic Connector + Pipeline path — AvcConnector.fetch()
+   * emits three raw Datasets, the reactive chain produces the clean rows. The importer's surviving
+   * job is ONLY the coverage provenance row (ADR-0043 §2: provenance is metadata, not Dataset data).
+   *
+   * This method is kept as a thin coverage-only entry point for any historical caller that still
+   * passes a full extraction; it logs a deprecation warning and writes coverage alone. New callers
+   * should use `importReportCoverage` directly.
+   *
+   * @deprecated Use AvcConnector.fetch() for the data stars and importReportCoverage() for coverage.
+   */
   async importReport(
     tenantId: string,
     r: AvcReportExtraction,
   ): Promise<{ metrics: number; brandShares: number; modelMetrics: number; objectType: string }> {
-    const [metricResult, shareResult, modelResult] = await Promise.all([
-      this.importStar(tenantId, MARKET_METRIC_TYPE, MARKET_METRIC_DEF, 'avc_market_metric',
-        r.metrics.map(toMetricInstance)),
-      this.importStar(tenantId, BRAND_SHARE_TYPE, BRAND_SHARE_DEF, 'avc_brand_share',
-        r.brandShares.map(toBrandShareInstance)),
-      this.importStar(tenantId, MODEL_METRIC_TYPE, MODEL_METRIC_DEF, 'avc_model_metric',
-        r.modelMetrics.map(toModelMetricInstance)),
-      this.importReportCoverage(tenantId, { sourceReport: r.sourceReport, category: r.category, period: r.period, coverage: r.coverage }),
-    ]);
-    return { metrics: metricResult.imported, brandShares: shareResult.imported, modelMetrics: modelResult.imported, objectType: MARKET_METRIC_TYPE };
-  }
-
-  /**
-   * Import one star type: write a Dataset first, enqueue SyncJob if an ObjectMapping exists;
-   * otherwise fall back to direct ImportEngine call (no mapping configured yet).
-   */
-  private async importStar(
-    tenantId: string,
-    starType: string,
-    def: Parameters<OntologyService['createObjectType']>[1] & { name: string },
-    datasetName: string,
-    instances: InstanceUpsert[],
-  ): Promise<ImportResult> {
-    await this.ensureObjectType(tenantId, def);
-
-    const mapping = await this.prisma.objectMapping.findFirst({
-      where: { tenantId, objectType: { name: starType } },
+    this.logger.warn(
+      `importReport() is deprecated (ADR-0055): data stars now flow through AvcConnector + Pipeline. ` +
+        `Writing coverage provenance only for ${r.sourceReport}.`,
+    );
+    await this.importReportCoverage(tenantId, {
+      sourceReport: r.sourceReport,
+      category: r.category,
+      period: r.period,
+      coverage: r.coverage,
     });
-
-    if (!mapping) {
-      // Fallback: no mapping configured yet — write directly (legacy path)
-      return this.importEngine.importInstances(tenantId, starType, instances);
-    }
-
-    // Dataset path (ADR-0040 §1)
-    const rows: Record<string, unknown>[] = instances.map((inst) => ({
-      externalId: inst.externalId,
-      label: inst.label,
-      ...inst.properties,
-    }));
-    const dataset = await this.datasetService.createDataset(tenantId, {
-      name: datasetName,
-      connectorId: mapping.connectorId ?? 'avc',
-    });
-    await this.datasetService.appendRows(tenantId, dataset.id, rows);
-    await this.datasetService.markReady(tenantId, dataset.id);
-    await this.syncJobService.enqueue(tenantId, dataset.id, mapping.id);
-    return { imported: instances.length, skipped: 0, objectType: starType };
-  }
-
-  // Keep legacy per-type methods for callers that still use them directly
-  async import(tenantId: string, rows: MarketMetricRow[]): Promise<ImportResult> {
-    return this.importStar(tenantId, MARKET_METRIC_TYPE, MARKET_METRIC_DEF, 'avc_market_metric',
-      rows.map(toMetricInstance));
-  }
-
-  async importBrandShares(tenantId: string, rows: BrandShareRow[]): Promise<ImportResult> {
-    return this.importStar(tenantId, BRAND_SHARE_TYPE, BRAND_SHARE_DEF, 'avc_brand_share',
-      rows.map(toBrandShareInstance));
-  }
-
-  async importModels(tenantId: string, rows: ModelMetricRow[]): Promise<ImportResult> {
-    return this.importStar(tenantId, MODEL_METRIC_TYPE, MODEL_METRIC_DEF, 'avc_model_metric',
-      rows.map(toModelMetricInstance));
+    // The data-star counts are no longer produced here — the Pipeline path owns them.
+    return { metrics: 0, brandShares: 0, modelMetrics: 0, objectType: AVC_REPORT_TYPE };
   }
 
   /**
@@ -164,7 +106,7 @@ export class MarketMetricImporter {
   }
 }
 
-const MARKET_METRIC_DEF = {
+export const MARKET_METRIC_DEF = {
   name: MARKET_METRIC_TYPE,
   label: '市场指标',
   description: 'AVC 月度监测的市场规模指标（零售额/零售量/零售均价等），按品类与月份',
@@ -178,7 +120,7 @@ const MARKET_METRIC_DEF = {
   derivedProperties: [],
 };
 
-const MODEL_METRIC_DEF = {
+export const MODEL_METRIC_DEF = {
   name: MODEL_METRIC_TYPE,
   label: '机型指标',
   description: 'AVC TOP机型明细（2-7）：单 SKU 月度销额份额/销量份额/零售均价 + 上市日期，按品类、机型、月份',
@@ -198,7 +140,7 @@ const MODEL_METRIC_DEF = {
   derivedProperties: [],
 };
 
-const AVC_REPORT_DEF = {
+export const AVC_REPORT_DEF = {
   name: AVC_REPORT_TYPE,
   label: 'AVC报告',
   description: 'AVC 月度报告的来源凭证：记录每份报告的品类、周期与数据覆盖度（full=含机型层 / essence=仅品牌层）',
@@ -211,7 +153,7 @@ const AVC_REPORT_DEF = {
   derivedProperties: [],
 };
 
-const BRAND_SHARE_DEF = {
+export const BRAND_SHARE_DEF = {
   name: BRAND_SHARE_TYPE,
   label: '品牌份额',
   description: 'AVC 月度监测的分价格段品牌零售份额，按品类、品牌、价格段',

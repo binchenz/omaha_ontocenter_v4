@@ -4,8 +4,8 @@ import {
   BRAND_SHARE_TYPE,
   MODEL_METRIC_TYPE,
   AVC_REPORT_TYPE,
+  MODEL_METRIC_DEF,
 } from './market-metric-importer.service';
-import { ModelMetricRow } from './avc-template-extractor';
 
 // Capture what the importer asks the single write path to upsert, and which Object
 // Type defs it ensures. The importer is a thin mapper over ImportEngine.importInstances;
@@ -50,31 +50,12 @@ function makeHarness() {
   return { importer, upserts, createdDefs, existingTypes, fakeOntology };
 }
 
-describe('MarketMetricImporter — model_metric (sheet 2-7, ADR-0043)', () => {
-  let h: ReturnType<typeof makeHarness>;
-
-  const row = (over: Partial<ModelMetricRow> = {}): ModelMetricRow => ({
-    category: '电饭煲',
-    model: 'SF40HC782',
-    brand: '苏泊尔',
-    heating: 'IH加热',
-    launchDate: '23.10',
-    reservation: '有',
-    month: '26.04',
-    valueShare: 0.0200989687,
-    volumeShare: 0.0079030185,
-    avgPrice: 709.48,
-    sourceReport: 'dianfanbao-full.xlsx',
-    ...over,
-  });
-
-  beforeEach(() => { h = makeHarness(); });
-
-  it('creates the model_metric Object Type with numeric shares sortable and key dims filterable', async () => {
-    await h.importer.importModels('t1', [row()]);
-    const def = h.createdDefs.find((d) => d.name === MODEL_METRIC_TYPE);
-    expect(def).toBeDefined();
-    const byName = Object.fromEntries(def.properties.map((p: any) => [p.name, p]));
+describe('MODEL_METRIC_DEF — model_metric Object Type shape (ADR-0043)', () => {
+  // After the #175 cutover the importer no longer writes model_metric instances (the
+  // Pipeline path does). The DEF is now exported so the provisioner can ensure the
+  // ObjectType; its shape is still the contract worth pinning.
+  it('declares numeric shares sortable and key dims filterable', () => {
+    const byName = Object.fromEntries(MODEL_METRIC_DEF.properties.map((p: any) => [p.name, p]));
     expect(byName.valueShare).toMatchObject({ type: 'number', sortable: true });
     expect(byName.volumeShare).toMatchObject({ type: 'number', sortable: true });
     expect(byName.avgPrice).toMatchObject({ type: 'number', sortable: true });
@@ -84,44 +65,8 @@ describe('MarketMetricImporter — model_metric (sheet 2-7, ADR-0043)', () => {
     expect(byName.launchDate.filterable).toBe(true);
   });
 
-  it('keys each instance by 品类_机型_月份 so re-ingest upserts in place', async () => {
-    await h.importer.importModels('t1', [row()]);
-    expect(h.upserts[0].objectType).toBe(MODEL_METRIC_TYPE);
-    expect(h.upserts[0].instances[0].externalId).toBe('电饭煲_SF40HC782_26.04');
-  });
-
-  it('carries the SKU attributes and per-month share/price into properties', async () => {
-    await h.importer.importModels('t1', [row()]);
-    expect(h.upserts[0].instances[0].properties).toMatchObject({
-      category: '电饭煲',
-      model: 'SF40HC782',
-      brand: '苏泊尔',
-      heating: 'IH加热',
-      launchDate: '23.10',
-      month: '26.04',
-      valueShare: 0.0200989687,
-      volumeShare: 0.0079030185,
-      avgPrice: 709.48,
-    });
-  });
-
-  it('emits one instance per (SKU, month) row', async () => {
-    await h.importer.importModels('t1', [
-      row({ month: '26.03', avgPrice: 700 }),
-      row({ month: '26.04', avgPrice: 709.48 }),
-    ]);
-    expect(h.upserts[0].instances).toHaveLength(2);
-    expect(h.upserts[0].instances.map((i: any) => i.externalId)).toEqual([
-      '电饭煲_SF40HC782_26.03',
-      '电饭煲_SF40HC782_26.04',
-    ]);
-  });
-
-  it('does not recreate the Object Type when it already exists (idempotent ensure)', async () => {
-    h.existingTypes.add(MODEL_METRIC_TYPE);
-    await h.importer.importModels('t1', [row()]);
-    expect(h.fakeOntology.createObjectType).not.toHaveBeenCalled();
-    expect(h.upserts[0].instances).toHaveLength(1);
+  it('names the type model_metric', () => {
+    expect(MODEL_METRIC_DEF.name).toBe(MODEL_METRIC_TYPE);
   });
 });
 
@@ -163,7 +108,7 @@ describe('MarketMetricImporter — avc_report coverage provenance (ADR-0043 §2)
   });
 });
 
-describe('MarketMetricImporter.importReport — one report = four writes (ADR-0043)', () => {
+describe('MarketMetricImporter.importReport — coverage-only after #175 cutover (ADR-0055 Step 5)', () => {
   let h: ReturnType<typeof makeHarness>;
 
   const report = () => ({
@@ -184,20 +129,15 @@ describe('MarketMetricImporter.importReport — one report = four writes (ADR-00
 
   beforeEach(() => { h = makeHarness(); });
 
-  it('writes all four object types from a single call', async () => {
+  it('writes ONLY the avc_report coverage row — the three stars now flow through Pipelines', async () => {
     await h.importer.importReport('t1', report());
-    const types = h.upserts.map((u) => u.objectType).sort();
-    expect(types).toEqual(
-      [MARKET_METRIC_TYPE, BRAND_SHARE_TYPE, MODEL_METRIC_TYPE, AVC_REPORT_TYPE].sort(),
-    );
-  });
-
-  it('returns per-type counts matching the input row counts', async () => {
-    const result = await h.importer.importReport('t1', report());
-    expect(result.metrics).toBe(1);
-    expect(result.brandShares).toBe(1);
-    expect(result.modelMetrics).toBe(1);
-    expect(result.objectType).toBe(MARKET_METRIC_TYPE);
+    // Cutover: importStar deleted. The market/brand/model stars are produced by the
+    // Connector → Pipeline → SyncJob chain, NOT here. Only coverage provenance stays direct (ADR-0043 §2).
+    const types = h.upserts.map((u) => u.objectType);
+    expect(types).toEqual([AVC_REPORT_TYPE]);
+    expect(types).not.toContain(MARKET_METRIC_TYPE);
+    expect(types).not.toContain(BRAND_SHARE_TYPE);
+    expect(types).not.toContain(MODEL_METRIC_TYPE);
   });
 
   it('stamps the coverage provenance row with the report period and coverage', async () => {
@@ -205,6 +145,16 @@ describe('MarketMetricImporter.importReport — one report = four writes (ADR-00
     const cov = h.upserts.find((u) => u.objectType === AVC_REPORT_TYPE)!.instances[0];
     expect(cov.externalId).toBe('dianfanbao-full.xlsx');
     expect(cov.properties).toMatchObject({ category: '电饭煲', period: '26.04', coverage: 'full' });
+  });
+
+  it('returns zero star counts and reports avc_report as the head objectType (coverage-only)', async () => {
+    const result = await h.importer.importReport('t1', report());
+    // Stars are no longer counted here (they are async via Pipelines); the shape stays stable for callers.
+    expect(result.metrics).toBe(0);
+    expect(result.brandShares).toBe(0);
+    expect(result.modelMetrics).toBe(0);
+    // avc_report is the only write this method still performs post-cutover.
+    expect(result.objectType).toBe(AVC_REPORT_TYPE);
   });
 });
 

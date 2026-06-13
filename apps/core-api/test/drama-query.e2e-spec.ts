@@ -9,29 +9,11 @@
 import { INestApplication } from '@nestjs/common';
 import { PrismaClient } from '@omaha/db';
 import request from 'supertest';
-import { createTestApp, postSse, runWithRetry, SseEvent } from './test-helpers';
+import { createTestApp, postSse, runWithRetry, SseEvent, getArgs, toolCalls } from './test-helpers';
 
 const TENANT_SLUG = 'demo-drama';
 const ADMIN_EMAIL = 'admin@demo-drama.local';
 const ADMIN_PASSWORD = 'demo2026';
-
-function findToolCall(events: SseEvent[]): SseEvent | undefined {
-  return events.find(
-    (e) => e.type === 'tool_call' && (e.name === 'query_objects' || e.name === 'aggregate_objects'),
-  );
-}
-
-function findAllToolCalls(events: SseEvent[]): SseEvent[] {
-  return events.filter(
-    (e) => e.type === 'tool_call' && (e.name === 'query_objects' || e.name === 'aggregate_objects'),
-  );
-}
-
-function getArgs(toolCall: SseEvent): Record<string, unknown> {
-  if (typeof toolCall.arguments === 'string') return JSON.parse(toolCall.arguments);
-  if (typeof toolCall.args === 'string') return JSON.parse(toolCall.args);
-  return (toolCall.arguments ?? toolCall.args ?? {}) as Record<string, unknown>;
-}
 
 describe('Drama Query — Semantic Layer Cross-Domain (e2e)', () => {
   let app: INestApplication;
@@ -68,7 +50,7 @@ describe('Drama Query — Semantic Layer Cross-Domain (e2e)', () => {
     it('S1: "短的镜头" → references duration, not shotNum', async () => {
       await runWithRetry('短的镜头', async () => {
         const events = await postSse(app, '/agent/chat', { message: '找出时长短的镜头' }, token);
-        const calls = findAllToolCalls(events);
+        const calls = toolCalls(events);
         expect(calls.length).toBeGreaterThan(0);
         // Check across all data tool calls — accept filter, sort, or aggregate on duration
         const referencesDuration = calls.some((tc) => {
@@ -96,7 +78,7 @@ describe('Drama Query — Semantic Layer Cross-Domain (e2e)', () => {
     it('S2: "节奏快的剧" → uses shotCount or aggregate shots', async () => {
       await runWithRetry('节奏快的剧', async () => {
         const events = await postSse(app, '/agent/chat', { message: '哪些剧节奏最快？' }, token);
-        const tc = findToolCall(events);
+        const tc = toolCalls(events)[0];
         expect(tc).toBeDefined();
         const args = getArgs(tc!);
         const hasRelevantField =
@@ -110,7 +92,7 @@ describe('Drama Query — Semantic Layer Cross-Domain (e2e)', () => {
     it('S3: "压抑的镜头" → filters by mood', async () => {
       await runWithRetry('压抑的镜头', async () => {
         const events = await postSse(app, '/agent/chat', { message: '找出情绪压抑的镜头' }, token);
-        const tc = findToolCall(events);
+        const tc = toolCalls(events)[0];
         expect(tc).toBeDefined();
         const args = getArgs(tc!);
         expect(args.objectType).toBe('shot');
@@ -124,7 +106,7 @@ describe('Drama Query — Semantic Layer Cross-Domain (e2e)', () => {
     it('S4: "哪部剧特写镜头最多" → aggregate shot, filter shotSize, groupBy series', async () => {
       await runWithRetry('特写镜头最多', async () => {
         const events = await postSse(app, '/agent/chat', { message: '哪部剧特写镜头最多？' }, token);
-        const tc = findToolCall(events);
+        const tc = toolCalls(events)[0];
         expect(tc).toBeDefined();
         const args = getArgs(tc!);
         expect(tc!.name).toBe('aggregate_objects');
@@ -142,7 +124,7 @@ describe('Drama Query — Semantic Layer Cross-Domain (e2e)', () => {
     it('S5: "各剧的平均镜头时长" → aggregate shot, groupBy series, avg duration', async () => {
       await runWithRetry('平均镜头时长', async () => {
         const events = await postSse(app, '/agent/chat', { message: '各剧的平均镜头时长是多少？' }, token);
-        const tc = findToolCall(events);
+        const tc = toolCalls(events)[0];
         expect(tc).toBeDefined();
         const args = getArgs(tc!);
         expect(tc!.name).toBe('aggregate_objects');
@@ -157,7 +139,7 @@ describe('Drama Query — Semantic Layer Cross-Domain (e2e)', () => {
     it('S6: "运镜最丰富的一集" → references movement variety', async () => {
       await runWithRetry('运镜最丰富', async () => {
         const events = await postSse(app, '/agent/chat', { message: '运镜手法最丰富的是哪一集？' }, token);
-        const calls = findAllToolCalls(events);
+        const calls = toolCalls(events);
         expect(calls.length).toBeGreaterThan(0);
         const referencesMovement = calls.some((tc) => {
           const args = getArgs(tc);
@@ -176,7 +158,7 @@ describe('Drama Query — Semantic Layer Cross-Domain (e2e)', () => {
     it('S7: "对话密集的场景" → filter dialogue, groupBy scene', async () => {
       await runWithRetry('对话密集', async () => {
         const events = await postSse(app, '/agent/chat', { message: '哪些场景对话最密集？' }, token);
-        const tc = findToolCall(events);
+        const tc = toolCalls(events)[0];
         expect(tc).toBeDefined();
         const args = getArgs(tc!);
         expect(args.objectType).toBe('shot');
@@ -197,7 +179,7 @@ describe('Drama Query — Semantic Layer Cross-Domain (e2e)', () => {
     it('S8: "拍摄手法单一的剧" → references variety of cinematography fields', async () => {
       await runWithRetry('手法单一', async () => {
         const events = await postSse(app, '/agent/chat', { message: '哪些剧的拍摄手法比较单一？' }, token);
-        const calls = findAllToolCalls(events);
+        const calls = toolCalls(events);
         expect(calls.length).toBeGreaterThan(0);
         // Accept any reasonable approach: countDistinct on movement/shotSize/angle,
         // or groupBy series with these fields, or filter+groupBy on series
@@ -218,7 +200,7 @@ describe('Drama Query — Semantic Layer Cross-Domain (e2e)', () => {
     it('S9: "视觉冲击力强的镜头" → references visual fields (shotSize/movement/duration)', async () => {
       await runWithRetry('视觉冲击力', async () => {
         const events = await postSse(app, '/agent/chat', { message: '找出视觉冲击力强的镜头' }, token);
-        const calls = findAllToolCalls(events);
+        const calls = toolCalls(events);
         expect(calls.length).toBeGreaterThan(0);
         const visualFields = ['shotSize', 'movement', 'duration', 'mood'];
         const referencesVisual = calls.some((tc) => {

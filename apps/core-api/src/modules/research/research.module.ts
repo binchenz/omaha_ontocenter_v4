@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ResearchSdk } from './research.sdk';
 import { AvcTemplateExtractor } from './avc-template-extractor';
+import { AvcConnector } from './avc-connector';
 import { MarketMetricImporter } from './market-metric-importer.service';
 import { DocumentTextExtractor } from './document-text-extractor';
 import { Chunker } from './chunker';
@@ -20,6 +21,7 @@ import { DatasetModule } from '../dataset/dataset.module';
   providers: [
     ResearchSdk,
     AvcTemplateExtractor,
+    AvcConnector,
     MarketMetricImporter,
     DocumentTextExtractor,
     Chunker,
