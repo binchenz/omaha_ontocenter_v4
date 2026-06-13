@@ -172,8 +172,9 @@ export class OntologySdk {
     const schema = await this.getSchema(tenantId);
     const target = schema.types.find(t => t.name === typeName);
     if (!target) {
-      const available = schema.types.map(t => t.name).join(', ');
-      throw new NotFoundException(`对象类型 "${typeName}" 不存在。可用类型：${available}`);
+      const available = schema.types.map(t => t.name).slice(0, 10);
+      const more = schema.types.length > 10 ? ` (共 ${schema.types.length} 个，调用 get_ontology_schema() 查看完整列表)` : '';
+      throw new NotFoundException(`对象类型 "${typeName}" 不存在。可用类型：${available.join(', ')}${more}`);
     }
     const relationships = schema.relationships.filter(
       r => r.sourceType === typeName || r.targetType === typeName,
