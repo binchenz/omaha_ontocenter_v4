@@ -14,7 +14,7 @@
 import { INestApplication } from '@nestjs/common';
 import { PrismaClient } from '@omaha/db';
 import request from 'supertest';
-import { createTestApp, postSse, SseEvent } from './test-helpers';
+import { createTestApp, postSse, SseEvent, getArgs } from './test-helpers';
 
 const TENANT_SLUG = 'demo-drama';
 const ADMIN_EMAIL = 'admin@demo-drama.local';
@@ -32,12 +32,6 @@ function filterableFor(ot: string): Set<string> {
 }
 function numericFor(ot: string): Set<string> {
   return ot === 'shot' ? SHOT_NUMERIC : ot === 'episode' ? EPISODE_NUMERIC : new Set();
-}
-
-function getArgs(e: SseEvent): Record<string, unknown> {
-  const raw = (e as any).arguments ?? (e as any).args ?? {};
-  if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return {}; } }
-  return raw as Record<string, unknown>;
 }
 
 const isDataTool = (e: SseEvent) => e.type === 'tool_call' && (e.name === 'query_objects' || e.name === 'aggregate_objects');

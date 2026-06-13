@@ -23,8 +23,55 @@ import { ListDbTablesTool } from './tools/list-db-tables.tool';
 import { PreviewDbTableTool } from './tools/preview-db-table.tool';
 import { CreateRelationshipTool } from './tools/create-relationship.tool';
 import { DeleteRelationshipTool } from './tools/delete-relationship.tool';
+import { AGENT_TOOLS } from '../tool-registry/tool-registry.tokens';
+import { ToolCollector } from '../tool-registry/tool-collector.service';
+import { AgentBootstrap } from './agent.bootstrap';
 
 describe('AgentModule (boot smoke test)', () => {
+  it('AGENT_TOOLS resolves to an array aggregating tools from every module', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [PrismaModule, PermissionModule, AgentModule],
+    }).compile();
+
+    // AGENT_TOOLS must be an ARRAY (NestJS does not support Angular-style `multi: true`,
+    // which silently yielded a single object — ADR-0052 fix via DiscoveryService).
+    const tools = moduleRef.get<any[]>(AGENT_TOOLS);
+    expect(Array.isArray(tools)).toBe(true);
+
+    // The collector does the real aggregation (fresh discovery, order-independent).
+    // The stable AGENT_TOOLS reference is filled from this at onApplicationBootstrap.
+    const collected = await moduleRef.get(ToolCollector).collect();
+    const names = collected.map((t) => t.name);
+    // own tools + cross-module tools (action, data-import, transform-config) all present
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'query_objects',
+        'create_action',
+        'execute_import',
+        'create_transform_config',
+        'list_transform_configs',
+      ]),
+    );
+    // no duplicates (read_file_preview is provided by two modules)
+    expect(names.length).toBe(new Set(names).size);
+
+    await moduleRef.close();
+  });
+
+  it('AgentBootstrap orphan check passes for every collected tool (no .init(): DB-free)', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [PrismaModule, PermissionModule, AgentModule],
+    }).compile();
+
+    // Run the orphan check against the REAL collected tools + skills without firing
+    // .init() (which would block on pg-boss DB connect). This catches both the array
+    // bug (map crash) and the landmine: every registered tool must be declared by a skill.
+    const bootstrap = moduleRef.get(AgentBootstrap);
+    await expect(bootstrap.onApplicationBootstrap()).resolves.toBeUndefined();
+
+    await moduleRef.close();
+  });
+
   it('boots and resolves all key providers', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [PrismaModule, PermissionModule, AgentModule],
@@ -52,7 +99,7 @@ describe('AgentModule (boot smoke test)', () => {
     await moduleRef.close();
   });
 
-  it('throws on init when a registered Tool is not declared by any Skill', async () => {
+  it('throws on bootstrap when a registered Tool is not declared by any Skill', async () => {
     const { AgentBootstrap } = await import('./agent.bootstrap');
     const orphanTool: any = {
       name: 'orphan_tool',
@@ -63,16 +110,18 @@ describe('AgentModule (boot smoke test)', () => {
     };
     const skill: any = { name: 's', description: '', tools: ['other'], systemPrompt: () => '' };
 
-    const bootstrap = new AgentBootstrap([orphanTool], [skill]);
-    expect(() => bootstrap.onModuleInit()).toThrow(/orphan_tool/);
+    const collector: any = { collect: async () => [orphanTool] };
+    const bootstrap = new AgentBootstrap(collector, [skill]);
+    await expect(bootstrap.onApplicationBootstrap()).rejects.toThrow(/orphan_tool/);
   });
 
-  it('does not throw on init when every Tool is declared', async () => {
+  it('does not throw on bootstrap when every Tool is declared', async () => {
     const { AgentBootstrap } = await import('./agent.bootstrap');
     const tool: any = { name: 't1', description: '', parameters: {}, requiresConfirmation: false, execute: async () => ({}) };
     const skill: any = { name: 's', description: '', tools: ['t1'], systemPrompt: () => '' };
 
-    const bootstrap = new AgentBootstrap([tool], [skill]);
-    expect(() => bootstrap.onModuleInit()).not.toThrow();
+    const collector: any = { collect: async () => [tool] };
+    const bootstrap = new AgentBootstrap(collector, [skill]);
+    await expect(bootstrap.onApplicationBootstrap()).resolves.toBeUndefined();
   });
 });

@@ -71,4 +71,33 @@ describe('DataPipelineOrchestrator', () => {
     await orchestrator.onPipelineRunComplete(T, 'run-1');
     expect(syncJobService.enqueue).not.toHaveBeenCalled();
   });
+
+  it('onPipelineRunComplete filters mapping by connectorId to avoid ambiguity', async () => {
+    // Bug scenario: same ObjectType has mappings from multiple Connectors
+    const mapping1 = { id: 'm-connector-1', tenantId: T, connectorId: 'c-1', objectTypeId: 'ot-1' };
+    const mapping2 = { id: 'm-connector-2', tenantId: T, connectorId: 'c-2', objectTypeId: 'ot-1' };
+
+    const { orchestrator, syncJobService, prisma } = make({
+      pipelines: [
+        { id: 'pipe-1', tenantId: T, connectorId: 'c-1', outputObjectTypeId: 'ot-1', status: 'active' },
+      ],
+    });
+
+    // Mock: database has both mappings, but findFirst should filter by connectorId
+    prisma.objectMapping.findFirst.mockResolvedValueOnce(mapping1);
+
+    await orchestrator.onPipelineRunComplete(T, 'run-1');
+
+    // Verify it looked up with connectorId filter
+    expect(prisma.objectMapping.findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: T,
+        connectorId: 'c-1',  // Must include this
+        objectTypeId: 'ot-1',
+      },
+    });
+
+    // Verify it used the correct mapping
+    expect(syncJobService.enqueue).toHaveBeenCalledWith(T, 'ds-clean-1', 'm-connector-1');
+  });
 });

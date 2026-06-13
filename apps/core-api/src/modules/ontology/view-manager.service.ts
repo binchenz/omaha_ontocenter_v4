@@ -75,8 +75,9 @@ export class ViewManagerService {
       `SELECT matviewname FROM pg_matviews WHERE matviewname LIKE $1`,
       `${prefix}_%`,
     );
-    for (const { matviewname } of rows) {
-      await this.prisma.$executeRawUnsafe(`DROP MATERIALIZED VIEW IF EXISTS "${matviewname}"`);
+    if (rows.length > 0) {
+      const drops = rows.map(({ matviewname }) => `DROP MATERIALIZED VIEW IF EXISTS "${matviewname}"`).join('; ');
+      await this.prisma.$executeRawUnsafe(drops);
     }
   }
 

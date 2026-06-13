@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma, PrismaService } from '@omaha/db';
 
 export interface CreateDatasetDto {
@@ -7,9 +7,27 @@ export interface CreateDatasetDto {
   kind?: 'raw' | 'clean';
 }
 
+/**
+ * Reactive trigger seam (#168). DatasetService fires this when a `raw` Dataset
+ * becomes ready. Typed structurally (not by import) to avoid a hard module cycle
+ * — the concrete DataPipelineOrchestrator is wired via DATASET_PIPELINE_TRIGGER.
+ */
+export interface RawDatasetReadyTrigger {
+  onRawDatasetReady(tenantId: string, datasetId: string): Promise<void>;
+}
+
+export const DATASET_PIPELINE_TRIGGER = 'DATASET_PIPELINE_TRIGGER';
+
 @Injectable()
 export class DatasetService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(DatasetService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    @Inject(DATASET_PIPELINE_TRIGGER)
+    private readonly pipelineTrigger?: RawDatasetReadyTrigger,
+  ) {}
 
   listDatasets(tenantId: string) {
     return this.prisma.dataset.findMany({ where: { tenantId }, orderBy: { createdAt: 'desc' } });
@@ -45,6 +63,24 @@ export class DatasetService {
 
   async markReady(tenantId: string, datasetId: string) {
     await this.getDataset(tenantId, datasetId);
-    return this.prisma.dataset.update({ where: { id: datasetId }, data: { status: 'ready' } });
+    const updated = await this.prisma.dataset.update({
+      where: { id: datasetId },
+      data: { status: 'ready' },
+    });
+
+    // Reactive trigger (#168): only raw Datasets kick off PipelineRuns. Clean
+    // Datasets are handled by the orchestrator's own post-PipelineRun SyncJob path.
+    if (updated.kind === 'raw' && this.pipelineTrigger) {
+      // Fire-and-forget: don't await — the caller returns as soon as the status
+      // flips. A trigger failure is logged but must not block or roll back `ready`.
+      void this.pipelineTrigger.onRawDatasetReady(tenantId, datasetId).catch((err) => {
+        this.logger.error(
+          `onRawDatasetReady failed for dataset=${datasetId} (status stays ready)`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      });
+    }
+
+    return updated;
   }
 }

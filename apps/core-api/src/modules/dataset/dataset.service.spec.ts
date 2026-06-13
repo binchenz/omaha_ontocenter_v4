@@ -5,6 +5,9 @@ const T = 'tenant-1';
 function make(seed: { datasets?: any[] } = {}) {
   const datasets: any[] = seed.datasets ?? [];
   const rows: any[] = [];
+  const orchestrator: any = {
+    onRawDatasetReady: jest.fn(async () => undefined),
+  };
   const prisma: any = {
     dataset: {
       findMany: jest.fn(async ({ where }: any) => datasets.filter((d) => d.tenantId === where.tenantId)),
@@ -29,7 +32,7 @@ function make(seed: { datasets?: any[] } = {}) {
     },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
   };
-  return { svc: new DatasetService(prisma), datasets };
+  return { svc: new DatasetService(prisma, orchestrator), datasets, orchestrator };
 }
 
 describe('DatasetService', () => {
@@ -59,5 +62,34 @@ describe('DatasetService', () => {
   it('enforces tenant isolation', async () => {
     const { svc } = make({ datasets: [{ id: 'ds-1', tenantId: 'other', rowCount: 0 }] });
     await expect(svc.getDataset(T, 'ds-1')).rejects.toThrow('not found');
+  });
+
+  describe('markReady reactive trigger (#168, ADR-0045)', () => {
+    it('fires onRawDatasetReady for a raw Dataset', async () => {
+      const { svc, orchestrator } = make({
+        datasets: [{ id: 'ds-1', tenantId: T, rowCount: 0, status: 'draft', kind: 'raw' }],
+      });
+      await svc.markReady(T, 'ds-1');
+      expect(orchestrator.onRawDatasetReady).toHaveBeenCalledWith(T, 'ds-1');
+    });
+
+    it('does NOT fire onRawDatasetReady for a clean Dataset', async () => {
+      const { svc, orchestrator } = make({
+        datasets: [{ id: 'ds-1', tenantId: T, rowCount: 0, status: 'draft', kind: 'clean' }],
+      });
+      await svc.markReady(T, 'ds-1');
+      expect(orchestrator.onRawDatasetReady).not.toHaveBeenCalled();
+    });
+
+    it('does not throw if the orchestrator trigger fails (fire-and-forget)', async () => {
+      const { svc, datasets, orchestrator } = make({
+        datasets: [{ id: 'ds-1', tenantId: T, rowCount: 0, status: 'draft', kind: 'raw' }],
+      });
+      orchestrator.onRawDatasetReady.mockRejectedValueOnce(new Error('orchestrator boom'));
+      const result = await svc.markReady(T, 'ds-1');
+      // status still flipped to ready — trigger failure must not roll it back
+      expect(result.status).toBe('ready');
+      expect(datasets[0].status).toBe('ready');
+    });
   });
 });

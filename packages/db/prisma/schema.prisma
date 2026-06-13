@@ -22,28 +22,30 @@ model Tenant {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  users              User[]
-  roles              Role[]
-  objectTypes        ObjectType[]
+  users               User[]
+  roles               Role[]
+  objectTypes         ObjectType[]
   objectRelationships ObjectRelationship[]
-  connectors         Connector[]
-  objectMappings     ObjectMapping[]
-  objectInstances    ObjectInstance[]
-  syncJobs           SyncJob[]
-  datasets           Dataset[]
-  datasetRows        DatasetRow[]
-  conversations      Conversation[]
-  skillDefinitions   SkillDefinition[]
-  auditLogs          AuditLog[]
-  actionDefinitions  ActionDefinition[]
-  actionPreviews     ActionPreview[]
-  actionRuns         ActionRun[]
-  ontologyDraft      OntologyDraft?
-  evalQuestions      EvalQuestion[]
-  researchDocuments  ResearchDocument[]
-  documentChunks     DocumentChunk[]
-  pipelines          Pipeline[]
-  pipelineRuns       PipelineRun[]
+  connectors          Connector[]
+  objectMappings      ObjectMapping[]
+  objectInstances     ObjectInstance[]
+  syncJobs            SyncJob[]
+  datasets            Dataset[]
+  datasetRows         DatasetRow[]
+  conversations       Conversation[]
+  skillDefinitions    SkillDefinition[]
+  auditLogs           AuditLog[]
+  actionDefinitions   ActionDefinition[]
+  actionPreviews      ActionPreview[]
+  actionRuns          ActionRun[]
+  ontologyDraft       OntologyDraft?
+  evalQuestions       EvalQuestion[]
+  researchDocuments   ResearchDocument[]
+  documentChunks      DocumentChunk[]
+  pipelines           Pipeline[]
+  pipelineRuns        PipelineRun[]
+  pendingActions      PendingAction[]
+  transformConfigs    TransformConfig[]
 
   @@map("tenants")
 }
@@ -72,12 +74,15 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id])
-  role          Role           @relation(fields: [roleId], references: [id])
-  conversations Conversation[]
-  auditLogs     AuditLog[]
-  actionPreviews ActionPreview[]
-  actionRuns    ActionRun[]
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  role             Role              @relation(fields: [roleId], references: [id])
+  conversations    Conversation[]
+  auditLogs        AuditLog[]
+  actionPreviews   ActionPreview[]
+  actionRuns       ActionRun[]
+  createdActions   PendingAction[]   @relation("CreatedActions")
+  approvedActions  PendingAction[]   @relation("ApprovedActions")
+  transformConfigs TransformConfig[]
 
   @@unique([tenantId, email])
   @@map("users")
@@ -95,7 +100,7 @@ model ObjectType {
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
-  tenant          Tenant              @relation(fields: [tenantId], references: [id])
+  tenant          Tenant               @relation(fields: [tenantId], references: [id])
   sourceRelations ObjectRelationship[] @relation("SourceType")
   targetRelations ObjectRelationship[] @relation("TargetType")
   mappings        ObjectMapping[]
@@ -150,10 +155,10 @@ model Connector {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  tenant   Tenant          @relation(fields: [tenantId], references: [id])
-  mappings ObjectMapping[]
-  syncJobs SyncJob[]
-  datasets Dataset[]
+  tenant    Tenant          @relation(fields: [tenantId], references: [id])
+  mappings  ObjectMapping[]
+  syncJobs  SyncJob[]
+  datasets  Dataset[]
   pipelines Pipeline[]
 
   @@unique([tenantId, name])
@@ -169,9 +174,9 @@ model ObjectMapping {
   relationshipMappings Json     @default("{}") @map("relationship_mappings")
   createdAt            DateTime @default(now()) @map("created_at")
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id])
-  objectType ObjectType  @relation(fields: [objectTypeId], references: [id])
-  connector  Connector?  @relation(fields: [connectorId], references: [id])
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  objectType ObjectType @relation(fields: [objectTypeId], references: [id])
+  connector  Connector? @relation(fields: [connectorId], references: [id])
   syncJobs   SyncJob[]
 
   @@unique([tenantId, objectTypeId])
@@ -179,18 +184,18 @@ model ObjectMapping {
 }
 
 model ObjectInstance {
-  id           String   @id @default(uuid()) @db.Uuid
-  tenantId     String   @map("tenant_id") @db.Uuid
-  objectType   String   @map("object_type")
-  externalId   String   @map("external_id")
-  label        String?
-  properties   Json     @default("{}")
-  relationships Json    @default("{}")
-  sourceRef    Json?    @map("source_ref")
-  searchText   String?  @map("search_text")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  deletedAt    DateTime? @map("deleted_at")
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  objectType    String    @map("object_type")
+  externalId    String    @map("external_id")
+  label         String?
+  properties    Json      @default("{}")
+  relationships Json      @default("{}")
+  sourceRef     Json?     @map("source_ref")
+  searchText    String?   @map("search_text")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
@@ -214,10 +219,10 @@ model Dataset {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  tenant    Tenant          @relation(fields: [tenantId], references: [id])
-  connector Connector       @relation(fields: [connectorId], references: [id])
-  rows      DatasetRow[]
-  syncJobs  SyncJob[]
+  tenant               Tenant        @relation(fields: [tenantId], references: [id])
+  connector            Connector     @relation(fields: [connectorId], references: [id])
+  rows                 DatasetRow[]
+  syncJobs             SyncJob[]
   pipelineRunsAsInput  PipelineRun[] @relation("PipelineRunInput")
   pipelineRunsAsOutput PipelineRun[] @relation("PipelineRunOutput")
 
@@ -313,9 +318,9 @@ model PipelineRun {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  tenant       Tenant   @relation(fields: [tenantId], references: [id])
-  pipeline     Pipeline @relation(fields: [pipelineId], references: [id])
-  inputDataset Dataset  @relation("PipelineRunInput", fields: [inputDatasetId], references: [id])
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  pipeline      Pipeline @relation(fields: [pipelineId], references: [id])
+  inputDataset  Dataset  @relation("PipelineRunInput", fields: [inputDatasetId], references: [id])
   outputDataset Dataset? @relation("PipelineRunOutput", fields: [outputDatasetId], references: [id])
 
   @@map("pipeline_runs")
@@ -330,9 +335,10 @@ model Conversation {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  tenant Tenant             @relation(fields: [tenantId], references: [id])
-  user   User               @relation(fields: [userId], references: [id])
-  turns  ConversationTurn[]
+  tenant         Tenant             @relation(fields: [tenantId], references: [id])
+  user           User               @relation(fields: [userId], references: [id])
+  turns          ConversationTurn[]
+  pendingActions PendingAction[]
 
   @@map("conversations")
 }
@@ -371,18 +377,18 @@ model SkillDefinition {
 }
 
 model AuditLog {
-  id                       String   @id @default(uuid()) @db.Uuid
-  tenantId                 String   @map("tenant_id") @db.Uuid
-  actorId                  String   @map("actor_id") @db.Uuid
-  actorType                String   @map("actor_type")
-  operation                String
-  objectType               String?  @map("object_type")
-  queryPlan                Json?    @map("query_plan")
-  resultCount              Int?     @map("result_count")
-  source                   String?
-  effectivePermissionFilter String? @map("effective_permission_filter")
-  compiledSqlHash          String?  @map("compiled_sql_hash")
-  createdAt                DateTime @default(now()) @map("created_at")
+  id                        String   @id @default(uuid()) @db.Uuid
+  tenantId                  String   @map("tenant_id") @db.Uuid
+  actorId                   String   @map("actor_id") @db.Uuid
+  actorType                 String   @map("actor_type")
+  operation                 String
+  objectType                String?  @map("object_type")
+  queryPlan                 Json?    @map("query_plan")
+  resultCount               Int?     @map("result_count")
+  source                    String?
+  effectivePermissionFilter String?  @map("effective_permission_filter")
+  compiledSqlHash           String?  @map("compiled_sql_hash")
+  createdAt                 DateTime @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
   actor  User   @relation(fields: [actorId], references: [id])
@@ -416,16 +422,16 @@ model ActionDefinition {
 }
 
 model ActionPreview {
-  id            String    @id @default(uuid()) @db.Uuid
-  tenantId      String    @map("tenant_id") @db.Uuid
-  actionDefId   String    @map("action_def_id") @db.Uuid
-  userId        String    @map("user_id") @db.Uuid
-  targetIds     String[]  @map("target_ids") @db.Uuid
-  inputParams   Json      @default("{}") @map("input_params")
-  previewResult Json      @default("{}") @map("preview_result")
-  status        String    @default("pending")
-  expiresAt     DateTime  @map("expires_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  actionDefId   String   @map("action_def_id") @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  targetIds     String[] @map("target_ids") @db.Uuid
+  inputParams   Json     @default("{}") @map("input_params")
+  previewResult Json     @default("{}") @map("preview_result")
+  status        String   @default("pending")
+  expiresAt     DateTime @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
 
   tenant    Tenant           @relation(fields: [tenantId], references: [id])
   actionDef ActionDefinition @relation(fields: [actionDefId], references: [id])
@@ -477,15 +483,15 @@ model OntologyDraft {
 /// for the N-repetition runner (#75). Lives per tenant; carried (de-identified) into
 /// templates (#76).
 model EvalQuestion {
-  id            String   @id @default(uuid()) @db.Uuid
-  tenantId      String   @map("tenant_id") @db.Uuid
-  question      String
-  baselineTool  String   @map("baseline_tool")
-  baselineArgs  Json     @default("{}") @map("baseline_args")
-  planSummary   String?  @map("plan_summary")
-  passHistory   Json     @default("[]") @map("pass_history")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  question     String
+  baselineTool String   @map("baseline_tool")
+  baselineArgs Json     @default("{}") @map("baseline_args")
+  planSummary  String?  @map("plan_summary")
+  passHistory  Json     @default("[]") @map("pass_history")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
@@ -499,15 +505,15 @@ model EvalQuestion {
 /// annotations, allowedValues, externalId names, question bank); never client privacy
 /// (instances, tenant_id, connector credentials). Not a community marketplace — private toolbox.
 model OntologyTemplate {
-  id           String   @id @default(uuid()) @db.Uuid
-  name         String
-  description  String?
-  snapshot     Json     @default("{}")
-  questionBank Json     @default("[]") @map("question_bank")
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  description   String?
+  snapshot      Json     @default("{}")
+  questionBank  Json     @default("[]") @map("question_bank")
   /// Soft attribution of which tenant saved it; NOT a scoping constraint (templates are shared).
-  ownerTenantId String? @map("owner_tenant_id") @db.Uuid
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  ownerTenantId String?  @map("owner_tenant_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@map("ontology_templates")
 }
@@ -543,22 +549,76 @@ model ResearchDocument {
 /// large-text truncated to 1024 dims); Prisma cannot type it, so it is declared Unsupported
 /// and all reads/writes of the vector go through raw SQL.
 model DocumentChunk {
-  id         String   @id @default(uuid()) @db.Uuid
-  tenantId   String   @map("tenant_id") @db.Uuid
-  documentId String   @map("document_id") @db.Uuid
+  id         String                      @id @default(uuid()) @db.Uuid
+  tenantId   String                      @map("tenant_id") @db.Uuid
+  documentId String                      @map("document_id") @db.Uuid
   /// Canonical 品类 (denormalised from the document) — the semantic-search pre-filter key.
   category   String
   /// Optional canonical 价格段 label, when the chunk is about a specific band.
-  priceBand  String?  @map("price_band")
+  priceBand  String?                     @map("price_band")
   text       String
   /// 1-based page anchor in the source document, for provenance.
   page       Int
   embedding  Unsupported("vector(1024)")
-  createdAt  DateTime @default(now()) @map("created_at")
+  createdAt  DateTime                    @default(now()) @map("created_at")
 
   tenant   Tenant           @relation(fields: [tenantId], references: [id])
   document ResearchDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, category])
   @@map("document_chunks")
+}
+
+/// Generic confirmation primitive for Agent-proposed write operations (ADR-0051). All Agent
+/// writes flow through PendingAction: Agent creates proposed action with payload, frontend
+/// renders confirmation card, user approves/cancels, executor runs approved actions. Used by
+/// AgentConnector (ephemeral import) and future features (bulk delete, schema migration).
+model PendingAction {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  conversationId  String?   @map("conversation_id") @db.Uuid
+  /// Discriminator for executor dispatch (e.g. 'agent_import', 'bulk_delete').
+  type            String
+  /// State machine: proposed → approved → executing → completed/failed/cancelled
+  status          String    @default("proposed")
+  /// Type-specific data (transforms, mapping, fileId for agent_import; filters for bulk_delete).
+  payload         Json
+  /// User-facing text shown in confirmation card.
+  summary         String
+  createdBy       String    @map("created_by") @db.Uuid
+  approvedBy      String?   @map("approved_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  approvedAt      DateTime? @map("approved_at")
+  /// Actions expire if not approved within window; expired actions reject approval.
+  expiresAt       DateTime  @map("expires_at")
+  /// Populated by executor on completion/failure.
+  executionResult Json?     @map("execution_result")
+  executionError  String?   @map("execution_error")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  conversation Conversation? @relation(fields: [conversationId], references: [id])
+  creator      User          @relation("CreatedActions", fields: [createdBy], references: [id])
+  approver     User?         @relation("ApprovedActions", fields: [approvedBy], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, conversationId])
+  @@map("pending_actions")
+}
+
+model TransformConfig {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  name      String
+  type      String
+  config    Json
+  version   Int
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant  Tenant @relation(fields: [tenantId], references: [id])
+  creator User?  @relation(fields: [createdBy], references: [id])
+
+  @@unique([tenantId, name, version])
+  @@index([tenantId, name])
+  @@map("transform_configs")
 }

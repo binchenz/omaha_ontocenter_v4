@@ -115,6 +115,12 @@ export const api = {
   deleteUser: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
 
   listRoles: () => request<RoleRecord[]>('/permissions/roles'),
+
+  confirmAction: (actionId: string) =>
+    request<{ status: string }>(`/actions/${actionId}/confirm`, { method: 'POST' }),
+
+  cancelAction: (actionId: string) =>
+    request<{ status: string }>(`/actions/${actionId}/cancel`, { method: 'POST' }),
 };
 
 // Types

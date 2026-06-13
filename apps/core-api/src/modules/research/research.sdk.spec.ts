@@ -16,16 +16,20 @@ function makeHarness() {
   const fakeOntologySdk: any = {
     invalidate: jest.fn((tid: string) => invalidated.push(tid)),
   };
-  const fakeExtractor: any = {
-    extractAll: jest.fn().mockResolvedValue({
-      category: '电饭煲', period: '26.04', coverage: 'full', sourceReport: 'test.xlsx',
-      metrics: [], brandShares: [], modelMetrics: [],
+  // Post-cutover (#175): the SDK routes the data stars through AvcConnector.fetch() (3 raw
+  // Datasets + reactive Pipelines) and writes ONLY the coverage provenance via the importer.
+  const fakeConnector: any = {
+    fetch: jest.fn().mockResolvedValue({
+      datasets: [
+        { star: 'market_metric', datasetId: 'ds-m', connectorId: 'c-m', rowCount: 3 },
+        { star: 'brand_share', datasetId: 'ds-b', connectorId: 'c-b', rowCount: 2 },
+        { star: 'model_metric', datasetId: 'ds-o', connectorId: 'c-o', rowCount: 5 },
+      ],
+      coverage: 'full', sourceReport: 'test.xlsx', category: '电饭煲', period: '26.04',
     }),
   };
   const fakeImporter: any = {
-    importReport: jest.fn().mockResolvedValue({
-      objectType: 'market_metric', metrics: 3, brandShares: 2, modelMetrics: 5,
-    }),
+    importReportCoverage: jest.fn().mockResolvedValue({ objectType: 'avc_report', imported: 1, skipped: 0 }),
   };
   const fakeDocIngestion: any = {
     ingest: jest.fn().mockResolvedValue({ chunks: 10 }),
@@ -34,9 +38,9 @@ function makeHarness() {
     search: jest.fn().mockResolvedValue([{ text: 'found', score: 0.9 }]),
   };
 
-  const sdk = new ResearchSdk(fakeOntologySdk, fakeExtractor, fakeImporter, fakeDocIngestion, fakeSearch);
+  const sdk = new ResearchSdk(fakeOntologySdk, fakeConnector, fakeImporter, fakeDocIngestion, fakeSearch);
 
-  return { sdk, invalidated, fakeOntologySdk, fakeExtractor, fakeImporter, fakeDocIngestion, fakeSearch };
+  return { sdk, invalidated, fakeOntologySdk, fakeConnector, fakeImporter, fakeDocIngestion, fakeSearch };
 }
 
 describe('ResearchSdk.extractAvcReport', () => {
@@ -46,14 +50,18 @@ describe('ResearchSdk.extractAvcReport', () => {
       .rejects.toThrow();
   });
 
-  it('calls extractor + importer and returns merged counts', async () => {
-    const { sdk, fakeExtractor, fakeImporter } = makeHarness();
+  it('routes the data stars through AvcConnector.fetch() and writes coverage via the importer', async () => {
+    const { sdk, fakeConnector, fakeImporter } = makeHarness();
     const result = await sdk.extractAvcReport(INGEST_USER, { fileId: 'f1', category: '电饭煲' });
-    expect(fakeExtractor.extractAll).toHaveBeenCalled();
-    expect(fakeImporter.importReport).toHaveBeenCalled();
-    expect(result.metrics).toBe(3);
+    // Cutover: stars flow through the connector's raw-Dataset fan-out, not importReport().
+    expect(fakeConnector.fetch).toHaveBeenCalledWith('t1', expect.objectContaining({ category: '电饭煲' }));
+    // Coverage provenance is still written directly (ADR-0043 §2).
+    expect(fakeImporter.importReportCoverage).toHaveBeenCalledWith('t1', expect.objectContaining({
+      sourceReport: 'test.xlsx', category: '电饭煲', period: '26.04', coverage: 'full',
+    }));
     expect(result.coverage).toBe('full');
-    expect(result.imported).toBe(10); // 3+2+5
+    // Reported counts come from the raw Dataset row counts (3+2+5), now enqueued for async cleaning.
+    expect(result.imported).toBe(10);
   });
 
   it('invalidates cache after successful AVC ingestion', async () => {

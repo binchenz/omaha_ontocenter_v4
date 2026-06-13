@@ -35,7 +35,11 @@ export class DataPipelineOrchestrator {
     const pipeline = await this.prisma.pipeline.findFirstOrThrow({ where: { id: run.pipelineId } });
 
     const mapping = await this.prisma.objectMapping.findFirst({
-      where: { tenantId, objectTypeId: pipeline.outputObjectTypeId },
+      where: {
+        tenantId,
+        connectorId: pipeline.connectorId,
+        objectTypeId: pipeline.outputObjectTypeId
+      },
     });
 
     if (!mapping) {
