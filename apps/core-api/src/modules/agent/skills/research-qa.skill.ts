@@ -21,17 +21,19 @@ export class ResearchQaSkill implements AgentSkill {
 - **model_metric**（来自 AVC 2-7）：TOP-100 SKU 明细——机型/品牌/加热方式/上市日期/预约功能，含4个月的销额份额/销量份额/零售均价。**TOP-100 样本，非全市场**。
 - **avc_report**：报告来源凭证——品类/周期/coverage（full=含机型层 / essence=仅品牌层）。
 
-### 四跳决策链（ADR-0043 验收用例）
+### 四跳决策链（ADR-0043 验收用例 · ADR-0049 执行范式）
 
-当用户问"某品牌近期趋势→份额是否下滑→哪个价格段出了问题→是否有竞品新品进入"时，逐跳推进：
+**执行范式（重要）**：①② 是单星查询，可连续执行后一并呈现。③④ 涉及跨星参数（价格段区间、launchDate 窗口），**必须在执行前停下来**，向用户展示你从 ①② 得到的中间结论及你计划用于下一步的具体参数，等用户确认或修正后再继续。不得在一次回复中直接跳过确认步骤一口气走完全部四跳。
 
-**① 品牌销量趋势**：用 aggregate_objects(model_metric) 按品牌聚合近3个月销量份额/销额份额，对比小米与其他主要品牌。出处：AVC 2-7，注明报告月份。
+**① 品牌销量趋势**：用 aggregate_objects(model_metric) 按品牌聚合近3个月销量份额/销额份额。出处：AVC 2-7，注明报告月份。
 
-**② 市场份额趋势**：用 query_objects(brand_share) 按周期过滤，对比多期 brand_share 数据，确认份额是否实际下滑。出处：AVC 2-5，注明报告周期。
+**② 市场份额趋势**：用 query_objects(brand_share) 按周期过滤，对比多期数据，确认份额是否下滑。出处：AVC 2-5，注明报告周期。
 
-**③ 定位下滑价格段**：用 query_objects(brand_share) 按价格段分列，找出份额下滑最大的段；再用 query_objects(model_metric) 按 avgPrice >= min AND avgPrice < max 过滤，筛出该价格段内的 SKU。出处：AVC 2-5（价格段）+ AVC 2-7（SKU 均价区间）。
+> **→ ①② 完成后停下来**，向用户呈现：当前趋势结论、你识别到的下滑品类/品牌、你计划用于 ③ 的价格段区间（min/max），**明确问用户"是否继续钻取这个价格段的机型？"**，等用户确认。
 
-**④ 是否有新品进入**：用 query_objects(model_metric) 按 launchDate 落在 [reportMonth-N, reportMonth] 且 avgPrice 落在该价格段区间过滤，结合 volumeShare/valueShare 是否上升判断是否是新品抢占。出处：AVC 2-7，注明上市日期与报告月份。
+**③ 定位下滑价格段**（用户确认后执行）：用 query_objects(brand_share) 按价格段分列，找到下滑最大的段；再用 query_objects(model_metric) 按用户确认的 avgPrice 区间（>= min AND < max）过滤 SKU。出处：AVC 2-5（价格段）+ AVC 2-7（SKU 均价区间）。
+
+**④ 是否有新品进入**（用户确认后执行）：用 query_objects(model_metric) 按 launchDate 落在 [reportMonth-N, reportMonth] 且 avgPrice 在确认区间内过滤，结合 volumeShare/valueShare 判断新品抢占。出处：AVC 2-7，注明上市日期与报告月份。
 
 每一跳都**必须标注来源 AVC 工作表（2-1/2-5/2-7）和报告月份**。
 

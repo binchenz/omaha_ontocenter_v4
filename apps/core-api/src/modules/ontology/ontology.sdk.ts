@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@omaha/db';
 import { CurrentUser as CurrentUserType, PropertyDefinition } from '@omaha/shared-types';
 import { assertCapability } from '../../common/helpers/assert-capability';
@@ -121,10 +121,17 @@ export class OntologySdk {
     const schema = await this.getSchema(tenantId);
     const typeNames = schema.types.map(t => t.name);
     const lines: string[] = ['数据模型：'];
-    const maxTypes = 15;
+    // ADR-0050 invariant: a type's *existence* is never truncated — every type is listed.
+    // Field *detail* is eager only within this budget; beyond it the line is name+description
+    // only, and detail is pulled lazily via get_ontology_schema(typeName).
+    const detailBudget = 25;
     const MAX_DESC = 50; // soft-truncate field descriptions to keep prompt budget bounded
-    for (const t of schema.types.slice(0, maxTypes)) {
+    schema.types.forEach((t, i) => {
       const typeDesc = t.description ? ` — ${t.description}` : '';
+      if (i >= detailBudget) {
+        lines.push(`- ${t.name}${typeDesc}`);
+        return;
+      }
       const props = t.properties
         .filter(p => p.filterable || p.sortable)
         .map(p => {
@@ -144,7 +151,7 @@ export class OntologySdk {
         })
         .join(', ');
       lines.push(`- ${t.name}(${props})${typeDesc}`);
-    }
+    });
     if (schema.relationships.length > 0) {
       const rels = schema.relationships.map(r => {
         const desc = r.description ? `(${r.description})` : '';
@@ -152,12 +159,27 @@ export class OntologySdk {
       }).join(', ');
       lines.push(`关系：${rels}`);
     }
-    if (schema.types.length > maxTypes) {
-      lines.push(`（共${schema.types.length}个类型，更多请调用 get_ontology_schema）`);
+    if (schema.types.length > detailBudget) {
+      lines.push(`（以上 ${detailBudget} 个类型含字段详情；其余 ${schema.types.length - detailBudget} 个仅列出名称，需要其字段时请调用 get_ontology_schema 并传入 typeName）`);
     }
     const result = { summary: lines.join('\n'), typeNames };
     this.schemaSummaryCache.set(tenantId, result);
     return result;
+  }
+
+  /** Tier-1 lazy detail (ADR-0050): full schema projection for a single object type. */
+  async getTypeDetail(tenantId: string, typeName: string): Promise<OntologySchema> {
+    const schema = await this.getSchema(tenantId);
+    const target = schema.types.find(t => t.name === typeName);
+    if (!target) {
+      const available = schema.types.map(t => t.name).slice(0, 10);
+      const more = schema.types.length > 10 ? ` (共 ${schema.types.length} 个，调用 get_ontology_schema() 查看完整列表)` : '';
+      throw new NotFoundException(`对象类型 "${typeName}" 不存在。可用类型：${available.join(', ')}${more}`);
+    }
+    const relationships = schema.relationships.filter(
+      r => r.sourceType === typeName || r.targetType === typeName,
+    );
+    return { types: [target], relationships };
   }
 
   // --- Ontology writes (each gated on ontology.design) ---

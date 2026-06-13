@@ -61,6 +61,25 @@ export class ViewManagerService {
     await this.prisma.$executeRawUnsafe(`DROP MATERIALIZED VIEW IF EXISTS "${name}"`);
   }
 
+  /**
+   * Drop every materialized view belonging to a tenant, matched by the same name
+   * prefix viewName() builds (mv_<tenantSlug>_*). Deleting the object_type rows does
+   * NOT drop these views — they are separate DB objects — so any whole-tenant teardown
+   * (test cleanup, future TenantService.delete) must call this or the views orphan and
+   * accumulate (unbounded for uniquely-named types).
+   */
+  async dropAllForTenant(tenantId: string): Promise<void> {
+    // Reuse viewName's prefix derivation by passing empty objectTypeName, then extract the prefix
+    const prefix = viewName(tenantId, '').slice(0, -1); // mv_<tSlug>_ without trailing char from empty name
+    const rows = await this.prisma.$queryRawUnsafe<{ matviewname: string }[]>(
+      `SELECT matviewname FROM pg_matviews WHERE matviewname LIKE $1`,
+      `${prefix}_%`,
+    );
+    for (const { matviewname } of rows) {
+      await this.prisma.$executeRawUnsafe(`DROP MATERIALIZED VIEW IF EXISTS "${matviewname}"`);
+    }
+  }
+
   async refresh(tenantId: string, objectTypeName: string): Promise<void> {
     const name = viewName(tenantId, objectTypeName);
     // Skip silently if the view doesn't exist — expected for objectTypes created before

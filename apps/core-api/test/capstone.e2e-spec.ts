@@ -1,7 +1,13 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { PrismaClient } from '@omaha/db';
-import { createTestApp, loginAsAdmin } from './test-helpers';
+import {
+  createTestApp,
+  ensureTestTenant,
+  cleanupTestTenant,
+  loginAsTestTenantAdmin,
+  TEST_TENANT_SLUG,
+} from './test-helpers';
 import { ViewManagerService } from '../src/modules/ontology/view-manager.service';
 
 describe('Capstone — multi-feature flagship query (e2e)', () => {
@@ -21,7 +27,9 @@ describe('Capstone — multi-feature flagship query (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    token = await loginAsAdmin(app);
+    await ensureTestTenant(app);
+    await cleanupTestTenant(app);
+    token = await loginAsTestTenantAdmin(app);
     prisma = new PrismaClient();
     viewManager = app.get(ViewManagerService);
 
@@ -32,20 +40,8 @@ describe('Capstone — multi-feature flagship query (e2e)', () => {
     tenantId = me.body.tenantId;
     adminUserId = me.body.id;
 
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM object_instances WHERE tenant_id = $1::uuid AND object_type LIKE 'cap_probe%'`,
-      tenantId,
-    );
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM object_relationships WHERE tenant_id = $1::uuid AND source_type_id IN (SELECT id FROM object_types WHERE tenant_id = $1::uuid AND name LIKE 'cap_probe%')`,
-      tenantId,
-    );
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM object_types WHERE tenant_id = $1::uuid AND name LIKE 'cap_probe%'`,
-      tenantId,
-    );
-    await prisma.$executeRawUnsafe(`DELETE FROM users WHERE email = 'capstone-sales@demo.com'`);
-    await prisma.$executeRawUnsafe(`DELETE FROM roles WHERE name = 'capstone-sales'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM users WHERE email = 'capstone-sales@tenant-test.local'`);
+    await prisma.$executeRawUnsafe(`DELETE FROM roles WHERE name = 'capstone-sales' AND tenant_id = $1::uuid`, tenantId);
 
     paymentTypeId = (
       await request(app.getHttpServer())
@@ -129,7 +125,7 @@ describe('Capstone — multi-feature flagship query (e2e)', () => {
     const sales = await prisma.user.create({
       data: {
         tenantId,
-        email: 'capstone-sales@demo.com',
+        email: 'capstone-sales@tenant-test.local',
         name: 'Capstone Sales',
         passwordHash: hash,
         roleId: salesRoleId,
@@ -139,7 +135,7 @@ describe('Capstone — multi-feature flagship query (e2e)', () => {
 
     const salesLogin = await request(app.getHttpServer())
       .post('/auth/login')
-      .send({ email: 'capstone-sales@demo.com', password: 'secret123', tenantSlug: 'demo' });
+      .send({ email: 'capstone-sales@tenant-test.local', password: 'secret123', tenantSlug: TEST_TENANT_SLUG });
     salesToken = salesLogin.body.accessToken;
 
     const orders = [
@@ -186,16 +182,8 @@ describe('Capstone — multi-feature flagship query (e2e)', () => {
   });
 
   afterAll(async () => {
-    for (const id of seededIds) {
-      await prisma.$executeRawUnsafe(`DELETE FROM object_instances WHERE id = $1::uuid`, id);
-    }
-    for (const id of [orderTypeId, paymentTypeId]) {
-      if (id) {
-        await request(app.getHttpServer())
-          .delete(`/ontology/types/${id}`)
-          .set('Authorization', `Bearer ${token}`);
-      }
-    }
+    // Self-created actor + its audit trail first (cleanupTestTenant covers types/instances/
+    // relationships but not users/roles/audit_logs).
     if (salesUserId) {
       await prisma.$executeRawUnsafe(`DELETE FROM audit_logs WHERE actor_id = $1::uuid`, salesUserId);
       await prisma.$executeRawUnsafe(`DELETE FROM users WHERE id = $1::uuid`, salesUserId);
@@ -203,6 +191,7 @@ describe('Capstone — multi-feature flagship query (e2e)', () => {
     if (salesRoleId) {
       await prisma.$executeRawUnsafe(`DELETE FROM roles WHERE id = $1::uuid`, salesRoleId);
     }
+    await cleanupTestTenant(app);
     await prisma.$disconnect();
     await app.close();
   });

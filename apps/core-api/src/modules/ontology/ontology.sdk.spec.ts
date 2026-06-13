@@ -96,6 +96,68 @@ describe('OntologySdk — allowedValues flows through getSchema', () => {
   });
 });
 
+describe('OntologySdk — schema menu existence is never truncated (ADR-0050)', () => {
+  function manyTypes(n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      name: `type_${String(i).padStart(3, '0')}`,
+      label: `T${i}`,
+      description: undefined,
+      properties: [{ name: 'f', type: 'string', label: 'F', filterable: true }],
+      derivedProperties: [],
+    }));
+  }
+
+  it('lists every type name even far beyond the detail budget', async () => {
+    const { sdk, mockOntologyService } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue(manyTypes(40));
+    const { summary, typeNames } = await sdk.getSchemaSummary('tenant-1');
+    expect(typeNames).toHaveLength(40);
+    // Every type's existence line is present, including the last one past the budget.
+    for (let i = 0; i < 40; i++) {
+      expect(summary).toContain(`type_${String(i).padStart(3, '0')}`);
+    }
+  });
+
+  it('emits field detail within budget and name-only past it', async () => {
+    const { sdk, mockOntologyService } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue(manyTypes(40));
+    const { summary } = await sdk.getSchemaSummary('tenant-1');
+    // In-budget type carries its field; past-budget type is name-only (no field paren).
+    expect(summary).toContain('type_000(f:string');
+    expect(summary).toContain('- type_039');
+    expect(summary).not.toContain('type_039(f:string');
+    // Hint points the Agent at the lazy detail path.
+    expect(summary).toContain('get_ontology_schema');
+  });
+});
+
+describe('OntologySdk — getTypeDetail lazy Tier-1 (ADR-0050)', () => {
+  it('returns only the requested type and its incident relationships', async () => {
+    const { sdk, mockOntologyService } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue([
+      { name: 'model_metric', label: 'MM', properties: [{ name: 'sales', type: 'number', label: 'S', sortable: true }], derivedProperties: [] },
+      { name: 'brand_share', label: 'BS', properties: [], derivedProperties: [] },
+      { name: 'customer', label: 'C', properties: [], derivedProperties: [] },
+    ]);
+    mockOntologyService.listRelationships.mockResolvedValue([
+      { name: 'rel1', sourceType: { name: 'model_metric' }, targetType: { name: 'brand_share' }, cardinality: 'one-to-many', description: undefined },
+      { name: 'rel2', sourceType: { name: 'customer' }, targetType: { name: 'brand_share' }, cardinality: 'one-to-many', description: undefined },
+    ]);
+    const detail = await sdk.getTypeDetail('tenant-1', 'model_metric');
+    expect(detail.types).toHaveLength(1);
+    expect(detail.types[0].name).toBe('model_metric');
+    expect(detail.relationships.map(r => r.name)).toEqual(['rel1']);
+  });
+
+  it('throws with available type names when the type is unknown', async () => {
+    const { sdk, mockOntologyService } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue([
+      { name: 'customer', label: 'C', properties: [], derivedProperties: [] },
+    ]);
+    await expect(sdk.getTypeDetail('tenant-1', 'nope')).rejects.toThrow('customer');
+  });
+});
+
 describe('OntologySdk — TypeResolver delegation', () => {
   it('updateObjectType uses TypeResolver not listObjectTypes', async () => {
     const { sdk, mockOntologyService } = makeHarness();

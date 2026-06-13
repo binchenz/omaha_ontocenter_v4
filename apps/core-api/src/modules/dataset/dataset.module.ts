@@ -8,6 +8,6 @@ import { AgentSdkModule } from '../agent/sdk/agent-sdk.module';
 @Module({
   imports: [AgentSdkModule],
   providers: [PgBossService, pgBossProvider, DatasetService, SyncJobService, SyncJobWorker],
-  exports: [DatasetService, SyncJobService, PgBossService],
+  exports: [DatasetService, SyncJobService, PgBossService, pgBossProvider],
 })
 export class DatasetModule {}

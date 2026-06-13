@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { PrismaClient } from '@omaha/db';
-import { createTestApp, loginAsAdmin } from './test-helpers';
+import { createTestApp, ensureTestTenant, cleanupTestTenant, loginAsTestTenantAdmin } from './test-helpers';
 import { ViewManagerService } from '../src/modules/ontology/view-manager.service';
 
 describe('Query include/select (e2e)', () => {
@@ -16,28 +16,11 @@ describe('Query include/select (e2e)', () => {
 
   beforeAll(async () => {
     app = await createTestApp();
-    token = await loginAsAdmin(app);
+    tenantId = await ensureTestTenant(app);
+    await cleanupTestTenant(app); // clear any leftovers from a crashed prior run before seeding
+    token = await loginAsTestTenantAdmin(app);
     prisma = new PrismaClient();
     viewManager = app.get(ViewManagerService);
-
-    const me = await request(app.getHttpServer())
-      .get('/auth/me')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    tenantId = me.body.tenantId;
-
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM object_instances WHERE tenant_id = $1::uuid AND object_type LIKE 'incl_probe%'`,
-      tenantId,
-    );
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM object_relationships WHERE tenant_id = $1::uuid AND source_type_id IN (SELECT id FROM object_types WHERE tenant_id = $1::uuid AND name LIKE 'incl_probe%')`,
-      tenantId,
-    );
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM object_types WHERE tenant_id = $1::uuid AND name LIKE 'incl_probe%'`,
-      tenantId,
-    );
 
     paymentTypeId = (
       await request(app.getHttpServer())
@@ -114,16 +97,7 @@ describe('Query include/select (e2e)', () => {
   });
 
   afterAll(async () => {
-    for (const id of seededIds) {
-      await prisma.$executeRawUnsafe(`DELETE FROM object_instances WHERE id = $1::uuid`, id);
-    }
-    for (const id of [orderTypeId, paymentTypeId]) {
-      if (id) {
-        await request(app.getHttpServer())
-          .delete(`/ontology/types/${id}`)
-          .set('Authorization', `Bearer ${token}`);
-      }
-    }
+    await cleanupTestTenant(app);
     await prisma.$disconnect();
     await app.close();
   });
