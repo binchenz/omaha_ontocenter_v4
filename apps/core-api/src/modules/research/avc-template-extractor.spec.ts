@@ -330,4 +330,125 @@ describe('AvcTemplateExtractor.extractAll — 2-7 present but unparseable struct
   );
 });
 
+// ADR-0058: the file's own 目录 title is the source of truth for 品类, NOT the caller's
+// asserted category. A positional bug in a script (category from filename index) mislabeled
+// 40/50 files; deriving from the file makes that class of bug structurally impossible.
+describe('AvcTemplateExtractor.extractAll — category derived from 目录 title (ADR-0058)', () => {
+  const extractor = new AvcTemplateExtractor();
+  const ExcelJS = require('exceljs');
+  const os = require('os');
+
+  /** A minimal full-variant workbook WITH a 目录 sheet declaring `title` in R1. */
+  async function writeWorkbookWithToc(title: string): Promise<string> {
+    const wb = new ExcelJS.Workbook();
+
+    const toc = wb.addWorksheet('目录');
+    toc.getRow(1).getCell(2).value = title;
+
+    const s1 = wb.addWorksheet('2-1整体市场销售规模走势');
+    s1.getRow(1).getCell(6).value = '26.04';
+    [['零售额', 100], ['零售量', 200], ['零售均价', 5]].forEach(([m, v], i) => {
+      const row = s1.getRow(2 + i);
+      row.getCell(5).value = m;
+      row.getCell(6).value = v;
+    });
+
+    const s5 = wb.addWorksheet('2-5主要品牌零售竞争');
+    s5.getRow(1).getCell(3).value = '2-5-1分价格段品牌零售额竞争';
+    s5.getRow(2).getCell(4).value = '整体';
+    s5.getRow(2).getCell(5).value = '800-999';
+    s5.getRow(3).getCell(4).value = '格兰仕';
+    s5.getRow(3).getCell(5).value = 0.3;
+
+    const file = path.join(os.tmpdir(), `avc-toc-${process.pid}-${Math.abs(hashString(title))}.xlsx`);
+    await wb.xlsx.writeFile(file);
+    return file;
+  }
+  // Deterministic per-title temp filename without Date.now/random (kept stable across runs).
+  function hashString(s: string): number {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return h;
+  }
+
+  it('derives the category from the 目录 title when the caller asserts nothing', async () => {
+    const file = await writeWorkbookWithToc('《AVC-台式复合机-线上零售市场监测月度数据报告》');
+    try {
+      const out = await extractor.extractAll(file);
+      expect(out.category).toBe('台式复合机');
+      expect(out.metrics.every((r) => r.category === '台式复合机')).toBe(true);
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+
+  it('derives through normalizeCategory for an essence-style title with extra dashes', async () => {
+    const file = await writeWorkbookWithToc('《AVC-破壁机-线上月度监测报告-综合分析精华版》');
+    try {
+      const out = await extractor.extractAll(file);
+      // 破壁机 is an alias of 食品料理机 — derivation must fold through normalizeCategory.
+      expect(out.category).toBe('食品料理机');
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+
+  it('throws when the 目录 title category is not in the vocabulary', async () => {
+    const file = await writeWorkbookWithToc('《AVC-扫地机器人-线上零售市场监测月度数据报告》');
+    try {
+      await expect(extractor.extractAll(file)).rejects.toThrow();
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+
+  it('throws a Category mismatch when the caller asserts a category that disagrees with the file', async () => {
+    // The exact bug class from ADR-0058: a 台式复合机 file asserted as 电饭煲 must fail loudly,
+    // never silently store 台式复合机 rows under 电饭煲.
+    const file = await writeWorkbookWithToc('《AVC-台式复合机-线上零售市场监测月度数据报告》');
+    try {
+      await expect(extractor.extractAll(file, '电饭煲')).rejects.toThrow(/mismatch/i);
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+
+  it('accepts a caller-asserted category that matches the file (cross-check passes)', async () => {
+    const file = await writeWorkbookWithToc('《AVC-台式复合机-线上零售市场监测月度数据报告》');
+    try {
+      const out = await extractor.extractAll(file, '台式复合机');
+      expect(out.category).toBe('台式复合机');
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+
+  it('falls back to the caller category when no 目录 sheet exists (hand-built test workbooks)', async () => {
+    // Synthetic workbooks built in other suites have no 目录; the caller assertion remains
+    // the only category source there, so those tests keep working.
+    const wb = new ExcelJS.Workbook();
+    const s1 = wb.addWorksheet('2-1整体市场销售规模走势');
+    s1.getRow(1).getCell(6).value = '26.04';
+    [['零售额', 100], ['零售量', 200], ['零售均价', 5]].forEach(([m, v], i) => {
+      const row = s1.getRow(2 + i);
+      row.getCell(5).value = m;
+      row.getCell(6).value = v;
+    });
+    const s5 = wb.addWorksheet('2-5主要品牌零售竞争');
+    s5.getRow(1).getCell(3).value = '2-5-1分价格段品牌零售额竞争';
+    s5.getRow(2).getCell(4).value = '整体';
+    s5.getRow(2).getCell(5).value = '800-999';
+    s5.getRow(3).getCell(4).value = '格兰仕';
+    s5.getRow(3).getCell(5).value = 0.3;
+    const file = path.join(os.tmpdir(), `avc-no-toc-${process.pid}.xlsx`);
+    await wb.xlsx.writeFile(file);
+    try {
+      const out = await extractor.extractAll(file, '微波炉');
+      expect(out.category).toBe('微波炉');
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+});
+
 

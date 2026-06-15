@@ -62,8 +62,13 @@ function make() {
     }),
   };
 
+  // Provisioner: idempotent pipeline setup, called at the start of fetch().
+  const provisioner: any = {
+    provision: jest.fn(async () => ({ created: [], skipped: [] })),
+  };
+
   return {
-    connector: new AvcConnector(extractor, prisma, datasetService),
+    connector: new AvcConnector(extractor, prisma, datasetService, provisioner),
     extractor,
     prisma,
     connectors,
@@ -71,6 +76,7 @@ function make() {
     appendCalls,
     readyCalls,
     datasetService,
+    provisioner,
   };
 }
 

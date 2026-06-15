@@ -141,7 +141,7 @@ describe('OrchestratorService', () => {
   });
 
   it('terminates with error after max tool iterations', async () => {
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 13; i++) {
       llm.queueResponse({
         type: 'tool_calls',
         calls: [{ id: `call_${i}`, name: 'query_objects', arguments: { objectType: 'customer' } }],
@@ -157,7 +157,7 @@ describe('OrchestratorService', () => {
     }
 
     const toolCalls = events.filter(e => e.type === 'tool_call');
-    expect(toolCalls.length).toBeLessThanOrEqual(8);
+    expect(toolCalls.length).toBeLessThanOrEqual(12);
 
     const errorEvent = events.find(e => e.type === 'error');
     expect(errorEvent).toBeDefined();
@@ -303,12 +303,12 @@ describe('OrchestratorService', () => {
       errorSpy.mockRestore();
     });
 
-    it('logs a warning when system prompt exceeds 4000 tokens', async () => {
+    it('logs a warning when system prompt exceeds 6000 tokens', async () => {
       const fatSkill: AgentSkill = {
         name: 'fat',
         description: '',
         tools: [],
-        systemPrompt: () => 'x'.repeat(6500),
+        systemPrompt: () => 'x'.repeat(9500),
       };
       const fatService = new OrchestratorService(llm, [], [fatSkill]);
       llm.queueResponse({ type: 'text', content: 'ok' });
@@ -321,12 +321,12 @@ describe('OrchestratorService', () => {
       expect(errorSpy).not.toHaveBeenCalled();
     });
 
-    it('logs an error when system prompt exceeds 5000 tokens', async () => {
+    it('logs an error when system prompt exceeds 8000 tokens', async () => {
       const hugeSkill: AgentSkill = {
         name: 'huge',
         description: '',
         tools: [],
-        systemPrompt: () => 'x'.repeat(8000),
+        systemPrompt: () => 'x'.repeat(12500),
       };
       const hugeService = new OrchestratorService(llm, [], [hugeSkill]);
       llm.queueResponse({ type: 'text', content: 'ok' });

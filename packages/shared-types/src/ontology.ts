@@ -24,12 +24,24 @@ export interface DerivedPropertyDefinition extends PropertyDefinition {
   params?: Array<{ name: string; type: 'datetime' | 'decimal' | 'string' | 'int' | 'boolean' }>;
 }
 
+/**
+ * ADR-0057: Dimension constraints for query-time validation.
+ * Declared per ObjectType — required dims must be filtered, defaulted dims auto-inject.
+ */
+export interface DimensionConstraints {
+  /** Properties that MUST appear in filters — omission returns structured error + available values */
+  required: string[];
+  /** Properties auto-injected with a default value when not filtered explicitly */
+  defaults: Record<string, string>;
+}
+
 export interface CreateObjectTypeRequest {
   name: string;
   label: string;
   description?: string;
   properties: PropertyDefinition[];
   derivedProperties?: DerivedPropertyDefinition[];
+  dimensions?: DimensionConstraints;
 }
 
 export interface UpdateObjectTypeRequest {
@@ -37,6 +49,7 @@ export interface UpdateObjectTypeRequest {
   description?: string;
   properties?: PropertyDefinition[];
   derivedProperties?: DerivedPropertyDefinition[];
+  dimensions?: DimensionConstraints;
 }
 
 export interface ObjectTypeResponse {

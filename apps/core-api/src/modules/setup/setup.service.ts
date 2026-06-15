@@ -31,7 +31,12 @@ export class SetupService {
       { key: 'DEEPSEEK_API_KEY', value: dto.apiKey },
     ].map(s => this.prisma.systemSetting.upsert({ where: { key: s.key }, update: { value: s.value }, create: s })));
 
-    const slug = dto.tenantName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    // Generate slug: use Latin chars directly; for CJK names, use pinyin-style fallback
+    let slug = dto.tenantName.toLowerCase().replace(/[^a-z0-9一-鿿]+/g, '-').replace(/^-|-$/g, '');
+    // If slug is empty or all-CJK (no Latin), generate a short random slug
+    if (!slug || !/[a-z0-9]/.test(slug)) {
+      slug = 'org-' + crypto.randomBytes(4).toString('hex');
+    }
     const tenant = await this.prisma.tenant.create({ data: { name: dto.tenantName, slug } });
 
     const [adminRole] = await Promise.all([

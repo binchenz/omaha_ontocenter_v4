@@ -15,9 +15,10 @@ import { OntologyModule } from '../ontology/ontology.module';
 import { OntologySdkModule } from '../ontology/ontology-sdk.module';
 import { AgentSdkModule } from '../agent/sdk/agent-sdk.module';
 import { DatasetModule } from '../dataset/dataset.module';
+import { PipelineModule } from '../pipeline/pipeline.module';
 
 @Module({
-  imports: [OntologyModule, OntologySdkModule, AgentSdkModule, DatasetModule],
+  imports: [OntologyModule, OntologySdkModule, AgentSdkModule, DatasetModule, PipelineModule],
   providers: [
     ResearchSdk,
     AvcTemplateExtractor,

@@ -145,33 +145,32 @@ function make(seed: { connectors?: any[]; objectTypes?: any[]; pipelines?: any[]
 }
 
 describe('AvcPipelineProvisioner (#174, ADR-0055 Step 2)', () => {
-  it('creates the 3 fixed AVC pipelines for a tenant, all in draft', async () => {
+  it('creates the 3 fixed AVC pipelines for a tenant, active on creation (Phase 5 cutover)', async () => {
     const { provisioner, pipelines, configureCalls } = make();
     const res = await provisioner.provision(T);
 
     expect(res.created.sort()).toEqual([...PIPELINE_NAMES].sort());
     expect(res.skipped).toEqual([]);
     expect(pipelines).toHaveLength(3);
-    // Every pipeline created with autoActivate:false → draft (live importStar path untouched).
+    // Cutover complete (ADR-0055 Step 5): every pipeline is created with autoActivate:true so
+    // markReady triggers runs immediately — the reactive chain is now the live AVC path.
     for (const call of configureCalls) {
-      expect(call.dto.autoActivate).toBe(false);
+      expect(call.dto.autoActivate).toBe(true);
     }
   });
 
-  it('seeds the brand_mapping + price_bands TransformConfigs so compute steps resolve', async () => {
+  it('seeds the brand_mapping TransformConfig so compute steps resolve', async () => {
     const { provisioner, configs, createCalls } = make();
     await provisioner.provision(T);
     const types = configs.map((c) => c.type).sort();
     expect(types).toContain('brand_mapping');
-    expect(types).toContain('price_bands');
-    expect(createCalls.length).toBeGreaterThanOrEqual(2);
+    expect(createCalls.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not re-seed a TransformConfig that already exists', async () => {
     const { provisioner, transformConfigService } = make({
       configs: [
         { tenantId: T, name: 'avc_brands', type: 'brand_mapping', version: 4, config: { mappings: {} } },
-        { tenantId: T, name: 'avc_price_bands', type: 'price_bands', version: 2, config: { bands: [] } },
       ],
     });
     await provisioner.provision(T);
@@ -230,13 +229,11 @@ describe('AvcPipelineProvisioner (#174, ADR-0055 Step 2)', () => {
     expect(compute.config.configRef).toBe('avc_brands');
   });
 
-  it('wires the model_metric pipeline with a price_band compute step', async () => {
+  it('wires the model_metric pipeline with zero steps (pure pass-through, ADR-0056)', async () => {
     const { provisioner, configureCalls } = make();
     await provisioner.provision(T);
     const modelMetric = configureCalls.find((c) => c.dto.name === 'avc_model_metric')!;
-    const compute = modelMetric.dto.steps.find((s: any) => s.type === 'compute');
-    expect(compute.config.function).toBe('price_band');
-    expect(compute.config.configRef).toBe('avc_price_bands');
+    expect(modelMetric.dto.steps).toEqual([]);
   });
 
   it('ensures the 3 star ObjectTypes when absent (fresh tenant, no prior importStar run)', async () => {
@@ -290,16 +287,16 @@ describe('AvcPipelineProvisioner (#174, ADR-0055 Step 2)', () => {
     expect(bs.propertyMappings).toMatchObject({ brand: 'brand' });
   });
 
-  describe('activate (#175, ADR-0055 Step 4 — the breaking flip)', () => {
-    it('flips the 3 draft AVC pipelines to active', async () => {
+  describe('activate (#175, ADR-0055 Step 4 — now a no-op safety net post-cutover)', () => {
+    it('provision() leaves no drafts (autoActivate:true), so activate() flips nothing', async () => {
       const ctx = make();
-      await ctx.provisioner.provision(T); // creates them as draft
-      const res = await ctx.provisioner.activate(T);
-      expect(res.activated.sort()).toEqual([...PIPELINE_NAMES].sort());
+      await ctx.provisioner.provision(T); // Phase 5: created already active
       for (const p of ctx.pipelines) expect(p.status).toBe('active');
+      const res = await ctx.provisioner.activate(T);
+      expect(res.activated).toEqual([]); // nothing left in draft to flip
     });
 
-    it('is idempotent — re-activating already-active pipelines flips nothing new', async () => {
+    it('is idempotent — re-running activate flips nothing new', async () => {
       const ctx = make();
       await ctx.provisioner.provision(T);
       await ctx.provisioner.activate(T);
@@ -309,14 +306,18 @@ describe('AvcPipelineProvisioner (#174, ADR-0055 Step 2)', () => {
       expect(ctx.prisma.pipeline.update).not.toHaveBeenCalled();
     });
 
-    it('only touches the AVC pipelines, not other tenant pipelines', async () => {
+    it('still flips a stray pre-existing draft AVC pipeline, leaving others untouched', async () => {
+      // Defensive: if a draft AVC pipeline survives from a pre-cutover provision, activate()
+      // must still flip it (it filters by status:'draft'), without touching unrelated pipelines.
       const ctx = make({
-        pipelines: [{ id: 'other', tenantId: T, name: 'unrelated', status: 'draft' }],
+        pipelines: [
+          { id: 'stray', tenantId: T, name: PIPELINE_NAMES[0], status: 'draft' },
+          { id: 'other', tenantId: T, name: 'unrelated', status: 'draft' },
+        ],
       });
-      await ctx.provisioner.provision(T);
       await ctx.provisioner.activate(T);
-      const other = ctx.pipelines.find((p) => p.name === 'unrelated')!;
-      expect(other.status).toBe('draft'); // untouched
+      expect(ctx.pipelines.find((p) => p.id === 'stray')!.status).toBe('active');
+      expect(ctx.pipelines.find((p) => p.name === 'unrelated')!.status).toBe('draft'); // untouched
     });
   });
 });

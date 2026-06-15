@@ -42,6 +42,7 @@ export class OntologyService {
         description: dto.description,
         properties: dto.properties as unknown as Prisma.InputJsonValue,
         derivedProperties: (dto.derivedProperties ?? []) as unknown as Prisma.InputJsonValue,
+        ...(dto.dimensions && { dimensions: dto.dimensions as unknown as Prisma.InputJsonValue }),
       },
     });
     await this.artifactManager.reconcile(tenantId, created.id, dto.name, dto.properties);
@@ -64,6 +65,7 @@ export class OntologyService {
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.properties !== undefined && { properties: dto.properties as unknown as Prisma.InputJsonValue }),
         ...(dto.derivedProperties !== undefined && { derivedProperties: dto.derivedProperties as unknown as Prisma.InputJsonValue }),
+        ...(dto.dimensions !== undefined && { dimensions: dto.dimensions as unknown as Prisma.InputJsonValue }),
         version: { increment: 1 },
       },
     });

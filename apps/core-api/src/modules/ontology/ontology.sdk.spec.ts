@@ -158,6 +158,89 @@ describe('OntologySdk — getTypeDetail lazy Tier-1 (ADR-0050)', () => {
   });
 });
 
+describe('OntologySdk — getTenantProfile (data-derived, ADR-pending)', () => {
+  it('lists each populated type with its row count and low-cardinality filterable values', async () => {
+    const { sdk, mockOntologyService, mockPrisma } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue([
+      {
+        name: 'market_metric', label: '市场指标', description: undefined,
+        properties: [
+          { name: 'category', type: 'string', label: '品类', filterable: true },
+          { name: 'value', type: 'number', label: '值', sortable: true },
+        ],
+        derivedProperties: [],
+      },
+    ]);
+    // Row-count groupBy + per-property distinct both go through $queryRawUnsafe.
+    // category is passed as a bound param ($2), so match on args, not SQL text.
+    mockPrisma.$queryRawUnsafe = jest.fn(async (sql: string, ...args: any[]) => {
+      if (/count/i.test(sql)) return [{ object_type: 'market_metric', n: 1234n }];
+      if (args.includes('category')) return [{ v: '电饭煲' }, { v: '净水器' }];
+      return [];
+    });
+
+    const profile = await sdk.getTenantProfile('tenant-1');
+
+    expect(profile).toContain('market_metric');
+    expect(profile).toContain('1234');
+    expect(profile).toContain('电饭煲');
+    expect(profile).toContain('净水器');
+  });
+
+  it('returns empty string when the tenant has no instances (caller skips the segment)', async () => {
+    const { sdk, mockOntologyService, mockPrisma } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue([
+      { name: 'market_metric', label: 'MM', properties: [], derivedProperties: [] },
+    ]);
+    mockPrisma.$queryRawUnsafe = jest.fn(async () => []); // no rows for any query
+    expect(await sdk.getTenantProfile('tenant-1')).toBe('');
+  });
+
+  it('omits high-cardinality filterable props but keeps the type with its count', async () => {
+    const { sdk, mockOntologyService, mockPrisma } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue([
+      {
+        name: 'model_metric', label: '机型', description: undefined,
+        properties: [{ name: 'model', type: 'string', label: '机型名', filterable: true }],
+        derivedProperties: [],
+      },
+    ]);
+    const manyModels = Array.from({ length: 21 }, (_, i) => ({ v: `SF-${i}` })); // > cap of 20
+    mockPrisma.$queryRawUnsafe = jest.fn(async (sql: string, ...args: any[]) => {
+      if (/count/i.test(sql)) return [{ object_type: 'model_metric', n: 388n }];
+      if (args.includes('model')) return manyModels;
+      return [];
+    });
+
+    const profile = await sdk.getTenantProfile('tenant-1');
+    expect(profile).toContain('model_metric');
+    expect(profile).toContain('388');
+    expect(profile).not.toContain('SF-0'); // high-cardinality dimension dropped
+  });
+
+  it('uses schema allowedValues without a DB probe (zero distinct query)', async () => {
+    const { sdk, mockOntologyService, mockPrisma } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue([
+      {
+        name: 'avc_report', label: '报告', description: undefined,
+        properties: [{ name: 'coverage', type: 'string', label: '覆盖', filterable: true, allowedValues: ['full', 'essence'] }],
+        derivedProperties: [],
+      },
+    ]);
+    const probe = jest.fn(async (sql: string) => {
+      if (/count/i.test(sql)) return [{ object_type: 'avc_report', n: 51n }];
+      return [];
+    });
+    mockPrisma.$queryRawUnsafe = probe;
+
+    const profile = await sdk.getTenantProfile('tenant-1');
+    expect(profile).toContain('coverage=full/essence');
+    // Only the count query ran; allowedValues came from schema, not a DISTINCT probe.
+    const distinctCalls = probe.mock.calls.filter(([sql]) => /DISTINCT/i.test(sql as string));
+    expect(distinctCalls).toHaveLength(0);
+  });
+});
+
 describe('OntologySdk — TypeResolver delegation', () => {
   it('updateObjectType uses TypeResolver not listObjectTypes', async () => {
     const { sdk, mockOntologyService } = makeHarness();

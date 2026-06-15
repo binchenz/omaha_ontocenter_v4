@@ -34,12 +34,21 @@ function make(overrides: { datasetKind?: string } = {}) {
   const importEngine: any = {
     importInstances: jest.fn(async () => ({ imported: 2 })),
   };
-  const boss: any = { work: jest.fn() };
+  const boss: any = { work: jest.fn(), createQueue: jest.fn() };
   const worker = new SyncJobWorker(boss, prisma, importEngine);
   return { worker, prisma, importEngine, updates, boss };
 }
 
 describe('SyncJobWorker', () => {
+  it('creates its pg-boss queue before working it (pg-boss v10 requires createQueue)', async () => {
+    const { worker, boss } = make();
+    await worker.onModuleInit();
+    expect(boss.createQueue).toHaveBeenCalledWith('sync-job');
+    const createOrder = boss.createQueue.mock.invocationCallOrder[0];
+    const workOrder = boss.work.mock.invocationCallOrder[0];
+    expect(createOrder).toBeLessThan(workOrder);
+  });
+
   it('rejects a raw Dataset with failed status (permanent, no rethrow)', async () => {
     const { worker, updates } = make({ datasetKind: 'raw' });
     const job = { data: { syncJobId: 'sj-1' } } as any;

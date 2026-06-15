@@ -93,12 +93,23 @@ function make(overrides: { steps?: any[]; inputRows?: any[]; configs?: any[] } =
   const configs: any[] = overrides.configs ?? [];
   const { service: transformConfigService, getCalls } = makeTransformConfigServiceMock(configs);
 
-  const boss: any = { work: jest.fn() };
-  const worker = new PipelineRunWorker(boss, prisma, transformConfigService);
-  return { worker, prisma, datasets, datasetRows, updates, pipelineRunRecord, transformConfigService, getCalls };
+  const boss: any = { work: jest.fn(), createQueue: jest.fn() };
+  const orchestrator: any = { onPipelineRunComplete: jest.fn().mockResolvedValue(undefined) };
+  const worker = new PipelineRunWorker(boss, prisma, transformConfigService, orchestrator);
+  return { worker, boss, orchestrator, prisma, datasets, datasetRows, updates, pipelineRunRecord, transformConfigService, getCalls };
 }
 
 describe('PipelineRunWorker', () => {
+  it('creates its pg-boss queue before working it (pg-boss v10 requires createQueue)', async () => {
+    const { worker, boss } = make();
+    await worker.onModuleInit();
+    // createQueue must run, and must precede work() — otherwise send() silently drops jobs.
+    expect(boss.createQueue).toHaveBeenCalledWith('pipeline-run');
+    const createOrder = boss.createQueue.mock.invocationCallOrder[0];
+    const workOrder = boss.work.mock.invocationCallOrder[0];
+    expect(createOrder).toBeLessThan(workOrder);
+  });
+
   it('executes steps and produces a clean Dataset', async () => {
     const { worker, datasets, datasetRows } = make();
     const job = { data: { pipelineRunId: 'run-1' } } as any;
@@ -127,6 +138,23 @@ describe('PipelineRunWorker', () => {
       recordsProcessed: 2,
       outputDatasetId: expect.any(String),
     }));
+  });
+
+  it('triggers onPipelineRunComplete after success (clean Dataset → SyncJob chain)', async () => {
+    const { worker, orchestrator } = make();
+    const job = { data: { pipelineRunId: 'run-1' } } as any;
+    await (worker as any).handle(job);
+    // The reactive chain must continue past PipelineRun success, else SyncJob never runs
+    // and clean rows never reach object_instances.
+    expect(orchestrator.onPipelineRunComplete).toHaveBeenCalledWith(T, 'run-1');
+  });
+
+  it('does not trigger onPipelineRunComplete when the run fails', async () => {
+    const { worker, prisma, orchestrator } = make();
+    prisma.datasetRow.findMany.mockRejectedValueOnce(new Error('DB gone'));
+    const job = { data: { pipelineRunId: 'run-1' } } as any;
+    await expect((worker as any).handle(job)).rejects.toThrow('DB gone');
+    expect(orchestrator.onPipelineRunComplete).not.toHaveBeenCalled();
   });
 
   it('marks PipelineRun failed on error', async () => {

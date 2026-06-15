@@ -36,6 +36,16 @@ export interface OntologyView {
   derivedProperties: Map<string, OntologyDerivedPropertyView>;
 
   /**
+   * ADR-0057: Dimension constraints.
+   * - `required`: filters MUST constrain these fields or the query returns a structured error.
+   * - `defaults`: these fields are auto-injected when not explicitly filtered.
+   */
+  dimensions?: {
+    required: string[];
+    defaults: Record<string, string>;
+  };
+
+  /**
    * Set by `projectVisible` when the view has been narrowed to a restricted
    * principal's visible fields. Tells the input gates to treat the (possibly
    * now-empty) capability sets as an EXACT whitelist — i.e. suppress the

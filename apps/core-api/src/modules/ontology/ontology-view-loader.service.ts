@@ -3,6 +3,16 @@ import { PrismaService } from '@omaha/db';
 import type { OntologyView, OntologyDerivedPropertyView, RelationInfo } from '@omaha/dsl';
 import type { PropertyDefinition, DerivedPropertyDefinition } from '@omaha/shared-types';
 
+/** Parse the raw JSONB dimensions column into the typed shape (tolerant of nulls/empty). */
+function parseDimensions(raw: unknown): OntologyView['dimensions'] {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+  const required = Array.isArray(obj.required) ? (obj.required as string[]) : [];
+  const defaults = (obj.defaults && typeof obj.defaults === 'object') ? obj.defaults as Record<string, string> : {};
+  if (required.length === 0 && Object.keys(defaults).length === 0) return undefined;
+  return { required, defaults };
+}
+
 @Injectable({ scope: Scope.REQUEST })
 export class OntologyViewLoader {
   private cache = new Map<string, OntologyView | null>();
@@ -57,6 +67,7 @@ export class OntologyViewLoader {
           { name: d.name, expression: d.expression, params: d.params },
         ]),
       ),
+      dimensions: parseDimensions(ot.dimensions),
     };
 
     this.cache.set(key, view);

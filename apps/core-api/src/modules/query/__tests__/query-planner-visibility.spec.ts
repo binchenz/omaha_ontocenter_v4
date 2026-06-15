@@ -32,7 +32,8 @@ function makePlanner(view: OntologyView | null, viewExists = false): QueryPlanne
     exists: jest.fn().mockResolvedValue(viewExists),
     getViewName: jest.fn().mockReturnValue('mv_employee'),
   } as any;
-  return new QueryPlannerService(viewLoader, viewManager);
+  const prisma = { $queryRawUnsafe: jest.fn().mockResolvedValue([]) } as any;
+  return new QueryPlannerService(viewLoader, viewManager, prisma);
 }
 
 const VISIBLE = new Set(['age', 'name']); // salary + salaryBand masked

@@ -21,6 +21,14 @@ describe('normalizeCategory', () => {
     expect(normalizeCategory('　空气炸锅　')).toBe('空气炸锅');
   });
 
+  it('recognizes 台式复合机 as its own canonical category, NOT an alias of 电烤箱', () => {
+    // AVC renamed the oven slot 电烤箱 → 台式复合机 at the 24.12 cycle, but it is a
+    // genuine universe change (零售额 −61%, sub-types & brands turned over), not a rename
+    // (ADR-0058). The two are distinct short series; 台式复合机 must stand on its own.
+    expect(normalizeCategory('台式复合机')).toBe('台式复合机');
+    expect(normalizeCategory('电烤箱')).toBe('电烤箱');
+  });
+
   it('returns null for an unknown category (the unjoinable-island guard)', () => {
     expect(normalizeCategory('扫地机器人')).toBeNull();
     expect(normalizeCategory('')).toBeNull();

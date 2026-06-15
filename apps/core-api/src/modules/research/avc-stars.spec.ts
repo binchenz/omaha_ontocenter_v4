@@ -33,6 +33,8 @@ describe('AVC star registry (#175)', () => {
     expect(row.value).toBe(100);
     expect(row.metric).toBe('零售额');
     expect((row as any).properties).toBeUndefined();
+    // year derived from month at ingest so aggregate_objects can group by year (ADR-0059).
+    expect(row.year).toBe('26');
   });
 
   it('brand_share raw row keys by 品类_品牌_价格段_周期 and carries raw brand for later normalization', () => {

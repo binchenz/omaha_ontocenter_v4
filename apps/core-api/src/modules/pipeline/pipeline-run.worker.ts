@@ -4,6 +4,7 @@ import PgBoss from 'pg-boss';
 import { PG_BOSS } from '../dataset/pg-boss.provider';
 import { PIPELINE_RUN_QUEUE } from './pipeline-run.service';
 import { TransformConfigService } from '../transform-config/transform-config.service';
+import { DataPipelineOrchestrator } from './data-pipeline.orchestrator';
 
 interface PipelineRunPayload { pipelineRunId: string; }
 
@@ -18,9 +19,14 @@ export class PipelineRunWorker implements OnModuleInit {
     @Inject(PG_BOSS) private readonly boss: PgBoss,
     private readonly prisma: PrismaService,
     private readonly transformConfigService: TransformConfigService,
+    private readonly orchestrator: DataPipelineOrchestrator,
   ) {}
 
   async onModuleInit() {
+    // pg-boss v10 requires a queue to exist before send()/work(). createQueue is an
+    // idempotent upsert, so calling it on every boot is safe and keeps queue ownership
+    // co-located with its worker.
+    await this.boss.createQueue(PIPELINE_RUN_QUEUE);
     await this.boss.work<PipelineRunPayload>(PIPELINE_RUN_QUEUE, async (jobs) => {
       for (const job of jobs) {
         await this.handle(job);
@@ -115,6 +121,12 @@ export class PipelineRunWorker implements OnModuleInit {
           recordsProcessed: rows.length,
           completedAt: new Date(),
         },
+      });
+
+      // Trigger the next reactive step: clean Dataset → SyncJob (ADR-0045 §2).
+      // Fire-and-forget: pg-boss handles retries if the orchestrator enqueue transiently fails.
+      void this.orchestrator.onPipelineRunComplete(run.tenantId, pipelineRunId).catch((err) => {
+        this.logger.error(`onPipelineRunComplete failed for run=${pipelineRunId}`, err);
       });
     } catch (err: unknown) {
       this.logger.error(`PipelineRun ${pipelineRunId} failed`, err);

@@ -75,7 +75,10 @@ export const toMarketMetricRawRow = (r: MarketMetricRow): AvcStarRow =>
   flatten({
     externalId: `${r.category}_${r.month}_${r.metric}`,
     label: `${r.category} ${r.month} ${r.metric}`,
-    properties: { category: r.category, month: r.month, metric: r.metric, value: r.value, sourceReport: r.sourceReport },
+    // `year` is derived from `month` at ingest (write-once, never recomputed at query time) so
+    // `aggregate_objects` can `group by year` deterministically — the Agent must never hand-sum
+    // months in a reply (ADR-0059). Keep year in lockstep with month; this is the only writer.
+    properties: { category: r.category, month: r.month, year: r.month.slice(0, 2), metric: r.metric, value: r.value, sourceReport: r.sourceReport },
   });
 
 export const toBrandShareRawRow = (r: BrandShareRow): AvcStarRow =>

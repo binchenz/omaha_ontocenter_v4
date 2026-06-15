@@ -113,11 +113,13 @@ export const MARKET_METRIC_DEF = {
   properties: [
     { name: 'category', label: '品类', type: 'string' as const, filterable: true },
     { name: 'month', label: '月份', type: 'string' as const, filterable: true, sortable: true },
-    { name: 'metric', label: '指标', type: 'string' as const, filterable: true },
+    { name: 'year', label: '年份', type: 'string' as const, filterable: true, sortable: true },
+    { name: 'metric', label: '指标', type: 'string' as const, filterable: true, allowedValues: ['零售额', '零售量', '零售均价'] },
     { name: 'value', label: '数值', type: 'number' as const, sortable: true },
     { name: 'sourceReport', label: '来源报告', type: 'string' as const },
   ],
   derivedProperties: [],
+  dimensions: { required: ['category', 'month'], defaults: {} },
 };
 
 export const MODEL_METRIC_DEF = {
@@ -138,6 +140,7 @@ export const MODEL_METRIC_DEF = {
     { name: 'sourceReport', label: '来源报告', type: 'string' as const },
   ],
   derivedProperties: [],
+  dimensions: { required: ['category', 'month'], defaults: {} },
 };
 
 export const AVC_REPORT_DEF = {
@@ -162,9 +165,10 @@ export const BRAND_SHARE_DEF = {
     { name: 'brand', label: '品牌', type: 'string' as const, filterable: true },
     { name: 'priceBand', label: '价格段', type: 'string' as const, filterable: true },
     { name: 'period', label: '周期', type: 'string' as const, filterable: true },
-    { name: 'metric', label: '指标', type: 'string' as const, filterable: true },
+    { name: 'metric', label: '指标', type: 'string' as const, filterable: true, allowedValues: ['share'] },
     { name: 'value', label: '份额', type: 'number' as const, sortable: true },
     { name: 'sourceReport', label: '来源报告', type: 'string' as const },
   ],
   derivedProperties: [],
+  dimensions: { required: ['category', 'period'], defaults: { priceBand: '整体' } },
 };

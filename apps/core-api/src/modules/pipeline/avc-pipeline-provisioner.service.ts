@@ -24,14 +24,13 @@ import {
  *
  *   Pipeline 1: avc_market_excel → market_metric   (filter out invalid/zero rows)
  *   Pipeline 2: avc_brand_excel  → brand_share      (normalize_brand via avc_brands TransformConfig)
- *   Pipeline 3: avc_model_excel  → model_metric     (price_band via avc_price_bands TransformConfig)
+ *   Pipeline 3: avc_model_excel  → model_metric     (pass-through — no price_band step, ADR-0056)
  */
 @Injectable()
 export class AvcPipelineProvisioner {
   private readonly logger = new Logger(AvcPipelineProvisioner.name);
 
   static readonly BRAND_CONFIG = 'avc_brands';
-  static readonly PRICE_BAND_CONFIG = 'avc_price_bands';
 
   constructor(
     private readonly prisma: PrismaService,
@@ -41,17 +40,9 @@ export class AvcPipelineProvisioner {
   ) {}
 
   async provision(tenantId: string): Promise<{ created: string[]; skipped: string[] }> {
-    // 1. Seed the brand_mapping + price_bands TransformConfigs (skip if already present).
+    // 1. Seed the brand_mapping TransformConfig (skip if already present).
     await this.ensureTransformConfig(tenantId, AvcPipelineProvisioner.BRAND_CONFIG, 'brand_mapping', {
       mappings: {},
-    });
-    await this.ensureTransformConfig(tenantId, AvcPipelineProvisioner.PRICE_BAND_CONFIG, 'price_bands', {
-      bands: [
-        { max: 2000, label: '0-2000' },
-        { max: 4000, label: '2000-4000' },
-        { max: 6000, label: '4000-6000' },
-        { label: '6000+' },
-      ],
     });
 
     // 2. Provision one connector + one pipeline per star.
@@ -81,7 +72,7 @@ export class AvcPipelineProvisioner {
         connectorId: connector.id,
         outputObjectTypeId,
         steps: spec.steps,
-        autoActivate: false, // draft — live importStar path stays the source of truth until cutover
+        autoActivate: true, // Cutover complete (Phase 5) — activate immediately so markReady triggers runs
       });
       created.push(spec.name);
     }
@@ -127,7 +118,7 @@ export class AvcPipelineProvisioner {
   private async ensureTransformConfig(
     tenantId: string,
     name: string,
-    type: 'brand_mapping' | 'price_bands',
+    type: 'brand_mapping',
     config: Record<string, unknown>,
   ): Promise<void> {
     try {
@@ -225,21 +216,8 @@ export class AvcPipelineProvisioner {
         connectorType: 'avc_model_excel',
         connectorName: 'AVC 机型指标',
         def: MODEL_METRIC_DEF,
-        // model_metric gains a NEW derived `priceBand` column from the price_band step;
-        // map it through alongside the native properties.
-        propertyMappings: { ...identityMap(MODEL_METRIC_DEF), priceBand: 'priceBand' },
-        steps: [
-          {
-            order: 1,
-            type: 'compute',
-            config: {
-              function: 'price_band',
-              inputField: 'avgPrice',
-              outputField: 'priceBand',
-              configRef: AvcPipelineProvisioner.PRICE_BAND_CONFIG,
-            },
-          },
-        ],
+        propertyMappings: identityMap(MODEL_METRIC_DEF),
+        steps: [],
       },
     ];
   }

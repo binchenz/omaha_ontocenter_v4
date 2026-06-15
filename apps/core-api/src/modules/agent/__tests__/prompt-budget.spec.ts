@@ -24,8 +24,8 @@ describe('estimateTokens', () => {
 });
 
 describe('threshold constants', () => {
-  it('WARN is 4000 and ERROR is 5000', () => {
-    expect(PROMPT_BUDGET_WARN).toBe(4000);
-    expect(PROMPT_BUDGET_ERROR).toBe(5000);
+  it('WARN is 6000 and ERROR is 8000', () => {
+    expect(PROMPT_BUDGET_WARN).toBe(6000);
+    expect(PROMPT_BUDGET_ERROR).toBe(8000);
   });
 });

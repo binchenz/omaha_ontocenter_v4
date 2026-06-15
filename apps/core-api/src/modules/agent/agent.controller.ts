@@ -81,7 +81,10 @@ export class AgentController {
       content: dto.message,
     });
 
-    const { summary, typeNames } = await this.sdk.getSchemaSummary(user.tenantId);
+    const [{ summary, typeNames }, tenantProfile] = await Promise.all([
+      this.sdk.getSchemaSummary(user.tenantId),
+      this.sdk.getTenantProfile(user.tenantId),
+    ]);
 
     await this.sseRunner.stream(
       res,
@@ -92,6 +95,7 @@ export class AgentController {
         history,
         fileId: dto.fileId,
         schemaSummary: summary,
+        tenantProfile,
         objectTypeNames: typeNames,
         // Surface comes from the Conversation (fixed at creation), never the live
         // request — so the Skill set is stable across the conversation (ADR-0041 §3).

@@ -4,7 +4,7 @@ import type { LlmOptions } from '../llm/llm-client.interface';
 export class ResearchQaSkill implements AgentSkill {
   name = 'research_qa';
   description = '调研洞察问答：在已导入的调研报告中语义检索叙述性结论与用户原声并带出处作答；能将市场数字与叙述洞察融合在一次回答里。';
-  tools = ['semantic_search', 'query_objects', 'aggregate_objects', 'get_ontology_schema', 'render_chart'];
+  tools = ['extract_avc_report', 'semantic_search', 'query_objects', 'aggregate_objects', 'get_ontology_schema', 'render_chart'];
 
   llmOptions: LlmOptions = {
     model: 'deepseek-v4-pro',
@@ -15,11 +15,34 @@ export class ResearchQaSkill implements AgentSkill {
   systemPrompt(_context: SkillContext): string {
     return `## 调研洞察问答能力
 
+### AVC 报告导入
+
+当用户上传 AVC（奥维云网）Excel 文件时，使用 extract_avc_report 工具导入数据：
+1. 识别用户上传的文件是否为 AVC 月度监测报告（通常文件名包含品类+月份，如"电饭煲 2025.05"）
+2. 确认品类（电饭煲、净水器、空气炸锅、养生壶、料理机等），如果用户未明确说明则询问
+3. 调用 extract_avc_report 工具，传入 fileId 和 category
+4. 工具会自动识别报告模板（数据报告 32 sheets / 精华版 10 sheets），提取并入库三个维度的数据
+5. 返回入库摘要后，告知用户"数据已就绪，可以开始查询"
+
 可用数据对象（AVC 月度监测）：
 - **market_metric**（来自 AVC 2-1）：品类整体规模——零售额/零售量/零售均价，按品类×月份。整体市场。
 - **brand_share**（来自 AVC 2-5）：分价格段品牌份额，按品类×品牌×价格段×报告周期。整体市场，可跨期叠加看趋势。
+  - **priceBand 维度默认折叠为"整体"**：不带 priceBand 过滤查询时，系统自动注入 priceBand=整体（全市场口径），你只会看到"整体"行。要看分价格段份额，必须**显式** groupBy [priceBand] 或传 priceBand 过滤。**绝不可因为默认只看到"整体"就断言"brand_share 无价格段数据"**——分段数据始终存在（0-100 一路到 ≥4000 共十余段），需主动钻取。问"某品牌在哪个价格段抢量/失守"时，直接用 brand_share 按 priceBand 拆，这是全市场口径，优于用 model_metric 的 TOP-100 SKU 均价去近似。
 - **model_metric**（来自 AVC 2-7）：TOP-100 SKU 明细——机型/品牌/加热方式/上市日期/预约功能，含4个月的销额份额/销量份额/零售均价。**TOP-100 样本，非全市场**。
 - **avc_report**：报告来源凭证——品类/周期/coverage（full=含机型层 / essence=仅品牌层）。
+
+### 意图分流（最先判断·决定走简单路径还是四跳链）
+
+**第一步永远是判断问题类型，不要默认套用四跳决策链：**
+
+- **事实查询（单星直答）**：用户问"X 是多少 / X 趋势如何 / X 排名 / TOP N"等单一指标，**直接走对应单星的一次查询并作答**，不要发散到其他星：
+  - "市场份额趋势/份额排名" → 只查 brand_share（一次 aggregate，groupBy [brand, period]，metric=share）
+  - "零售额/零售量/均价 趋势" → 只查 market_metric（一次 aggregate，groupBy [month]）
+  - "TOP 机型/机型份额" → 只查 model_metric（先 avc_report 确认 coverage）
+  - **按年汇总/同比**：要"全年合计/某年总额/同比"时，market_metric 有 year 维度（值如 24、25），用 aggregate groupBy [year] 让数据库求和，**绝不要在回复里手动累加多个月份的数字**——跨月加总必须走一次 tool 调用，否则会算错且无凭证。
+  - **零售均价是比率，不可加**：年度/跨月均价必须用 "零售额合计 ÷ 零售量合计"（销量加权），**绝不要对多个月的"零售均价"行求和，也不要简单平均**。先 aggregate 拿到年额、年量，再相除。
+  - 目标：**3 步内完成**（必要的 coverage 检查 → 一次聚合 → render_chart + 文字洞察）。不要为了"全面"去查用户没问的指标。
+- **诊断分析（四跳链）**：仅当用户明确要"诊断 / 为什么下滑 / 帮我分析哪里出了问题 / 找出原因"时，才启用下方四跳决策链。
 
 ### 四跳决策链（ADR-0043 验收用例 · ADR-0049 执行范式）
 
@@ -49,6 +72,11 @@ model_metric 查询返回空结果时，先回到 avc_report 区分"该周期本
 ### universe 区分规则
 
 model_metric 是 TOP-100 样本；将 model_metric 聚合得到的品牌份额 **不等于** brand_share（全市场口径）。若两者数字出现差异，应说明："model_metric 是 TOP-100 样本口径，官方份额请以 brand_share（AVC 2-5）为准。"绝不把 SKU 汇总结果直接当作 AVC 官方品牌份额引用。
+
+### 洞察措辞纪律（数字对 ≠ 话对）
+
+- **"稳定在/突破/站上 X"须逐点核对**：描述绝对水平时，所查的每个数据点都要满足才能下此断言；趋势同比走高 ≠ 绝对值"稳定"（12 个月只有 4 个月超 300，就不能说"稳定在 300 以上"）。
+- **未查证的归因须标注推测**：把变化归因到本轮没查的维度（如均价上涨归因为"IH 渗透加速"却没查 heating），用"可能/推测"措辞或先补查取证，勿讲成定论。
 
 ### 叙述性问题（调研报告）
 

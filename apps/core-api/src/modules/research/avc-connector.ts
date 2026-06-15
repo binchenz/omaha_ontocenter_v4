@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@omaha/db';
 import { AvcTemplateExtractor } from './avc-template-extractor';
 import { DatasetService } from '../dataset/dataset.service';
+import { AvcPipelineProvisioner } from '../pipeline/avc-pipeline-provisioner.service';
 import {
   AVC_STARS,
   AvcStarSpec,
@@ -17,7 +18,12 @@ import { AvcVariant } from './avc-template-extractor';
 
 export interface AvcFetchParams {
   filePath: string;
-  category: string;
+  /**
+   * Optional caller-asserted 品类. The authoritative category is derived from the file's 目录
+   * title (ADR-0058); when supplied here it is used only as a fail-fast cross-check. Omit it to
+   * let the file decide (the batch re-ingest path does this).
+   */
+  category?: string;
 }
 
 export interface AvcStarDatasetSummary {
@@ -62,9 +68,13 @@ export class AvcConnector {
     private readonly extractor: AvcTemplateExtractor,
     private readonly prisma: PrismaService,
     private readonly datasetService: DatasetService,
+    private readonly provisioner: AvcPipelineProvisioner,
   ) {}
 
   async fetch(tenantId: string, params: AvcFetchParams): Promise<AvcFetchResult> {
+    // Auto-provision pipelines on first run for this tenant (idempotent).
+    await this.provisioner.provision(tenantId);
+
     const extraction = await this.extractor.extractAll(params.filePath, params.category);
 
     // Map each star's typed rows to flat raw-Dataset rows (single source of truth: avc-stars).

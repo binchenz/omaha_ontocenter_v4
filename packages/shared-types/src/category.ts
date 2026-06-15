@@ -21,6 +21,10 @@ const CANONICAL_CATEGORIES: readonly string[] = [
   '微波炉',
   '电烤箱',
   '煎烤机',
+  // AVC renamed the oven slot 电烤箱 → 台式复合机 at the 24.12 cycle. It is a genuine
+  // universe change (零售额 −61%, sub-types 嵌入式/台式 → 微蒸烤/蒸烤, brand roster turned
+  // over), NOT a rename — so it is its own canonical 品类, never aliased to 电烤箱 (ADR-0058).
+  '台式复合机',
 ];
 
 /**

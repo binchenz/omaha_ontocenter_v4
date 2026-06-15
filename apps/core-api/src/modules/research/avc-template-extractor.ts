@@ -1,6 +1,6 @@
 import * as path from 'path';
 import ExcelJS from 'exceljs';
-import { requireCategory, parsePriceBand } from '@omaha/shared-types';
+import { requireCategory, normalizeCategory, parsePriceBand } from '@omaha/shared-types';
 
 /** One extracted market-metric datapoint: a metric value for a category in a given month. */
 export interface MarketMetricRow {
@@ -42,6 +42,10 @@ export interface ModelMetricRow {
   sourceReport: string;
 }
 
+/** The table-of-contents sheet; its R1 title declares the report's 品类 (ADR-0058). */
+const TOC_SHEET = '目录';
+/** The 品类 is the 2nd dash-token of the 目录 title `《AVC-<品类>-线上…报告》`. */
+const TOC_TITLE_PATTERN = /AVC-([^-]+)-/;
 /** The size-trend sheet present in every AVC monthly report (both variants). */
 const SIZE_TREND_SHEET = '2-1整体市场销售规模走势';
 /** The brand × price-band competition sheet. */
@@ -100,11 +104,33 @@ export class AvcTemplateExtractor {
    */
   async extractAll(
     filePath: string,
-    rawCategory: string,
+    assertedCategory?: string,
   ): Promise<{ category: string; metrics: MarketMetricRow[]; brandShares: BrandShareRow[]; modelMetrics: ModelMetricRow[]; coverage: AvcVariant; period: string; sourceReport: string }> {
-    const category = requireCategory(rawCategory);
     const workbook = await this.load(filePath);
     const sourceReport = path.basename(filePath);
+    // ADR-0058: the file's 目录 title is the source of truth for 品类. When present (every real
+    // AVC file has it), it overrides any caller assertion — a positional script bug can no longer
+    // mislabel data. A caller-supplied category is kept only as a fail-fast cross-check: if it
+    // disagrees with the file, throw rather than silently store rows under the wrong category.
+    const declared = this.readDeclaredCategory(workbook);
+    let category: string;
+    if (declared) {
+      category = declared;
+      if (assertedCategory) {
+        const asserted = requireCategory(assertedCategory);
+        if (asserted !== declared) {
+          throw new Error(
+            `Category mismatch in ${sourceReport}: caller asserted "${asserted}" but the file's 目录 declares "${declared}".`,
+          );
+        }
+      }
+    } else {
+      // No 目录 sheet (hand-built test workbooks): fall back to the caller's assertion.
+      if (!assertedCategory) {
+        throw new Error(`Cannot determine 品类 for ${sourceReport}: no 目录 title and no caller-asserted category.`);
+      }
+      category = requireCategory(assertedCategory);
+    }
     const period = this.readCoverMonth(workbook, sourceReport);
     const coverage: AvcVariant = workbook.getWorksheet(FULL_VARIANT_SHEET) ? 'full' : 'essence';
     return {
@@ -203,6 +229,31 @@ export class AvcTemplateExtractor {
    * Derive the report's cover month (YY.MM). Primary: parse `（YY.MM）` from the filename.
    * Fallback: the latest month column in the 2-1 size-trend sheet (always present).
    */
+  /**
+   * Derive the report's canonical 品类 from the 目录 sheet's R1 title (`《AVC-<品类>-线上…报告》`),
+   * folded through normalizeCategory so AVC's renamed/aliased names land on the canonical key
+   * (ADR-0058). Returns null when the sheet/title is absent (hand-built test workbooks) so the
+   * caller can fall back to an asserted category. Throws when a title is present but its 品类 is
+   * not in the vocabulary — a loud failure beats silently storing an unjoinable category.
+   */
+  private readDeclaredCategory(workbook: ExcelJS.Workbook): string | null {
+    const sheet = workbook.getWorksheet(TOC_SHEET);
+    if (!sheet) return null;
+    const row = sheet.getRow(1);
+    let title = '';
+    for (let col = 1; col <= 8; col++) {
+      const text = this.cellText(row.getCell(col).value);
+      if (text.includes('AVC')) { title = text; break; }
+    }
+    const m = TOC_TITLE_PATTERN.exec(title);
+    if (!m) return null;
+    const canonical = normalizeCategory(m[1]);
+    if (!canonical) {
+      throw new Error(`Cannot derive 品类 from 目录 title "${title}": "${m[1]}" is not in the category vocabulary.`);
+    }
+    return canonical;
+  }
+
   private readCoverMonth(workbook: ExcelJS.Workbook, sourceReport: string): string {
     const m = FILENAME_PERIOD_PATTERN.exec(sourceReport);
     if (m) return m[1];

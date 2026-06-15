@@ -19,6 +19,10 @@ export class SyncJobWorker implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    // pg-boss v10 requires a queue to exist before send()/work(). createQueue is an
+    // idempotent upsert, so calling it on every boot is safe and keeps queue ownership
+    // co-located with its worker.
+    await this.boss.createQueue(SYNC_JOB_QUEUE);
     await this.boss.work<SyncJobPayload>(SYNC_JOB_QUEUE, async (jobs) => {
       for (const job of jobs) {
         await this.handle(job);

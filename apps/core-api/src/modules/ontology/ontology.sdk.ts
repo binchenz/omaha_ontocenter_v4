@@ -167,6 +167,79 @@ export class OntologySdk {
     return result;
   }
 
+  /**
+   * Data-derived tenant profile (Hermes-inspired per-tenant context). Unlike getSchemaSummary
+   * (which describes the model — what types/fields *could* hold), this describes what the tenant
+   * has *actually loaded*: per-type row counts + the distinct values of each low-cardinality
+   * filterable string property. That is what tells the Agent "this tenant analyzes 电饭煲/净水器
+   * small appliances", grounding it in the customer's real data.
+   *
+   * Deliberately NOT cached: row counts and distinct values change on every data import, and the
+   * import path (SyncJob → ImportEngine) never triggers schema-cache invalidation — a cache here
+   * would silently go stale. The cost is one indexed groupBy + a few low-cardinality distincts,
+   * negligible next to the LLM call it precedes. Returns '' when the tenant has no data, so the
+   * caller can skip the prompt segment entirely.
+   */
+  async getTenantProfile(tenantId: string): Promise<string> {
+    const MAX_DISTINCT = 20; // only enumerate genuinely categorical properties, not free text/ids
+    const schema = await this.getSchema(tenantId);
+
+    const countRows = await this.prisma.$queryRawUnsafe<Array<{ object_type: string; n: bigint }>>(
+      `SELECT object_type, COUNT(*) AS n FROM object_instances
+       WHERE tenant_id = $1::uuid AND deleted_at IS NULL
+       GROUP BY object_type`,
+      tenantId,
+    );
+    const countByType = new Map(countRows.map((r) => [r.object_type, Number(r.n)]));
+    if (countByType.size === 0) return '';
+
+    // Derive each populated type's dimensions concurrently — independent DISTINCT probes that
+    // would otherwise serialize on every chat turn (getTenantProfile is intentionally uncached).
+    const populated = schema.types.filter((t) => countByType.get(t.name));
+    const dimsByType = await Promise.all(
+      populated.map((t) => this.deriveTypeDimensions(tenantId, t, MAX_DISTINCT)),
+    );
+    const lines = ['本租户已导入数据：', ...populated.map((t, i) => {
+      const count = countByType.get(t.name)!;
+      const dims = dimsByType[i];
+      return `- ${t.name}（${count} 行）${dims ? `：${dims}` : ''}`;
+    })];
+    return lines.join('\n');
+  }
+
+  /**
+   * For one type, render its low-cardinality filterable string properties as `prop=v1/v2/...`.
+   * Uses schema-declared allowedValues when present (zero DB cost); otherwise probes DISTINCT and
+   * skips the property when cardinality exceeds the cap (high-cardinality = not a useful label).
+   */
+  private async deriveTypeDimensions(
+    tenantId: string,
+    type: OntologySchema['types'][number],
+    cap: number,
+  ): Promise<string> {
+    // Probe each categorical property concurrently — the DISTINCT scans are independent.
+    const candidates = type.properties.filter((p) => p.type === 'string' && p.filterable);
+    const parts = await Promise.all(candidates.map(async (p) => {
+      let values: string[];
+      if (p.allowedValues && p.allowedValues.length > 0) {
+        values = p.allowedValues; // schema-declared — zero DB cost
+      } else {
+        const rows = await this.prisma.$queryRawUnsafe<Array<{ v: string | null }>>(
+          `SELECT DISTINCT properties->>$2 AS v FROM object_instances
+           WHERE tenant_id = $1::uuid AND object_type = $3 AND deleted_at IS NULL
+             AND properties->>$2 IS NOT NULL
+           LIMIT $4`,
+          tenantId, p.name, type.name, cap + 1,
+        );
+        values = rows.map((r) => r.v).filter((v): v is string => v !== null);
+      }
+      // Skip empty (no rows) and high-cardinality (free text/ids — not a useful label).
+      if (values.length === 0 || values.length > cap) return null;
+      return `${p.name}=${values.join('/')}`;
+    }));
+    return parts.filter((x): x is string => x !== null).join('，');
+  }
+
   /** Tier-1 lazy detail (ADR-0050): full schema projection for a single object type. */
   async getTypeDetail(tenantId: string, typeName: string): Promise<OntologySchema> {
     const schema = await this.getSchema(tenantId);

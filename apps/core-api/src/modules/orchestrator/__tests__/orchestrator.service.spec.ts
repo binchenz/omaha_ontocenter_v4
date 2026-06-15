@@ -68,7 +68,7 @@ describe('OrchestratorService', () => {
   });
 
   it('reaches MAX_TOOL_ITERATIONS and emits error', async () => {
-    llm.responses = Array(10).fill({ type: 'tool_calls', calls: [{ id: 'tc1', name: 'test_tool', arguments: {} }] });
+    llm.responses = Array(14).fill({ type: 'tool_calls', calls: [{ id: 'tc1', name: 'test_tool', arguments: {} }] });
     const events = await collect(orchestrator.run({ user, message: 'loop' }));
     expect(events.find(e => e.type === 'error')).toBeTruthy();
   });
@@ -76,5 +76,36 @@ describe('OrchestratorService', () => {
   it('buildSystemPrompt includes skill prompt', () => {
     const prompt = orchestrator.buildSystemPrompt();
     expect(prompt).toContain('skill prompt');
+  });
+
+  it('passes the real tenantId to each skill systemPrompt during run', async () => {
+    let seenTenantId: string | undefined;
+    const capturingSkill: AgentSkill = {
+      name: 'capturing_skill',
+      description: 'captures context',
+      tools: ['test_tool'],
+      systemPrompt: (ctx) => { seenTenantId = ctx.tenantId; return 'captured'; },
+    };
+    const o = new OrchestratorService(llm, [mockTool], [capturingSkill]);
+    llm.responses = [{ type: 'text', content: 'ok' }];
+    await collect(o.run({ user, message: 'hi' }));
+    expect(seenTenantId).toBe('t1');
+  });
+
+  it('injects the tenant profile into the system prompt when provided', async () => {
+    llm.responses = [{ type: 'text', content: 'ok' }];
+    const events = await collect(orchestrator.run({
+      user, message: 'hi', tenantProfile: '本租户已导入数据：\n- market_metric（1234 行）：category=电饭煲/净水器',
+    }));
+    const sysPrompt = events.find(e => e.type === 'system_prompt')?.content as string;
+    expect(sysPrompt).toContain('本租户已导入数据');
+    expect(sysPrompt).toContain('电饭煲');
+  });
+
+  it('omits the profile segment when tenantProfile is empty', async () => {
+    llm.responses = [{ type: 'text', content: 'ok' }];
+    const events = await collect(orchestrator.run({ user, message: 'hi', tenantProfile: '' }));
+    const sysPrompt = events.find(e => e.type === 'system_prompt')?.content as string;
+    expect(sysPrompt).not.toContain('本租户已导入数据');
   });
 });
