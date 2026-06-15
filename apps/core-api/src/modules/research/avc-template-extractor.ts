@@ -226,10 +226,6 @@ export class AvcTemplateExtractor {
   }
 
   /**
-   * Derive the report's cover month (YY.MM). Primary: parse `（YY.MM）` from the filename.
-   * Fallback: the latest month column in the 2-1 size-trend sheet (always present).
-   */
-  /**
    * Derive the report's canonical 品类 from the 目录 sheet's R1 title (`《AVC-<品类>-线上…报告》`),
    * folded through normalizeCategory so AVC's renamed/aliased names land on the canonical key
    * (ADR-0058). Returns null when the sheet/title is absent (hand-built test workbooks) so the
@@ -254,6 +250,10 @@ export class AvcTemplateExtractor {
     return canonical;
   }
 
+  /**
+   * Derive the report's cover month (YY.MM). Primary: parse `（YY.MM）` from the filename.
+   * Fallback: the latest month column in the 2-1 size-trend sheet (always present).
+   */
   private readCoverMonth(workbook: ExcelJS.Workbook, sourceReport: string): string {
     const m = FILENAME_PERIOD_PATTERN.exec(sourceReport);
     if (m) return m[1];

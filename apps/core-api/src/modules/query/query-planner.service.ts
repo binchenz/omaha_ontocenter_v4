@@ -544,17 +544,20 @@ export class QueryPlannerService {
    */
   private injectDimensionDefaults(filters: QueryFilter[], defaults: Record<string, string>): void {
     for (const [field, defaultValue] of Object.entries(defaults)) {
-      const hasFilter = filters.some((f) => f.field === field);
-      if (!hasFilter) {
+      if (!this.hasFieldFilter(filters, field)) {
         filters.push({ field, operator: 'eq', value: defaultValue });
       }
     }
   }
 
+  /** A dimension is "present" if ANY filter references it (eq, in, gte, lte, etc.). */
+  private hasFieldFilter(filters: QueryFilter[], field: string): boolean {
+    return filters.some((f) => f.field === field);
+  }
+
   /**
    * Enforce required dimension constraints. Throws a structured BadRequestException
    * with scoped available values if a required dimension is missing from filters.
-   * A dimension is "present" if ANY filter references it (eq, in, gte, lte, etc.).
    */
   private async enforceDimensionRequired(
     tenantId: string,
@@ -563,8 +566,7 @@ export class QueryPlannerService {
     required: string[],
   ): Promise<void> {
     for (const dim of required) {
-      const hasFilter = filters.some((f) => f.field === dim);
-      if (!hasFilter) {
+      if (!this.hasFieldFilter(filters, dim)) {
         const available = await this.getAvailableValues(tenantId, objectType, dim, filters);
         throw new BadRequestException({
           error: {

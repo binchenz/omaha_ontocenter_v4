@@ -196,12 +196,17 @@ export class OntologySdk {
     // Derive each populated type's dimensions concurrently — independent DISTINCT probes that
     // would otherwise serialize on every chat turn (getTenantProfile is intentionally uncached).
     const populated = schema.types.filter((t) => countByType.get(t.name));
-    const dimsByType = await Promise.all(
-      populated.map((t) => this.deriveTypeDimensions(tenantId, t, MAX_DISTINCT)),
+    const dimsByType = new Map(
+      await Promise.all(
+        populated.map(async (t): Promise<[string, string]> => [
+          t.name,
+          await this.deriveTypeDimensions(tenantId, t, MAX_DISTINCT),
+        ]),
+      ),
     );
-    const lines = ['本租户已导入数据：', ...populated.map((t, i) => {
+    const lines = ['本租户已导入数据：', ...populated.map((t) => {
       const count = countByType.get(t.name)!;
-      const dims = dimsByType[i];
+      const dims = dimsByType.get(t.name);
       return `- ${t.name}（${count} 行）${dims ? `：${dims}` : ''}`;
     })];
     return lines.join('\n');
