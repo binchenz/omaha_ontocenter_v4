@@ -44,6 +44,21 @@ export class ConfigurePipelineTool implements AgentTool {
         type: 'boolean',
         description: 'true=直接激活；false=保存为草稿。缺省按激活处理',
       },
+      declaredInputs: {
+        type: 'array',
+        description:
+          '多输入（事实×事实 JOIN）管道的输入源声明。省略=单输入（默认，以 connectorId 为唯一输入）。每项声明一个 join 步骤引用的输入：inputName=角色名（如 orders/refunds），connectorId=该输入的连接器，alignKeyField=批次对齐键所在列（如 reportMonth，可选）。',
+        items: {
+          type: 'object',
+          properties: {
+            inputName: { type: 'string', description: 'join 步骤引用的输入角色名' },
+            connectorId: { type: 'string', description: '该输入来源的连接器 ID' },
+            alignKeyField: { type: 'string', description: '批次对齐键所在列（可选，如 reportMonth）' },
+          },
+          required: ['inputName', 'connectorId'],
+          additionalProperties: false,
+        },
+      },
     },
     required: ['name', 'connectorId', 'outputObjectTypeId', 'steps'],
     additionalProperties: false,
@@ -53,12 +68,17 @@ export class ConfigurePipelineTool implements AgentTool {
   constructor(private readonly service: PipelineService) {}
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
+    const declaredInputs = args.declaredInputs as
+      | { inputName: string; connectorId: string; alignKeyField?: string }[]
+      | undefined;
     return this.service.configurePipeline(context.user.tenantId, {
       name: args.name as string,
       connectorId: args.connectorId as string,
       outputObjectTypeId: args.outputObjectTypeId as string,
       steps: args.steps as { order: number; type: string; config: Record<string, unknown>; name?: string }[],
       autoActivate: args.autoActivate as boolean | undefined,
+      // Only forward when the Agent supplied inputs, so single-input calls keep their exact shape.
+      ...(declaredInputs ? { declaredInputs } : {}),
     });
   }
 }

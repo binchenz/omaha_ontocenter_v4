@@ -224,16 +224,53 @@ describe('AvcPipelineProvisioner (#174, ADR-0055 Step 2)', () => {
     const { provisioner, configureCalls } = make();
     await provisioner.provision(T);
     const brandShare = configureCalls.find((c) => c.dto.name === 'avc_brand_share')!;
-    const compute = brandShare.dto.steps.find((s: any) => s.type === 'compute');
+    const compute = brandShare.dto.steps.find((s: any) => s.type === 'compute' && s.config.function === 'normalize_brand');
     expect(compute.config.function).toBe('normalize_brand');
     expect(compute.config.configRef).toBe('avc_brands');
   });
 
-  it('wires the model_metric pipeline with zero steps (pure pass-through, ADR-0056)', async () => {
+  it('wires the brand_share pipeline to re-key + merge-sum after normalization (#177 gap ③)', async () => {
+    // After normalize_brand rewrites `brand`, the upstream-baked externalId is stale (still
+    // carries the dirty brand). A `concat` step re-derives externalId from the normalized fields,
+    // then an `aggregate` step groups by it and SUMs `value` so colliding variants merge instead
+    // of landing as two coexisting rows (SyncJob upserts on externalId).
+    const { provisioner, configureCalls } = make();
+    await provisioner.provision(T);
+    const steps = configureCalls.find((c) => c.dto.name === 'avc_brand_share')!.dto.steps;
+    const orders = steps.map((s: any) => s.type);
+    expect(orders).toEqual(['compute', 'compute', 'aggregate']); // normalize → concat → merge-sum
+
+    const concat = steps.find((s: any) => s.config.function === 'concat');
+    expect(concat.config.fields).toEqual(['category', 'brand', 'priceBand', 'period']);
+    expect(concat.config.outputField).toBe('externalId');
+
+    const agg = steps.find((s: any) => s.type === 'aggregate');
+    expect(agg.config.groupBy).toContain('externalId');
+    expect(agg.config.groupBy).toContain('brand');
+    expect(agg.config.metrics).toContainEqual({ op: 'sum', field: 'value', as: 'value' });
+  });
+
+  it('wires the model_metric pipeline with a normalize_brand step (#177 gap ②)', async () => {
+    // model_metric externalId = category_model_month (no brand) → renaming brand never collides,
+    // so model_metric needs ONLY normalize_brand (no re-key / merge-sum). It must reference the
+    // same avc_brands config so both stars normalize consistently.
     const { provisioner, configureCalls } = make();
     await provisioner.provision(T);
     const modelMetric = configureCalls.find((c) => c.dto.name === 'avc_model_metric')!;
-    expect(modelMetric.dto.steps).toEqual([]);
+    const compute = modelMetric.dto.steps.find((s: any) => s.type === 'compute');
+    expect(compute.config.function).toBe('normalize_brand');
+    expect(compute.config.configRef).toBe('avc_brands');
+    expect(modelMetric.dto.steps.filter((s: any) => s.type === 'aggregate')).toHaveLength(0);
+  });
+
+  it('seeds a non-empty brand alias dictionary (#177 gap ①)', async () => {
+    const { provisioner, createCalls } = make();
+    await provisioner.provision(T);
+    const brandSeed = createCalls.find((c) => c.dto.name === 'avc_brands')!;
+    expect(Object.keys(brandSeed.dto.config.mappings).length).toBeGreaterThan(0);
+    // Confirmed same-brand variants (user-approved 2026-06-15); 东菱星 deliberately NOT merged.
+    expect(brandSeed.dto.config.mappings).toMatchObject({ 苏泊: '苏泊尔', 小米米家: '小米' });
+    expect(brandSeed.dto.config.mappings).not.toHaveProperty('东菱星');
   });
 
   it('ensures the 3 star ObjectTypes when absent (fresh tenant, no prior importStar run)', async () => {

@@ -32,6 +32,20 @@ export class AvcPipelineProvisioner {
 
   static readonly BRAND_CONFIG = 'avc_brands';
 
+  /**
+   * Canonical brand-alias dictionary (#177 gap ①). AVC source data spells some brands
+   * inconsistently; these are the confirmed same-brand variants (user-approved 2026-06-15,
+   * mirrors scripts/fix-brand-variants.ts). 东菱星 is deliberately NOT merged into 东菱 — they
+   * are distinct brands. Extend as new variants surface; ADR-0054 keeps versions immutable.
+   */
+  static readonly BRAND_ALIASES: Record<string, string> = {
+    苏泊: '苏泊尔',
+    小米米家: '小米',
+  };
+
+  /** brand_share dims that form its externalId + identity (the merge-sum group key, #177 gap ③). */
+  private static readonly BRAND_SHARE_KEY_FIELDS = ['category', 'brand', 'priceBand', 'period'];
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly pipelineService: PipelineService,
@@ -40,9 +54,10 @@ export class AvcPipelineProvisioner {
   ) {}
 
   async provision(tenantId: string): Promise<{ created: string[]; skipped: string[] }> {
-    // 1. Seed the brand_mapping TransformConfig (skip if already present).
+    // 1. Seed the brand_mapping TransformConfig with the real alias dictionary (#177 gap ①).
+    // Skip if already present so a hand-curated later version is never clobbered (ADR-0054).
     await this.ensureTransformConfig(tenantId, AvcPipelineProvisioner.BRAND_CONFIG, 'brand_mapping', {
-      mappings: {},
+      mappings: AvcPipelineProvisioner.BRAND_ALIASES,
     });
 
     // 2. Provision one connector + one pipeline per star.
@@ -197,6 +212,53 @@ export class AvcPipelineProvisioner {
         connectorName: 'AVC 品牌份额',
         def: BRAND_SHARE_DEF,
         propertyMappings: identityMap(BRAND_SHARE_DEF),
+        // #177: normalize the brand, RE-DERIVE externalId from the normalized fields (the upstream
+        // externalId still carries the dirty brand), then merge-sum colliding rows so two spellings
+        // of one brand sum their share instead of landing as two rows (SyncJob upserts on externalId).
+        steps: [
+          {
+            order: 1,
+            type: 'compute',
+            config: {
+              function: 'normalize_brand',
+              inputField: 'brand',
+              outputField: 'brand',
+              configRef: AvcPipelineProvisioner.BRAND_CONFIG,
+            },
+          },
+          {
+            order: 2,
+            type: 'compute',
+            config: {
+              function: 'concat',
+              fields: AvcPipelineProvisioner.BRAND_SHARE_KEY_FIELDS,
+              separator: '_',
+              outputField: 'externalId',
+            },
+          },
+          {
+            order: 3,
+            type: 'aggregate',
+            config: {
+              // Group by externalId + every identity dimension so the surviving row keeps its full
+              // shape; SUM the share so merged variants accumulate rather than overwrite. groupBy is
+              // derived from the same KEY_FIELDS that concat builds externalId from, so the two can't
+              // drift; `metric`/`sourceReport` are constant within a collision and ride through.
+              groupBy: ['externalId', ...AvcPipelineProvisioner.BRAND_SHARE_KEY_FIELDS, 'metric', 'sourceReport'],
+              metrics: [{ op: 'sum', field: 'value', as: 'value' }],
+            },
+          },
+        ],
+      },
+      {
+        name: 'avc_model_metric',
+        objectType: 'model_metric',
+        connectorType: 'avc_model_excel',
+        connectorName: 'AVC 机型指标',
+        def: MODEL_METRIC_DEF,
+        propertyMappings: identityMap(MODEL_METRIC_DEF),
+        // #177 gap ②: model_metric externalId = category_model_month (no brand), so renaming brand
+        // never collides — it needs ONLY normalize_brand (same avc_brands config), no re-key/merge.
         steps: [
           {
             order: 1,
@@ -209,15 +271,6 @@ export class AvcPipelineProvisioner {
             },
           },
         ],
-      },
-      {
-        name: 'avc_model_metric',
-        objectType: 'model_metric',
-        connectorType: 'avc_model_excel',
-        connectorName: 'AVC 机型指标',
-        def: MODEL_METRIC_DEF,
-        propertyMappings: identityMap(MODEL_METRIC_DEF),
-        steps: [],
       },
     ];
   }

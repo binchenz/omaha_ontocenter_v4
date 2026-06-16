@@ -83,6 +83,10 @@ export const toMarketMetricRawRow = (r: MarketMetricRow): AvcStarRow =>
 
 export const toBrandShareRawRow = (r: BrandShareRow): AvcStarRow =>
   flatten({
+    // NOTE: this externalId formula (category_brand_priceBand_period) is re-derived in the
+    // brand_share pipeline's `concat` step (AvcPipelineProvisioner.BRAND_SHARE_KEY_FIELDS) AFTER
+    // normalize_brand cleans the brand (#177). The two MUST stay in lockstep — change one, change
+    // the other, or variant merging keys on the wrong shape.
     externalId: `${r.category}_${r.brand}_${r.priceBand}_${r.period}`,
     label: `${r.category} ${r.brand} ${r.priceBand}`,
     properties: { category: r.category, brand: r.brand, priceBand: r.priceBand, period: r.period, metric: r.metric, value: r.value, sourceReport: r.sourceReport },

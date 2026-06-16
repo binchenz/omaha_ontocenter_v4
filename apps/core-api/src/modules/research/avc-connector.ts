@@ -93,6 +93,9 @@ export class AvcConnector {
         name: `${star.datasetPrefix}_${extraction.category}_${extraction.period}`,
         connectorId: connector.id,
         kind: 'raw',
+        // Carry the report month as the batch-alignment key (#186) so a future multi-input AVC
+        // pipeline can pair same-period stars; single-input pipelines (null alignKey) ignore it.
+        alignKeyValue: extraction.period,
       });
       if (rows.length > 0) {
         await this.datasetService.appendRows(tenantId, dataset.id, rows);

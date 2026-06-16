@@ -63,6 +63,33 @@ describe('ConfigurePipelineTool', () => {
     );
   });
 
+  it('exposes declaredInputs in the parameter schema', () => {
+    const props = (tool.parameters as any).properties;
+    expect(props.declaredInputs).toBeDefined();
+    expect(props.declaredInputs.type).toBe('array');
+    const itemProps = props.declaredInputs.items.properties;
+    expect(itemProps.inputName).toBeDefined();
+    expect(itemProps.connectorId).toBeDefined();
+    expect(itemProps.alignKeyField).toBeDefined();
+    expect(props.declaredInputs.items.required.sort()).toEqual(['connectorId', 'inputName']);
+  });
+
+  it('forwards declaredInputs through to the service for a multi-input pipeline', async () => {
+    service.configurePipeline.mockResolvedValue({ pipelineId: 'p-join', status: 'active' });
+    const declaredInputs = [
+      { inputName: 'orders', connectorId: 'c-orders' },
+      { inputName: 'refunds', connectorId: 'c-refunds', alignKeyField: 'reportMonth' },
+    ];
+    await tool.execute(
+      { name: 'net', connectorId: 'c-orders', outputObjectTypeId: 'ot-net', steps: [], declaredInputs },
+      ctx,
+    );
+    expect(service.configurePipeline).toHaveBeenCalledWith(
+      'tenant-1',
+      expect.objectContaining({ declaredInputs }),
+    );
+  });
+
   it('surfaces a validation failure as a usable error message', async () => {
     service.configurePipeline.mockRejectedValue(new BadRequestException('Invalid filter step config: bad'));
     await expect(

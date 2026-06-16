@@ -5,6 +5,8 @@ export interface CreateDatasetDto {
   name: string;
   connectorId: string;
   kind?: 'raw' | 'clean';
+  /** Batch-alignment key value for this snapshot (e.g. "25.06" for reportMonth), #186. */
+  alignKeyValue?: string;
 }
 
 /**
@@ -41,7 +43,13 @@ export class DatasetService {
 
   async createDataset(tenantId: string, dto: CreateDatasetDto) {
     return this.prisma.dataset.create({
-      data: { tenantId, name: dto.name, connectorId: dto.connectorId, kind: dto.kind ?? 'clean' },
+      data: {
+        tenantId,
+        name: dto.name,
+        connectorId: dto.connectorId,
+        kind: dto.kind ?? 'clean',
+        alignKeyValue: dto.alignKeyValue ?? null,
+      },
     });
   }
 

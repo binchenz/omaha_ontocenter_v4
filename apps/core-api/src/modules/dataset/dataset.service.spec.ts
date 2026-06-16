@@ -42,6 +42,12 @@ describe('DatasetService', () => {
     expect(d.status).toBe('draft');
   });
 
+  it('persists alignKeyValue when the connector supplies a batch key (#186)', async () => {
+    const { svc, datasets } = make();
+    await svc.createDataset(T, { name: 'avc', connectorId: 'c1', kind: 'raw', alignKeyValue: '25.06' });
+    expect(datasets[0].alignKeyValue).toBe('25.06');
+  });
+
   it('appendRows increments rowCount', async () => {
     const { svc, datasets } = make({ datasets: [{ id: 'ds-1', tenantId: T, rowCount: 0 }] });
     await svc.appendRows(T, 'ds-1', [{ v: 1 }, { v: 2 }]);

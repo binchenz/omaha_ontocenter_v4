@@ -2,8 +2,73 @@ import { BadRequestException } from '@nestjs/common';
 import { validatePipelineStep, PIPELINE_STEP_SCHEMAS } from './pipeline-step.schemas';
 
 describe('pipeline-step schemas (ADR-0053)', () => {
-  it('exposes filter/rename/compute schema entries', () => {
-    expect(Object.keys(PIPELINE_STEP_SCHEMAS).sort()).toEqual(['compute', 'filter', 'rename']);
+  it('exposes filter/rename/compute + the ADR-0060 operators', () => {
+    expect(Object.keys(PIPELINE_STEP_SCHEMAS).sort()).toEqual(
+      ['aggregate', 'compute', 'dedup', 'explode_json', 'filter', 'join', 'rename'],
+    );
+  });
+
+  describe('join', () => {
+    it('accepts an inner/left join with a non-empty on key set', () => {
+      const cfg = { left: 'orders', right: 'refunds', type: 'inner', on: [{ leftField: 'orderId', rightField: 'orderId' }] };
+      expect(validatePipelineStep('join', cfg)).toEqual(cfg);
+    });
+
+    it('rejects an unknown join type', () => {
+      expect(() =>
+        validatePipelineStep('join', { left: 'a', right: 'b', type: 'cross', on: [{ leftField: 'k', rightField: 'k' }] }),
+      ).toThrow(BadRequestException);
+    });
+
+    it('rejects an empty on key set', () => {
+      expect(() =>
+        validatePipelineStep('join', { left: 'a', right: 'b', type: 'inner', on: [] }),
+      ).toThrow(BadRequestException);
+    });
+  });
+
+  describe('explode_json', () => {
+    it('accepts array mode and object mode', () => {
+      expect(validatePipelineStep('explode_json', { field: 'events', mode: 'array' })).toEqual({ field: 'events', mode: 'array' });
+      expect(validatePipelineStep('explode_json', { field: 'payload', mode: 'object' })).toEqual({ field: 'payload', mode: 'object' });
+    });
+
+    it('rejects an unknown mode', () => {
+      expect(() => validatePipelineStep('explode_json', { field: 'x', mode: 'sideways' })).toThrow(BadRequestException);
+    });
+
+    it('rejects a missing field', () => {
+      expect(() => validatePipelineStep('explode_json', { mode: 'array' })).toThrow(BadRequestException);
+    });
+  });
+
+  describe('dedup', () => {
+    it('accepts a non-empty keys array', () => {
+      expect(validatePipelineStep('dedup', { keys: ['a', 'b'] })).toEqual({ keys: ['a', 'b'] });
+    });
+
+    it('rejects an empty keys array', () => {
+      expect(() => validatePipelineStep('dedup', { keys: [] })).toThrow(BadRequestException);
+    });
+  });
+
+  describe('aggregate', () => {
+    it('accepts groupBy + metrics with known ops', () => {
+      const cfg = { groupBy: ['cat'], metrics: [{ op: 'sum', field: 'v', as: 'total' }, { op: 'count', as: 'n' }] };
+      expect(validatePipelineStep('aggregate', cfg)).toEqual(cfg);
+    });
+
+    it('rejects an unknown metric op', () => {
+      expect(() =>
+        validatePipelineStep('aggregate', { groupBy: ['cat'], metrics: [{ op: 'median', field: 'v', as: 'm' }] }),
+      ).toThrow(BadRequestException);
+    });
+
+    it('rejects empty groupBy', () => {
+      expect(() =>
+        validatePipelineStep('aggregate', { groupBy: [], metrics: [{ op: 'count', as: 'n' }] }),
+      ).toThrow(BadRequestException);
+    });
   });
 
   describe('filter', () => {
@@ -62,6 +127,22 @@ describe('pipeline-step schemas (ADR-0053)', () => {
     it('rejects an unknown function', () => {
       expect(() =>
         validatePipelineStep('compute', { function: 'frobnicate', inputField: 'a', outputField: 'b' }),
+      ).toThrow(BadRequestException);
+    });
+
+    it('accepts a concat compute (fields + separator, no inputField) (#177)', () => {
+      const cfg = {
+        function: 'concat',
+        fields: ['category', 'brand', 'priceBand', 'period'],
+        separator: '_',
+        outputField: 'externalId',
+      };
+      expect(validatePipelineStep('compute', cfg)).toEqual(cfg);
+    });
+
+    it('rejects a stray key on a concat compute (.strict())', () => {
+      expect(() =>
+        validatePipelineStep('compute', { function: 'concat', fields: ['a'], outputField: 'k', bogus: 1 }),
       ).toThrow(BadRequestException);
     });
   });

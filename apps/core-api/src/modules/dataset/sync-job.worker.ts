@@ -1,7 +1,7 @@
 import { Injectable, Inject, OnModuleInit, Logger } from '@nestjs/common';
 import { PrismaService } from '@omaha/db';
 import PgBoss from 'pg-boss';
-import { PG_BOSS } from './pg-boss.provider';
+import { PG_BOSS, consumeQueue } from './pg-boss.provider';
 import { SYNC_JOB_QUEUE } from './sync-job.service';
 import { ImportEngine } from '../agent/sdk/import-engine.service';
 
@@ -19,15 +19,7 @@ export class SyncJobWorker implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    // pg-boss v10 requires a queue to exist before send()/work(). createQueue is an
-    // idempotent upsert, so calling it on every boot is safe and keeps queue ownership
-    // co-located with its worker.
-    await this.boss.createQueue(SYNC_JOB_QUEUE);
-    await this.boss.work<SyncJobPayload>(SYNC_JOB_QUEUE, async (jobs) => {
-      for (const job of jobs) {
-        await this.handle(job);
-      }
-    });
+    await consumeQueue<SyncJobPayload>(this.boss, SYNC_JOB_QUEUE, (job) => this.handle(job));
   }
 
   private async handle(job: PgBoss.Job<SyncJobPayload>) {

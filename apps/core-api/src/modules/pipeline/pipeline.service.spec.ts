@@ -7,9 +7,16 @@ function make(seed: { pipelines?: any[]; steps?: any[]; configs?: any[] } = {}) 
   const pipelines: any[] = seed.pipelines ?? [];
   const steps: any[] = seed.steps ?? [];
   const configs: any[] = seed.configs ?? [];
+  const inputs: any[] = [];
   let seq = 0;
   const prisma: any = {
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    pipelineInput: {
+      createMany: jest.fn(async ({ data }: any) => {
+        inputs.push(...data);
+        return { count: data.length };
+      }),
+    },
     pipeline: {
       findMany: jest.fn(async ({ where }: any) => pipelines.filter((p) => p.tenantId === where.tenantId)),
       findFirst: jest.fn(async ({ where }: any) =>
@@ -56,6 +63,7 @@ function make(seed: { pipelines?: any[]; steps?: any[]; configs?: any[] } = {}) 
     svc: new PipelineService(prisma, transformConfigService),
     pipelines,
     steps,
+    inputs,
     prisma,
     transformConfigService,
     getCalls,
@@ -196,6 +204,50 @@ describe('PipelineService', () => {
       const { svc } = make();
       const res = await svc.configurePipeline(T, { ...baseDto(), autoActivate: true });
       expect(res.status).toBe('active');
+    });
+
+    describe('declaredInputs (#187, multi-input provisioning)', () => {
+      it('creates a PipelineInput row per declared input, scoped to the new Pipeline + tenant', async () => {
+        const { svc, inputs } = make();
+        const res = await svc.configurePipeline(T, {
+          ...baseDto(),
+          declaredInputs: [
+            { inputName: 'orders', connectorId: 'c-orders' },
+            { inputName: 'refunds', connectorId: 'c-refunds', alignKeyField: 'reportMonth' },
+          ],
+        });
+        expect(inputs).toEqual([
+          { tenantId: T, pipelineId: res.pipelineId, inputName: 'orders', connectorId: 'c-orders', alignKeyField: null },
+          { tenantId: T, pipelineId: res.pipelineId, inputName: 'refunds', connectorId: 'c-refunds', alignKeyField: 'reportMonth' },
+        ]);
+      });
+
+      it('writes no PipelineInput rows when declaredInputs is omitted (single-input unchanged)', async () => {
+        const { svc, inputs } = make();
+        await svc.configurePipeline(T, baseDto());
+        expect(inputs).toHaveLength(0);
+      });
+
+      it('writes no PipelineInput rows for an empty declaredInputs array', async () => {
+        const { svc, inputs } = make();
+        await svc.configurePipeline(T, { ...baseDto(), declaredInputs: [] });
+        expect(inputs).toHaveLength(0);
+      });
+
+      it('rejects duplicate inputName before any write (preserves atomic-create guarantee)', async () => {
+        const { svc, pipelines, inputs } = make();
+        await expect(
+          svc.configurePipeline(T, {
+            ...baseDto(),
+            declaredInputs: [
+              { inputName: 'orders', connectorId: 'c-a' },
+              { inputName: 'orders', connectorId: 'c-b' },
+            ],
+          }),
+        ).rejects.toThrow(/duplicate inputName/i);
+        expect(pipelines).toHaveLength(0);
+        expect(inputs).toHaveLength(0);
+      });
     });
   });
 });

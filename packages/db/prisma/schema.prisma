@@ -156,11 +156,12 @@ model Connector {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  tenant    Tenant          @relation(fields: [tenantId], references: [id])
-  mappings  ObjectMapping[]
-  syncJobs  SyncJob[]
-  datasets  Dataset[]
-  pipelines Pipeline[]
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  mappings       ObjectMapping[]
+  syncJobs       SyncJob[]
+  datasets       Dataset[]
+  pipelines      Pipeline[]
+  pipelineInputs PipelineInput[]
 
   @@unique([tenantId, name])
   @@map("connectors")
@@ -217,15 +218,19 @@ model Dataset {
   status      String   @default("draft")
   version     Int      @default(1)
   rowCount    Int      @default(0) @map("row_count")
+  // Batch-alignment key value for this snapshot (ADR-0060 #5 model 1′, follow-up #186), e.g.
+  // "25.06" for reportMonth. Populated by the Connector when the source carries a batch key; null
+  // otherwise. Read by the join-barrier to pair only same-key fact×fact versions.
+  alignKeyValue String? @map("align_key_value")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  tenant               Tenant        @relation(fields: [tenantId], references: [id])
-  connector            Connector     @relation(fields: [connectorId], references: [id])
+  tenant               Tenant             @relation(fields: [tenantId], references: [id])
+  connector            Connector          @relation(fields: [connectorId], references: [id])
   rows                 DatasetRow[]
   syncJobs             SyncJob[]
-  pipelineRunsAsInput  PipelineRun[] @relation("PipelineRunInput")
-  pipelineRunsAsOutput PipelineRun[] @relation("PipelineRunOutput")
+  pipelineRunInputs    PipelineRunInput[] @relation("PipelineRunInput")
+  pipelineRunsAsOutput PipelineRun[]      @relation("PipelineRunOutput")
 
   @@unique([tenantId, name, version])
   @@map("datasets")
@@ -277,17 +282,46 @@ model Pipeline {
   connectorId        String   @map("connector_id") @db.Uuid
   outputObjectTypeId String   @map("output_object_type_id") @db.Uuid
   status             String   @default("active")
+  // Optional batch-alignment key for multi-input join (ADR-0060 #5, model 1′). When set (e.g.
+  // "reportMonth"), a run fires only when every input has a ready version sharing the same key
+  // value, and only same-key versions are joined — guarding fact×fact cross-batch mis-pairing.
+  // Null = "latest ready" semantics (correct for single-input and fact×slow-dimension).
+  alignKey           String?  @map("align_key")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
-  tenant           Tenant         @relation(fields: [tenantId], references: [id])
-  connector        Connector      @relation(fields: [connectorId], references: [id])
-  outputObjectType ObjectType     @relation(fields: [outputObjectTypeId], references: [id])
+  tenant           Tenant          @relation(fields: [tenantId], references: [id])
+  connector        Connector       @relation(fields: [connectorId], references: [id])
+  outputObjectType ObjectType      @relation(fields: [outputObjectTypeId], references: [id])
   steps            PipelineStep[]
   runs             PipelineRun[]
+  inputs           PipelineInput[]
 
-  @@unique([tenantId, connectorId, outputObjectTypeId])
+  // NOTE: the former @@unique([tenantId, connectorId, outputObjectTypeId]) is relaxed (ADR-0060 #4):
+  // a Pipeline may declare multiple input sources, so a single connector no longer keys a Pipeline.
   @@map("pipelines")
+}
+
+// A declared input source of a multi-input Pipeline (ADR-0060 #4/#5, follow-up #186). Names the
+// Connector that feeds one input plus the role name a `join` step references (e.g. "orders" /
+// "refunds"). `alignKeyField`, when set, is the column in that input's rows carrying the batch key
+// (e.g. "reportMonth") used for same-key alignment. A Pipeline with NO PipelineInput rows implicitly
+// declares its own `connectorId` as its sole input (backward compatible — single-input AVC unchanged).
+model PipelineInput {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  pipelineId    String   @map("pipeline_id") @db.Uuid
+  inputName     String   @map("input_name")
+  connectorId   String   @map("connector_id") @db.Uuid
+  alignKeyField String?  @map("align_key_field")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  pipeline  Pipeline  @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  connector Connector @relation(fields: [connectorId], references: [id])
+
+  @@unique([pipelineId, inputName])
+  @@index([tenantId, connectorId])
+  @@map("pipeline_inputs")
 }
 
 model PipelineStep {
@@ -309,7 +343,6 @@ model PipelineRun {
   id               String    @id @default(uuid()) @db.Uuid
   tenantId         String    @map("tenant_id") @db.Uuid
   pipelineId       String    @map("pipeline_id") @db.Uuid
-  inputDatasetId   String    @map("input_dataset_id") @db.Uuid
   outputDatasetId  String?   @map("output_dataset_id") @db.Uuid
   status           String    @default("pending")
   pgBossJobId      String?   @map("pg_boss_job_id")
@@ -319,12 +352,33 @@ model PipelineRun {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  tenant        Tenant   @relation(fields: [tenantId], references: [id])
-  pipeline      Pipeline @relation(fields: [pipelineId], references: [id])
-  inputDataset  Dataset  @relation("PipelineRunInput", fields: [inputDatasetId], references: [id])
-  outputDataset Dataset? @relation("PipelineRunOutput", fields: [outputDatasetId], references: [id])
+  tenant        Tenant             @relation(fields: [tenantId], references: [id])
+  pipeline      Pipeline           @relation(fields: [pipelineId], references: [id])
+  // Inputs are a set (ADR-0060 #3): single-input AVC runs carry one element; fact×fact runs carry
+  // several. Replaces the former scalar inputDatasetId, which the migration backfills 1:1.
+  inputs        PipelineRunInput[]
+  outputDataset Dataset?           @relation("PipelineRunOutput", fields: [outputDatasetId], references: [id])
 
   @@map("pipeline_runs")
+}
+
+// One input Dataset version consumed by a PipelineRun (ADR-0060 #3 multi-input). The set of rows
+// for a run is its full input set; a single-input run has exactly one. `inputName` optionally
+// labels the role (e.g. "orders" / "refunds") for the join operator (#184).
+model PipelineRunInput {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  pipelineRunId String   @map("pipeline_run_id") @db.Uuid
+  datasetId     String   @map("dataset_id") @db.Uuid
+  inputName     String?  @map("input_name")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  pipelineRun PipelineRun @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade)
+  dataset     Dataset     @relation("PipelineRunInput", fields: [datasetId], references: [id])
+
+  @@unique([pipelineRunId, datasetId])
+  @@index([tenantId, pipelineRunId])
+  @@map("pipeline_run_inputs")
 }
 
 model Conversation {

@@ -4,6 +4,7 @@ const T = 'tenant-1';
 
 function make() {
   const runs: any[] = [];
+  const inputs: any[] = [];
   let seq = 0;
   const prisma: any = {
     $transaction: jest.fn(async (cb: any) => {
@@ -20,6 +21,12 @@ function make() {
             return r;
           }),
         },
+        pipelineRunInput: {
+          createMany: jest.fn(async ({ data }: any) => {
+            inputs.push(...data);
+            return { count: data.length };
+          }),
+        },
       };
       return cb(tx);
     }),
@@ -33,12 +40,12 @@ function make() {
     },
   };
   const boss: any = { send: jest.fn(async () => 'boss-run-1') };
-  return { svc: new PipelineRunService(prisma, boss), runs, boss };
+  return { svc: new PipelineRunService(prisma, boss), runs, inputs, boss };
 }
 
 describe('PipelineRunService', () => {
-  it('creates PipelineRun and enqueues to pg-boss transactionally', async () => {
-    const { svc, runs, boss } = make();
+  it('creates a single-input PipelineRun and enqueues to pg-boss transactionally', async () => {
+    const { svc, runs, inputs, boss } = make();
     const run = await svc.enqueue(T, 'pipe-1', 'ds-raw-1');
     expect(runs).toHaveLength(1);
     expect(boss.send).toHaveBeenCalledWith(
@@ -48,7 +55,18 @@ describe('PipelineRunService', () => {
     );
     expect(run.pgBossJobId).toBe('boss-run-1');
     expect(run.pipelineId).toBe('pipe-1');
-    expect(run.inputDatasetId).toBe('ds-raw-1');
+    // The single input is recorded as a one-element input set (ADR-0060 #3 backward compat).
+    expect(inputs).toEqual([{ pipelineRunId: run.id, tenantId: T, datasetId: 'ds-raw-1' }]);
+  });
+
+  it('records every input dataset when enqueuing a multi-input run', async () => {
+    const { svc, runs, inputs } = make();
+    const run = await svc.enqueue(T, 'pipe-1', ['ds-orders', 'ds-refunds']);
+    expect(runs).toHaveLength(1);
+    expect(inputs).toEqual([
+      { pipelineRunId: run.id, tenantId: T, datasetId: 'ds-orders' },
+      { pipelineRunId: run.id, tenantId: T, datasetId: 'ds-refunds' },
+    ]);
   });
 
   it('throws NotFoundException for unknown run', async () => {

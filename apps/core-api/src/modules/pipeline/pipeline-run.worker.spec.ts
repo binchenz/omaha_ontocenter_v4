@@ -1,9 +1,9 @@
-import { PipelineRunWorker } from './pipeline-run.worker';
+import { PipelineRunWorker, MAX_ROWS as MAX_ROWS_BOUND } from './pipeline-run.worker';
 import { makeTransformConfigServiceMock } from './transform-config.mock';
 
 const T = 'tenant-1';
 
-function make(overrides: { steps?: any[]; inputRows?: any[]; configs?: any[] } = {}) {
+function make(overrides: { steps?: any[]; inputRows?: any[]; configs?: any[]; runInputs?: any[] } = {}) {
   const datasets: any[] = [];
   const datasetRows: any[] = [];
   let seq = 0;
@@ -43,10 +43,14 @@ function make(overrides: { steps?: any[]; inputRows?: any[]; configs?: any[] } =
     id: 'run-1',
     tenantId: T,
     pipelineId: 'pipe-1',
-    inputDatasetId: 'ds-raw-1',
     outputDatasetId: null,
     status: 'pending',
   };
+
+  // ADR-0060 #3: inputs live in the join table. AVC runs are single-input (one element).
+  const runInputs = overrides.runInputs ?? [
+    { id: 'pri-1', tenantId: T, pipelineRunId: 'run-1', datasetId: 'ds-raw-1' },
+  ];
 
   const updates: Record<string, any>[] = [];
 
@@ -64,6 +68,9 @@ function make(overrides: { steps?: any[]; inputRows?: any[]; configs?: any[] } =
     },
     pipelineStep: {
       findMany: jest.fn(async () => steps),
+    },
+    pipelineRunInput: {
+      findMany: jest.fn(async () => runInputs),
     },
     dataset: {
       findFirst: jest.fn(async () => inputDataset),
@@ -168,6 +175,23 @@ describe('PipelineRunWorker', () => {
     }));
   });
 
+  it('resolves a single-element input set to the input dataset (ADR-0060 #3 backward compat)', async () => {
+    // A run migrated from the former scalar inputDatasetId carries exactly one PipelineRunInput;
+    // the worker must read it from the set and produce the same clean Dataset as before.
+    const { worker, datasets, datasetRows } = make({
+      runInputs: [{ id: 'pri-1', tenantId: T, pipelineRunId: 'run-1', datasetId: 'ds-raw-1' }],
+    });
+    await (worker as any).handle({ data: { pipelineRunId: 'run-1' } } as any);
+    expect(datasets).toHaveLength(1);
+    expect(datasetRows).toHaveLength(2);
+  });
+
+  it('fails the run when its input set is empty', async () => {
+    const { worker, updates } = make({ runInputs: [] });
+    await expect((worker as any).handle({ data: { pipelineRunId: 'run-1' } } as any)).rejects.toThrow(/input/i);
+    expect(updates.find((u) => u.status === 'failed')).toBeDefined();
+  });
+
   it('executes steps in order — rename consumes the filter output', async () => {
     // filter on a renamed column would only work if rename ran first;
     // here filter must run first (order 1), so it matches the pre-rename column.
@@ -195,12 +219,15 @@ describe('PipelineRunWorker', () => {
     expect(datasetRows.map((r) => r.columns.n).sort()).toEqual([15, 20]);
   });
 
-  it('fails the run with a permanent error when input exceeds 100k rows', async () => {
+  it('fails the run with a structured permanent error when input exceeds the single-node row limit', async () => {
+    // ADR-0060 #1: the former in-memory 100k cap is replaced by a far larger DuckDB single-node
+    // bound. The *behavior* — over-limit input fails loudly with a structured error rather than
+    // OOMing — is preserved; only the threshold moved. We assert the guard exists by reporting a
+    // count above the bound rather than allocating millions of rows.
     const { worker, prisma, updates } = make();
-    // simulate >100k input by overriding the row loader to report a huge count
-    const huge = Array.from({ length: 100_001 }, (_, i) => ({ id: `r${i}`, columns: { status: 'active' } }));
-    prisma.datasetRow.findMany.mockResolvedValueOnce(huge);
-    await expect((worker as any).handle({ data: { pipelineRunId: 'run-1' } } as any)).rejects.toThrow(/100000|100k|row/i);
+    const over = MAX_ROWS_BOUND + 1;
+    prisma.datasetRow.findMany.mockResolvedValueOnce({ length: over } as any);
+    await expect((worker as any).handle({ data: { pipelineRunId: 'run-1' } } as any)).rejects.toThrow(/exceed|limit|row/i);
     const failed = updates.find((u) => u.status === 'failed');
     expect(failed).toBeDefined();
     expect(failed!.error).toEqual(expect.objectContaining({ message: expect.any(String) }));
@@ -290,6 +317,18 @@ describe('PipelineRunWorker', () => {
       await expect((worker as any).handle({ data: { pipelineRunId: 'run-1' } } as any)).rejects.toThrow();
       const failed = updates.find((u) => u.status === 'failed');
       expect(failed!.error).toEqual(expect.objectContaining({ message: expect.stringMatching(/config|version|not found/i) }));
+    });
+
+    it('runs a concat compute step (no configRef) without a TransformConfig lookup (#177)', async () => {
+      // concat carries no configRef — resolveSteps must NOT try to load a config for it, else it
+      // throws "config not found" on an undefined ref.
+      const steps = [{ id: 's1', pipelineId: 'pipe-1', order: 1, type: 'compute',
+        config: { function: 'concat', fields: ['category', 'brand'], separator: '_', outputField: 'externalId' } }];
+      const inputRows = [{ id: 'r1', columns: { category: '电饭煲', brand: '苏泊尔' } }];
+      const { worker, datasetRows, getCalls } = make({ steps, inputRows, configs: [] });
+      await (worker as any).handle({ data: { pipelineRunId: 'run-1' } } as any);
+      expect(datasetRows[0].columns.externalId).toBe('电饭煲_苏泊尔');
+      expect(getCalls).toHaveLength(0); // never reached TransformConfigService
     });
   });
 });

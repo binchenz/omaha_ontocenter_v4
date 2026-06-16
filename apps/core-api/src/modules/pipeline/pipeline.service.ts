@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, PrismaService } from '@omaha/db';
 import { validatePipelineStep } from './pipeline-step.schemas';
 import { TransformConfigService } from '../transform-config/transform-config.service';
@@ -23,12 +23,27 @@ export interface ConfigureStepDto {
   name?: string;
 }
 
+/** One declared input source of a multi-input (fact×fact) Pipeline (ADR-0060 #4/#5, #187). */
+export interface DeclaredInputDto {
+  /** Role name a `join` step references (e.g. "orders" / "refunds"). */
+  inputName: string;
+  /** Connector feeding this input. */
+  connectorId: string;
+  /** Column carrying the batch key (e.g. "reportMonth") for same-key alignment; optional. */
+  alignKeyField?: string;
+}
+
 export interface ConfigurePipelineDto {
   name: string;
   connectorId: string;
   outputObjectTypeId: string;
   steps: ConfigureStepDto[];
   autoActivate?: boolean;
+  /**
+   * Explicit input sources for a multi-input Pipeline. Omitted/empty → the Pipeline implicitly
+   * declares its own `connectorId` as its sole input (single-input, unchanged — ADR-0060 #186).
+   */
+  declaredInputs?: DeclaredInputDto[];
 }
 
 @Injectable()
@@ -81,6 +96,15 @@ export class PipelineService {
       }),
     );
 
+    // Reject duplicate input names before any write, so the atomic-create guarantee holds rather
+    // than the @@unique([pipelineId, inputName]) constraint failing mid-transaction.
+    if (dto.declaredInputs) {
+      const names = dto.declaredInputs.map((i) => i.inputName);
+      if (new Set(names).size < names.length) {
+        throw new BadRequestException(`declaredInputs has duplicate inputName: ${names.join(', ')}`);
+      }
+    }
+
     const status = dto.autoActivate === false ? 'draft' : 'active';
 
     // 2. Persist atomically.
@@ -103,6 +127,21 @@ export class PipelineService {
             name: step.name,
             config: step.config as Prisma.InputJsonValue,
           },
+        });
+      }
+      // Declared inputs (multi-input fact×fact). None → implicit single-input by connector (#186).
+      // `alignKeyField` is persisted but not yet read by the join-barrier — the orchestrator's
+      // resolver currently keys on Pipeline.alignKey + Dataset.alignKeyValue (#186). It is stored
+      // now so a future per-input alignment variant has the source column on record (ADR-0060 §5).
+      if (dto.declaredInputs && dto.declaredInputs.length > 0) {
+        await tx.pipelineInput.createMany({
+          data: dto.declaredInputs.map((input) => ({
+            tenantId,
+            pipelineId: pipeline.id,
+            inputName: input.inputName,
+            connectorId: input.connectorId,
+            alignKeyField: input.alignKeyField ?? null,
+          })),
         });
       }
       return { pipelineId: pipeline.id, status };

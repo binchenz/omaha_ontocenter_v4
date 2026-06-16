@@ -29,12 +29,15 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '@omaha/db';
+import { AvcPipelineProvisioner } from '../src/modules/pipeline/avc-pipeline-provisioner.service';
 
-/** Confirmed same-brand variants → canonical (user-approved 2026-06-15). 东菱星 deliberately NOT merged. */
-const BRAND_VARIANTS: Record<string, string> = {
-  苏泊: '苏泊尔',
-  小米米家: '小米',
-};
+/**
+ * Confirmed same-brand variants → canonical. Single source of truth is the provisioner's
+ * BRAND_ALIASES (the architectural fix, #177) — this retired one-shot reuses it so the two
+ * can't drift. This script is superseded by the pipeline normalize_brand path and should be
+ * deleted once #177 is confirmed live on the tenant.
+ */
+const BRAND_VARIANTS: Record<string, string> = AvcPipelineProvisioner.BRAND_ALIASES;
 
 async function main() {
   const tenantSlug = process.argv[2];
