@@ -215,7 +215,9 @@ export class OrchestratorService {
         // #194(a) — equivalent query already run this turn: reuse its result, don't re-execute.
         const cached = dedup.get(call.name, call.arguments);
         if (cached.hit) {
-          yield synthResult({ ...(cached.value as Record<string, unknown>), _note: '该查询本轮已执行，复用上次结果（请勿重复查询已有数据）' });
+          const cachedData = cached.value as Record<string, unknown>;
+          cachedData._note = '该查询本轮已执行，复用上次结果（请勿重复查询已有数据）';
+          yield synthResult(cachedData);
           continue;
         }
 
@@ -258,18 +260,12 @@ export class OrchestratorService {
           deferUnprocessedSiblings();
           if (this.confirmationGate && input.conversationId) {
             await this.confirmationGate.suspend(input.conversationId, {
-              toolName: call.name,
-              toolCallId: call.id,
-              args: call.arguments,
-              messages: [...messages],
-              objectTypeNames: input.objectTypeNames,
+              toolName: call.name, toolCallId: call.id, args: call.arguments,
+              messages: [...messages], objectTypeNames: input.objectTypeNames,
             });
           }
           yield {
-            type: 'confirmation_request',
-            id: call.id,
-            toolName: call.name,
-            args: call.arguments,
+            type: 'confirmation_request', id: call.id, toolName: call.name, args: call.arguments,
             message: `即将执行 ${call.name}，参数：${JSON.stringify(call.arguments)}`,
           };
           yield { type: 'done', conversationId: input.conversationId ?? 'new' };
