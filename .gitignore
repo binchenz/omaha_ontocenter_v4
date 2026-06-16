@@ -14,3 +14,4 @@ scripts/test-results/
 调研及市场数据/
 .esdata/
 apps/core-api/reports/
+.backups/
