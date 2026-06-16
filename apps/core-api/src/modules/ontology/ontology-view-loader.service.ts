@@ -9,8 +9,29 @@ function parseDimensions(raw: unknown): OntologyView['dimensions'] {
   const obj = raw as Record<string, unknown>;
   const required = Array.isArray(obj.required) ? (obj.required as string[]) : [];
   const defaults = (obj.defaults && typeof obj.defaults === 'object') ? obj.defaults as Record<string, string> : {};
-  if (required.length === 0 && Object.keys(defaults).length === 0) return undefined;
-  return { required, defaults };
+  const collapsedDefault = (obj.collapsedDefault && typeof obj.collapsedDefault === 'object')
+    ? obj.collapsedDefault as Record<string, string>
+    : undefined;
+  const requiredEquivalents = (obj.requiredEquivalents && typeof obj.requiredEquivalents === 'object')
+    ? obj.requiredEquivalents as Record<string, string[]>
+    : undefined;
+  if (required.length === 0 && Object.keys(defaults).length === 0 && !collapsedDefault && !requiredEquivalents) return undefined;
+  return { required, defaults, collapsedDefault, requiredEquivalents };
+}
+
+/**
+ * ADR-0061 §1: lift each property's `additivity` / `ratioOf` into the view's
+ * additivity map. Only tagged fields enter the map — the guard reads absence as
+ * `additive`. Returns undefined when no field carries a tag (the common case),
+ * so non-AVC types pay nothing.
+ */
+function parseAdditivity(properties: PropertyDefinition[]): OntologyView['additivity'] {
+  const map: NonNullable<OntologyView['additivity']> = new Map();
+  for (const p of properties) {
+    if (!p.additivity) continue;
+    map.set(p.name, { kind: p.additivity, ratioOf: p.ratioOf });
+  }
+  return map.size > 0 ? map : undefined;
 }
 
 @Injectable({ scope: Scope.REQUEST })
@@ -68,6 +89,7 @@ export class OntologyViewLoader {
         ]),
       ),
       dimensions: parseDimensions(ot.dimensions),
+      additivity: parseAdditivity(properties),
     };
 
     this.cache.set(key, view);

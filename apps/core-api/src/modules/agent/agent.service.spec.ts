@@ -205,8 +205,9 @@ describe('OrchestratorService', () => {
   });
 
   it('uses skill system prompt when skills are provided', async () => {
+    // Named 'query' so the no-surface budget-safe fallback (#179, CONSUME set) keeps it.
     const skill: AgentSkill = {
-      name: 'test-skill',
+      name: 'query',
       description: 'Test skill',
       tools: ['query_objects'],
       systemPrompt: () => '你是测试助手。只回答测试相关问题。',
@@ -304,8 +305,9 @@ describe('OrchestratorService', () => {
     });
 
     it('logs a warning when system prompt exceeds 6000 tokens', async () => {
+      // Named 'query' so the no-surface fallback (#179) keeps it and its fat prose reaches the budget check.
       const fatSkill: AgentSkill = {
-        name: 'fat',
+        name: 'query',
         description: '',
         tools: [],
         systemPrompt: () => 'x'.repeat(9500),
@@ -322,8 +324,9 @@ describe('OrchestratorService', () => {
     });
 
     it('logs an error when system prompt exceeds 8000 tokens', async () => {
+      // Named 'query' so the no-surface fallback (#179) keeps it and its huge prose reaches the budget check.
       const hugeSkill: AgentSkill = {
-        name: 'huge',
+        name: 'query',
         description: '',
         tools: [],
         systemPrompt: () => 'x'.repeat(12500),

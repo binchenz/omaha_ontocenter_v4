@@ -26,6 +26,29 @@ describe('assembleSkills', () => {
     const result = assembleSkills(ALL, 'maintain', ['object.query']);
     expect(result.map((s) => s.name)).not.toContain('ontology_design');
   });
+
+  describe('no declared surface → budget-safe fallback (#179)', () => {
+    const RESEARCH = skill('research_qa', ['semantic_search', 'query_objects']);
+    const FULL = [QUERY, INGEST, DESIGN, RESEARCH];
+
+    it('falls back to the consume skill set, NOT the full union, when no surface is declared', () => {
+      // The full 6-skill union blows the prompt budget (#179). With no surface, a
+      // design-time user gets the safe CONSUME set rather than everything.
+      const result = assembleSkills(FULL, undefined, ['ontology.design', 'object.query']);
+      expect(result.map((s) => s.name).sort()).toEqual(['query', 'research_qa']);
+    });
+
+    it('still withholds design-time skills on the fallback for a query-only user', () => {
+      const result = assembleSkills(FULL, undefined, ['object.query']);
+      expect(result.map((s) => s.name)).not.toContain('ontology_design');
+      expect(result.map((s) => s.name)).not.toContain('data_ingestion');
+    });
+
+    it('treats an unknown surface the same as no surface (safe fallback, not union)', () => {
+      const result = assembleSkills(FULL, 'totally-unknown', ['ontology.design']);
+      expect(result.map((s) => s.name).sort()).toEqual(['query', 'research_qa']);
+    });
+  });
 });
 
 describe('openingGuidanceFor', () => {

@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import type { OntologyView } from '@omaha/dsl';
 import { QueryPlannerService } from '../query-planner.service';
+import { DimensionConstraintEnforcer } from '../dimension-constraint-enforcer';
 
 /**
  * ADR-0057: Dimension constraint tests.
@@ -40,7 +41,7 @@ function makePlanner(view: OntologyView | null): QueryPlannerService {
       { val: '22.12' }, { val: '23.12' }, { val: '24.12' }, { val: '25.12' }, { val: '26.04' },
     ]),
   } as any;
-  return new QueryPlannerService(viewLoader, viewManager, prisma);
+  return new QueryPlannerService(viewLoader, viewManager, prisma, new DimensionConstraintEnforcer(prisma));
 }
 
 describe('QueryPlannerService — dimension constraints (ADR-0057)', () => {

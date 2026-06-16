@@ -25,6 +25,18 @@ describe('ResearchQaSkill', () => {
     expect(prompt).toContain('品类');
   });
 
+  it('teaches that year is a trustworthy same-source dimension — no month-exhaustion re-verify (#178)', () => {
+    // ADR-0059 added a stored `year` derived in lockstep with `month`. The Agent
+    // was distrusting it: after a correct groupBy[year] it would re-verify by
+    // exhausting month in [...] (24 months), burning ~50% more tool_calls. The
+    // skill must vouch for `year` so a yearly rollup converges in one aggregate.
+    const prompt = skill.systemPrompt({ tenantId: 't1' });
+    expect(prompt).toContain('year');
+    expect(prompt).toMatch(/同源/);            // year 与 month 同源
+    expect(prompt).toMatch(/可信|可靠|信任/);   // trustworthy
+    expect(prompt).toMatch(/穷举|逐月|复核|月份再验|month\s*in/i); // names the anti-pattern to avoid
+  });
+
   it('enforces the stop-and-confirm checkpoint before cross-star drill-down (ADR-0049)', () => {
     // ①② are single-star (reliable). ③④ are cross-star, where the Agent's
     // query-plan translation fails 50-100% per question. The skill must stop

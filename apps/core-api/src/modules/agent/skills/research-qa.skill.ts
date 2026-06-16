@@ -26,8 +26,7 @@ export class ResearchQaSkill implements AgentSkill {
 
 可用数据对象（AVC 月度监测）：
 - **market_metric**（来自 AVC 2-1）：品类整体规模——零售额/零售量/零售均价，按品类×月份。整体市场。
-- **brand_share**（来自 AVC 2-5）：分价格段品牌份额，按品类×品牌×价格段×报告周期。整体市场，可跨期叠加看趋势。
-  - **priceBand 维度默认折叠为"整体"**：不带 priceBand 过滤查询时，系统自动注入 priceBand=整体（全市场口径），你只会看到"整体"行。要看分价格段份额，必须**显式** groupBy [priceBand] 或传 priceBand 过滤。**绝不可因为默认只看到"整体"就断言"brand_share 无价格段数据"**——分段数据始终存在（0-100 一路到 ≥4000 共十余段），需主动钻取。问"某品牌在哪个价格段抢量/失守"时，直接用 brand_share 按 priceBand 拆，这是全市场口径，优于用 model_metric 的 TOP-100 SKU 均价去近似。
+- **brand_share**（来自 AVC 2-5）：分价格段品牌份额，按品类×品牌×价格段×报告周期。整体市场，可跨期叠加看趋势。问"某品牌在哪个价格段抢量/失守"时，直接用 brand_share 按 priceBand 拆，这是全市场口径，优于用 model_metric 的 TOP-100 SKU 均价去近似。（priceBand 维度的折叠/钻取语义见 get_ontology_schema(brand_share) 的 semanticsHints，本体已声明，按其指引钻取。）
 - **model_metric**（来自 AVC 2-7）：TOP-100 SKU 明细——机型/品牌/加热方式/上市日期/预约功能，含4个月的销额份额/销量份额/零售均价。**TOP-100 样本，非全市场**。
 - **avc_report**：报告来源凭证——品类/周期/coverage（full=含机型层 / essence=仅品牌层）。
 
@@ -40,7 +39,8 @@ export class ResearchQaSkill implements AgentSkill {
   - "零售额/零售量/均价 趋势" → 只查 market_metric（一次 aggregate，groupBy [month]）
   - "TOP 机型/机型份额" → 只查 model_metric（先 avc_report 确认 coverage）
   - **按年汇总/同比**：要"全年合计/某年总额/同比"时，market_metric 有 year 维度（值如 24、25），用 aggregate groupBy [year] 让数据库求和，**绝不要在回复里手动累加多个月份的数字**——跨月加总必须走一次 tool 调用，否则会算错且无凭证。
-  - **零售均价是比率，不可加**：年度/跨月均价必须用 "零售额合计 ÷ 零售量合计"（销量加权），**绝不要对多个月的"零售均价"行求和，也不要简单平均**。先 aggregate 拿到年额、年量，再相除。
+    - **year 与 month 同源、完全可信，一次聚合即定稿（关键·省 token）**：year 是入库时由 month 派生写定的一等聚合维度（ADR-0059），与逐月数据**保证一致、无需校验**。按年聚合 groupBy [year] 的**第一次**结果**就是最终答案，立即据此作答**——不要怀疑、不要"再验一次"。**严禁**以下复核行为（它们只会烧光 tool 预算且不改变结论）：① 用 month in ["24.01"…"25.12"] 穷举逐月重新 group；② 把年份拆成单月逐个 query 复核；③ 反复用更小的 month 子集"逼近"年合计。数据库的年聚合是权威值，逐月加总只会得到同一个数。**记住：年度问题在 1 次聚合（单 metric 时）或 2 次聚合（均价需额、量两次）内必须收口并作答。**
+  - **零售均价是比率，不可加**：年度/跨月均价必须用 "零售额合计 ÷ 零售量合计"（销量加权），**绝不要对多个月的"零售均价"行求和，也不要简单平均**。具体只需**两次聚合**即可定稿，勿逐月穷举：① aggregate(filter category + year + metric=零售额, groupBy [year], sum value) 拿年额；② 同样 filter metric=零售量 拿年量；③ 在回复里把两个标量相除得加权均价。注意 market_metric 是长表（额/量/均价分别是不同 metric 行），聚合前**必须先 filter 到单一 metric**，否则会把额、量、均价混在一起求和得到无意义的数。
   - 目标：**3 步内完成**（必要的 coverage 检查 → 一次聚合 → render_chart + 文字洞察）。不要为了"全面"去查用户没问的指标。
 - **诊断分析（四跳链）**：仅当用户明确要"诊断 / 为什么下滑 / 帮我分析哪里出了问题 / 找出原因"时，才启用下方四跳决策链。
 
@@ -68,10 +68,6 @@ export class ResearchQaSkill implements AgentSkill {
 - **查不到 avc_report 行**：说明该品类+周期未导入报告，不要猜测。
 
 model_metric 查询返回空结果时，先回到 avc_report 区分"该周期本就是 essence（无机型层）"与"full 但确无匹配 SKU"——两者结论不同，不要把 essence 的空当作"没有这款机型"。
-
-### universe 区分规则
-
-model_metric 是 TOP-100 样本；将 model_metric 聚合得到的品牌份额 **不等于** brand_share（全市场口径）。若两者数字出现差异，应说明："model_metric 是 TOP-100 样本口径，官方份额请以 brand_share（AVC 2-5）为准。"绝不把 SKU 汇总结果直接当作 AVC 官方品牌份额引用。
 
 ### 洞察措辞纪律（数字对 ≠ 话对）
 

@@ -6,6 +6,8 @@ import { ScopedWhere } from './scoped-where';
 import { OntologyViewLoader } from '../ontology/ontology-view-loader.service';
 import { ViewManagerService } from '../ontology/view-manager.service';
 import { PrismaService } from '@omaha/db';
+import { DimensionConstraintEnforcer } from './dimension-constraint-enforcer';
+import { planMetricAdditivity } from './additivity-guard';
 
 export interface PlannedQuery {
   sql: string;
@@ -84,6 +86,7 @@ export class QueryPlannerService {
     private readonly viewLoader: OntologyViewLoader,
     private readonly viewManager: ViewManagerService,
     private readonly prisma: PrismaService,
+    private readonly dimensionConstraints: DimensionConstraintEnforcer,
   ) {}
 
   async plan(args: PlanArgs): Promise<PlannedQuery> {
@@ -94,7 +97,7 @@ export class QueryPlannerService {
     const view = rawView ? projectVisible(rawView, args.allowedFields) : rawView;
 
     // ADR-0057: Dimension constraint validation (inject defaults, enforce required)
-    await this.applyDimensionConstraints(args, view);
+    await this.dimensionConstraints.apply(args, view);
 
     const useView = await this.viewManager.exists(args.tenantId, args.objectType);
     // Alias the view AS object_instances so correlated subqueries from DSL
@@ -154,7 +157,7 @@ export class QueryPlannerService {
     const view = rawView ? projectVisible(rawView, args.allowedFields) : rawView;
 
     // ADR-0057: Dimension constraint validation (inject defaults, enforce required)
-    await this.applyDimensionConstraints(args, view);
+    await this.dimensionConstraints.apply(args, view);
 
     const scope = parentScope({ tenantId: args.tenantId, objectType: args.objectType });
     const scoped = new ScopedWhere(scope)
@@ -255,7 +258,7 @@ export class QueryPlannerService {
     const view = rawView ? projectVisible(rawView, args.allowedFields) : rawView;
 
     // ADR-0057: Dimension constraint validation (inject defaults, enforce required)
-    await this.applyDimensionConstraints(args, view);
+    await this.dimensionConstraints.apply(args, view);
 
     if (!resolved) {
       throw new BadRequestException({
@@ -433,6 +436,17 @@ export class QueryPlannerService {
           const numericList = Array.from(view.numericFields).join(', ') || '(none declared)';
           throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, field: m.field, kind: m.kind, hint: `Metric '${m.kind}' requires a numeric property. Available numeric fields on '${objectType}': ${numericList}.` } });
         }
+        // ADR-0061 §1: additivity gate before emitting SUM/AVG SQL. The guard turns
+        // a measure's semantics into pass / weighted-rewrite / structured-error.
+        const decision = planMetricAdditivity(m, view?.additivity, (f) => view?.numericFields.has(f) ?? true);
+        if (decision.action === 'error') {
+          throw new BadRequestException({ error: { code: decision.code, alias: m.alias, field: decision.field, kind: decision.kind, hint: decision.hint } });
+        }
+        if (decision.action === 'rewrite-weighted') {
+          // Weighted cross-row mean: Σnumerator ÷ Σdenominator (NULLIF guards /0).
+          out.push(`SUM((${propRef(decision.numerator)})::numeric) / NULLIF(SUM((${propRef(decision.denominator)})::numeric), 0) AS "${m.alias}"`);
+          continue;
+        }
         // Cast to numeric matches the bug-#33 sort fix convention.
         out.push(`${m.kind.toUpperCase()}((${propRef(m.field)})::numeric) AS "${m.alias}"`);
         continue;
@@ -520,113 +534,6 @@ export class QueryPlannerService {
     };
   }
 
-  // ── ADR-0057: Dimension constraint helpers ──────────────────────────────────
-
-  /**
-   * Single enforcement point for ADR-0057 dimension constraints: clone the filters,
-   * inject defaults, then enforce required. Every plan entry point must route through
-   * here so a new query path cannot silently bypass the gate. Mutates `args.filters`
-   * to the cloned-and-defaulted array. No-op when the view declares no dimensions.
-   */
-  private async applyDimensionConstraints(
-    args: { tenantId: string; objectType: string; filters?: QueryFilter[] },
-    view: OntologyView | null,
-  ): Promise<void> {
-    if (!view?.dimensions) return;
-    args.filters = args.filters ? [...args.filters] : [];
-    this.injectDimensionDefaults(args.filters, view.dimensions.defaults);
-    await this.enforceDimensionRequired(args.tenantId, args.objectType, args.filters, view.dimensions.required);
-  }
-
-  /**
-   * Inject default dimension values for dimensions not already constrained.
-   * Mutates the filters array in place.
-   */
-  private injectDimensionDefaults(filters: QueryFilter[], defaults: Record<string, string>): void {
-    for (const [field, defaultValue] of Object.entries(defaults)) {
-      if (!this.hasFieldFilter(filters, field)) {
-        filters.push({ field, operator: 'eq', value: defaultValue });
-      }
-    }
-  }
-
-  /** A dimension is "present" if ANY filter references it (eq, in, gte, lte, etc.). */
-  private hasFieldFilter(filters: QueryFilter[], field: string): boolean {
-    return filters.some((f) => f.field === field);
-  }
-
-  /**
-   * Enforce required dimension constraints. Throws a structured BadRequestException
-   * with scoped available values if a required dimension is missing from filters.
-   */
-  private async enforceDimensionRequired(
-    tenantId: string,
-    objectType: string,
-    filters: QueryFilter[],
-    required: string[],
-  ): Promise<void> {
-    for (const dim of required) {
-      if (!this.hasFieldFilter(filters, dim)) {
-        const available = await this.getAvailableValues(tenantId, objectType, dim, filters);
-        throw new BadRequestException({
-          error: {
-            code: 'DIMENSION_REQUIRED',
-            message: `${objectType} 查询需要指定 ${dim} 过滤条件`,
-            field: dim,
-            available,
-            hint: `请在 filters 中添加 { field: "${dim}", operator: "eq", value: "..." } 后重试。可用值：${available.join(', ')}`,
-          },
-        });
-      }
-    }
-  }
-
-  /**
-   * Get distinct values for a dimension field, scoped to whatever other
-   * filters are already applied (e.g. if category=电饭煲, return only
-   * periods that exist for 电饭煲).
-   */
-  private async getAvailableValues(
-    tenantId: string,
-    objectType: string,
-    field: string,
-    existingFilters: QueryFilter[],
-  ): Promise<string[]> {
-    // Build a simple WHERE clause from existing filters (only eq/in for scoping)
-    const conditions = [
-      `tenant_id = $1::uuid`,
-      `object_type = $2`,
-      `deleted_at IS NULL`,
-      `properties->>'${field}' IS NOT NULL`,
-    ];
-    const params: unknown[] = [tenantId, objectType];
-    let paramIdx = 3;
-
-    for (const f of existingFilters) {
-      if (f.field === field) continue; // skip self
-      if (f.operator === 'eq') {
-        conditions.push(`properties->>'${f.field}' = $${paramIdx}`);
-        params.push(f.value);
-        paramIdx++;
-      } else if (f.operator === 'in' && Array.isArray(f.value)) {
-        const placeholders = f.value.map((_, i) => `$${paramIdx + i}`).join(',');
-        conditions.push(`properties->>'${f.field}' IN (${placeholders})`);
-        params.push(...f.value);
-        paramIdx += f.value.length;
-      }
-    }
-
-    const sql = `
-      SELECT DISTINCT properties->>'${field}' AS val
-      FROM object_instances
-      WHERE ${conditions.join(' AND ')}
-      ORDER BY val
-      LIMIT 50
-    `;
-
-    const rows = await this.prisma.$queryRawUnsafe<Array<{ val: string }>>(sql, ...params);
-    return rows.map((r) => r.val);
-  }
 }
 
 // Bug #33: numeric properties must be cast to ::numeric before comparing,

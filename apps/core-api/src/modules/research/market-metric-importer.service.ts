@@ -115,11 +115,19 @@ export const MARKET_METRIC_DEF = {
     { name: 'month', label: '月份', type: 'string' as const, filterable: true, sortable: true },
     { name: 'year', label: '年份', type: 'string' as const, filterable: true, sortable: true },
     { name: 'metric', label: '指标', type: 'string' as const, filterable: true, allowedValues: ['零售额', '零售量', '零售均价'] },
+    // ADR-0061 §1: long-format measure — additivity belongs to the metric ROW, not the column.
+    // 零售额/零售量 are additive; 零售均价 is a ratio. With a single `value` column the guard
+    // cannot tag per-row, so the metric-aware additivity is enforced via the skill's groupBy
+    // guidance; `value` stays untagged (additive) which is correct for the额/量 rows it usually holds.
     { name: 'value', label: '数值', type: 'number' as const, sortable: true },
     { name: 'sourceReport', label: '来源报告', type: 'string' as const },
   ],
   derivedProperties: [],
-  dimensions: { required: ['category', 'month'], defaults: {} },
+  // #178: a `year` filter satisfies the `month` requirement — an annual rollup (groupBy[year]) is a
+  // valid coarser period scope (year derived from month in lockstep, ADR-0059), so it need not be
+  // rejected DIMENSION_REQUIRED:month and forced into month-exhaustion.
+  dimensions: { required: ['category', 'month'], defaults: {}, requiredEquivalents: { month: ['year'] } },
+  semantics: { universe: 'whole-market' as const }, // ADR-0061 §2: 整体市场口径
 };
 
 export const MODEL_METRIC_DEF = {
@@ -134,13 +142,18 @@ export const MODEL_METRIC_DEF = {
     { name: 'launchDate', label: '上市日期', type: 'string' as const, filterable: true },
     { name: 'reservation', label: '预约功能', type: 'string' as const, filterable: true },
     { name: 'month', label: '月份', type: 'string' as const, filterable: true, sortable: true },
-    { name: 'valueShare', label: '销额份额', type: 'number' as const, sortable: true },
-    { name: 'volumeShare', label: '销量份额', type: 'number' as const, sortable: true },
-    { name: 'avgPrice', label: '零售均价', type: 'number' as const, sortable: true },
+    // ADR-0061 §1: shares are non-additive (summing SKU shares across a group is meaningless);
+    // 均价 is a ratio whose weight columns (额/量) are NOT carried on the model row, so a weighted
+    // rewrite is impossible — the guard returns RATIO_AVG_UNWEIGHTABLE rather than a wrong mean.
+    { name: 'valueShare', label: '销额份额', type: 'number' as const, sortable: true, additivity: 'non-additive' as const },
+    { name: 'volumeShare', label: '销量份额', type: 'number' as const, sortable: true, additivity: 'non-additive' as const },
+    { name: 'avgPrice', label: '零售均价', type: 'number' as const, sortable: true, additivity: 'ratio' as const },
     { name: 'sourceReport', label: '来源报告', type: 'string' as const },
   ],
   derivedProperties: [],
+  // model_metric has no stored `year` field, so no month↔year equivalent applies here.
   dimensions: { required: ['category', 'month'], defaults: {} },
+  semantics: { universe: 'top-sample' as const }, // ADR-0061 §2: TOP-100 样本，非全市场
 };
 
 export const AVC_REPORT_DEF = {
@@ -166,9 +179,15 @@ export const BRAND_SHARE_DEF = {
     { name: 'priceBand', label: '价格段', type: 'string' as const, filterable: true },
     { name: 'period', label: '周期', type: 'string' as const, filterable: true },
     { name: 'metric', label: '指标', type: 'string' as const, filterable: true, allowedValues: ['share'] },
-    { name: 'value', label: '份额', type: 'number' as const, sortable: true },
+    // ADR-0061 §1: brand share is non-additive — adding shares across price bands / brands is
+    // nonsense; the guard rejects SUM(value) with NON_ADDITIVE_SUM and steers to a base-quantity path.
+    { name: 'value', label: '份额', type: 'number' as const, sortable: true, additivity: 'non-additive' as const },
     { name: 'sourceReport', label: '来源报告', type: 'string' as const },
   ],
   derivedProperties: [],
-  dimensions: { required: ['category', 'period'], defaults: { priceBand: '整体' } },
+  // ADR-0061 §3: priceBand is BOTH defaulted (auto-pinned to 整体) AND collapsedDefault
+  // (surfaced through the schema so the Agent knows the dimension exists and must be
+  // drilled, not reverse-asserted as absent — the dimension-default-blindspot fix).
+  dimensions: { required: ['category', 'period'], defaults: { priceBand: '整体' }, collapsedDefault: { priceBand: '整体' } },
+  semantics: { universe: 'whole-market' as const }, // ADR-0061 §2: 整体市场份额（官方口径）
 };

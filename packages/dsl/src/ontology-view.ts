@@ -43,7 +43,20 @@ export interface OntologyView {
   dimensions?: {
     required: string[];
     defaults: Record<string, string>;
+    /** ADR-0061 §3: dimensions that exist but are folded to a default unless the query drills in. */
+    collapsedDefault?: Record<string, string>;
+    /** #178: alternative fields that satisfy a required dimension (e.g. a `year` filter satisfies `month`). */
+    requiredEquivalents?: Record<string, string[]>;
   };
+
+  /**
+   * ADR-0061 §1: per-field aggregation semantics, keyed by property name. Read by
+   * the AdditivityGuard before aggregate SQL is built (additive→SUM, ratio→weighted
+   * mean, non-additive→reject SUM). Absent / field-not-present → treated as additive.
+   * Carries the same shape as `PropertySemantics` from shared-types (kind + ratioOf),
+   * inlined here to keep the DSL package dependency-free.
+   */
+  additivity?: Map<string, { kind: 'additive' | 'non-additive' | 'ratio'; ratioOf?: { numerator: string; denominator: string } }>;
 
   /**
    * Set by `projectVisible` when the view has been narrowed to a restricted

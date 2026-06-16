@@ -19,7 +19,17 @@ const SURFACE_SKILLS: Record<string, string[]> = {
  * even when the surface would otherwise load them (least-privilege over relevance). */
 const DESIGN_TIME_SKILLS = ['ontology_design', 'data_ingestion'];
 
-/** A surface that declares a known Skill set. Absent/unknown → no narrowing applies. */
+/**
+ * The skill set used when no surface is declared (or it is unknown). #179: the
+ * former "all-active union" fallback (ADR-0010) assembled all six skills, whose
+ * concatenated prompt blows PROMPT_BUDGET_ERROR (~8.3k > 8k) and silently shipped.
+ * A no-surface conversation is read-only by nature, so the safe default is the
+ * CONSUME set — it stays well under budget and never withholds anything a query
+ * user is entitled to. A declared surface still narrows precisely as before.
+ */
+const FALLBACK_SKILLS = SURFACE_SKILLS[SURFACE.CONSUME];
+
+/** A surface that declares a known Skill set. Absent/unknown → budget-safe fallback applies. */
 function declaredSurface(surface: string | undefined): surface is string {
   return surface !== undefined && surface in SURFACE_SKILLS;
 }
@@ -29,11 +39,11 @@ export function assembleSkills(
   surface: string | undefined,
   permissions: string[],
 ): AgentSkill[] {
-  // No declared surface → preserve the all-active union (ADR-0010). Surface narrows
-  // the Skill set only when the user has actually declared one (ADR-0039/0041).
-  if (!declaredSurface(surface)) return allSkills;
+  // A declared surface narrows precisely (ADR-0039/0041); no/unknown surface falls
+  // back to the budget-safe CONSUME set rather than the full union (#179).
+  const wantedNames = declaredSurface(surface) ? SURFACE_SKILLS[surface] : FALLBACK_SKILLS;
   const designTime = isDesignTimeUser(permissions);
-  const wanted = SURFACE_SKILLS[surface].filter(
+  const wanted = wantedNames.filter(
     (name) => designTime || !DESIGN_TIME_SKILLS.includes(name),
   );
   return allSkills.filter((s) => wanted.includes(s.name));

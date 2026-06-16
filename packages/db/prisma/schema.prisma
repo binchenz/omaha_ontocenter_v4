@@ -97,6 +97,10 @@ model ObjectType {
   properties        Json     @default("[]")
   derivedProperties Json     @default("[]") @map("derived_properties")
   dimensions        Json     @default("{}")
+  // ADR-0061 §2: ObjectType-level intrinsic semantics (e.g. sampling `universe`),
+  // lifted out of skill prose. Additivity lives inline on each property; this holds
+  // type-level facts the Agent reads from the schema.
+  semantics         Json     @default("{}")
   version           Int      @default(1)
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")

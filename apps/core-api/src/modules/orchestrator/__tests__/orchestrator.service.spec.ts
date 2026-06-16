@@ -80,8 +80,10 @@ describe('OrchestratorService', () => {
 
   it('passes the real tenantId to each skill systemPrompt during run', async () => {
     let seenTenantId: string | undefined;
+    // Named 'query' so the no-surface budget-safe fallback (#179, CONSUME set) keeps it —
+    // a synthetic name would be narrowed out and its systemPrompt never run.
     const capturingSkill: AgentSkill = {
-      name: 'capturing_skill',
+      name: 'query',
       description: 'captures context',
       tools: ['test_tool'],
       systemPrompt: (ctx) => { seenTenantId = ctx.tenantId; return 'captured'; },

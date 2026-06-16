@@ -4,6 +4,7 @@ import { CurrentUser as CurrentUserType, PropertyDefinition } from '@omaha/share
 import { assertCapability } from '../../common/helpers/assert-capability';
 import { OntologyService } from '../ontology/ontology.service';
 import { TypeResolver } from '../agent/sdk/type-resolver.service';
+import { renderSemanticsHints, toRenderableSemantics } from './semantics-renderer';
 
 /**
  * The Ontology schema as the Agent sees it. Property shape derives from the canonical
@@ -18,6 +19,12 @@ export interface OntologySchema {
     properties: PropertyDefinition[];
     derivedProperties: Array<{ name: string; type: string; label: string }>;
     actions: Array<{ name: string; label: string; description?: string; parameters: Array<{ name: string; type: string; label: string; required: boolean }> }>;
+    /**
+     * ADR-0061 §3: structural-semantics warnings the Agent must heed (folded
+     * dimensions now; universe in #191), rendered by SemanticsRenderer. Replaces
+     * the skill prose that encoded these rules. Empty/absent for plain types.
+     */
+    semanticsHints?: string[];
   }>;
   relationships: Array<{
     name: string;
@@ -91,6 +98,8 @@ export class OntologySdk {
           name: d.name, type: d.type, label: d.label,
         })),
         actions: actionsByType.get(t.name) ?? [],
+        // ADR-0061 §3: lift folded-dimension / universe semantics into Agent-readable hints.
+        semanticsHints: renderSemanticsHints(toRenderableSemantics(t)),
       })),
       relationships: relationships.map((r: any) => ({
         name: r.name,

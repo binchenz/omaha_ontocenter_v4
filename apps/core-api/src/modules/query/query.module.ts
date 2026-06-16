@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { QueryController } from './query.controller';
 import { QueryService } from './query.service';
 import { QueryPlannerService } from './query-planner.service';
+import { DimensionConstraintEnforcer } from './dimension-constraint-enforcer';
 import { OntologyModule } from '../ontology/ontology.module';
 import { ProvenanceGate, PROVENANCE_GATE_REGISTRY } from './provenance-gate.service';
 import {
@@ -23,6 +24,7 @@ const COVERAGE_GATE_REGISTRY = [
   providers: [
     QueryService,
     QueryPlannerService,
+    DimensionConstraintEnforcer,
     ProvenanceGate,
     { provide: PROVENANCE_GATE_REGISTRY, useValue: COVERAGE_GATE_REGISTRY },
   ],

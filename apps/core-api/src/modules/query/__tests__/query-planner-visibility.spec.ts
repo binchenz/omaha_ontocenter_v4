@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import type { OntologyView } from '@omaha/dsl';
 import { QueryPlannerService } from '../query-planner.service';
+import { DimensionConstraintEnforcer } from '../dimension-constraint-enforcer';
 
 /**
  * Field-visibility enforcement at the input seam. These assert that a masked
@@ -33,7 +34,7 @@ function makePlanner(view: OntologyView | null, viewExists = false): QueryPlanne
     getViewName: jest.fn().mockReturnValue('mv_employee'),
   } as any;
   const prisma = { $queryRawUnsafe: jest.fn().mockResolvedValue([]) } as any;
-  return new QueryPlannerService(viewLoader, viewManager, prisma);
+  return new QueryPlannerService(viewLoader, viewManager, prisma, new DimensionConstraintEnforcer(prisma));
 }
 
 const VISIBLE = new Set(['age', 'name']); // salary + salaryBand masked
