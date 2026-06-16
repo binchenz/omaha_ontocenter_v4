@@ -25,8 +25,10 @@ async function main() {
 
   // Test 2: #200 - Identity injection (verify selfBrands in tenant)
   console.log('[Test 2] #200 - Identity injection with tenant name');
-  const tenant = await prisma.tenant.findFirst({
-    where: { settings: { path: ['selfBrands'], not: null } },
+  const tenants = await prisma.tenant.findMany({ take: 10 });
+  const tenant = tenants.find(t => {
+    const settings = t.settings as any;
+    return Array.isArray(settings?.selfBrands) && settings.selfBrands.length > 0;
   });
   if (tenant) {
     const settings = tenant.settings as any;

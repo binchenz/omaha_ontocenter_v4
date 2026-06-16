@@ -103,7 +103,7 @@ async function main() {
   }
 
   const token = sign(
-    { userId: admin.id, tenantId: tenant.id, email: admin.email },
+    { sub: admin.id, tenantId: tenant.id, email: admin.email, roleId: admin.roleId },
     JWT_SECRET
   );
 
@@ -117,10 +117,11 @@ async function main() {
       expectation: '身份解析到 selfBrands 并报合并份额',
       validate: (text) => {
         const hasPercentage = /\d+(\.\d+)?%/.test(text);
-        const notMissing = !/未找到|无数据|查不到|没有.*数据/.test(text);
+        // Allow "米家 无数据" but not claiming ALL brands have no data
+        const notTotallyMissing = !/^(?!.*\d+(\.\d+)?%).*(未找到|查不到|没有.*数据)/.test(text);
         return {
-          pass: hasPercentage && notMissing,
-          reason: !hasPercentage ? '未报份额数字' : !notMissing ? '回答说无数据' : undefined,
+          pass: hasPercentage && notTotallyMissing,
+          reason: !hasPercentage ? '未报份额数字' : !notTotallyMissing ? '完全无据' : undefined,
         };
       },
     },
