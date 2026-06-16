@@ -109,6 +109,50 @@ export class GroundTruth {
     return (rows[0]?.n ?? 0) > 0;
   }
 
+  /**
+   * #200 — the tenant's OWN combined share (纯米 ≙ 小米+米家). Reads the self-brands from
+   * Tenant.settings.selfBrands (the same source #193 injects into the prompt), sums their 整体
+   * share for category+period. Returns null when no selfBrands are configured — so a flipped
+   * CHM identity judge skips rather than inventing a target. The share is a fraction (0–1).
+   */
+  async combinedSelfShare(input: { tenantId: string; category: string; period: string }): Promise<number | null> {
+    const settingsRows = await this.prisma.$queryRawUnsafe<Array<{ self: string[] | null }>>(
+      `SELECT settings->'selfBrands' AS self FROM tenants WHERE id = $1::uuid`,
+      input.tenantId,
+    );
+    const selfBrands = settingsRows[0]?.self;
+    if (!Array.isArray(selfBrands) || selfBrands.length === 0) return null;
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ v: number | null }>>(
+      `SELECT COALESCE(SUM((properties->>'value')::float8), 0) AS v
+         FROM object_instances
+        WHERE tenant_id = $1::uuid AND object_type = 'brand_share' AND deleted_at IS NULL
+          AND properties->>'category' = $2
+          AND properties->>'period' = $3
+          AND properties->>'priceBand' = '整体'
+          AND properties->>'brand' = ANY($4)`,
+      input.tenantId, input.category, input.period, selfBrands,
+    );
+    return Number(rows[0]?.v ?? 0);
+  }
+
+  /**
+   * All model (SKU) names that exist for a category in ANY period (#198 groundedness).
+   * A coverage-honesty answer may legitimately reference a real SKU from an earlier full period;
+   * only a SKU absent from this set is fabricated. Used to ground the fabrication check instead
+   * of a keyword blacklist that mislabeled real cross-period references.
+   */
+  async modelNamesForCategory(input: { tenantId: string; category: string }): Promise<string[]> {
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ model: string }>>(
+      `SELECT DISTINCT properties->>'model' AS model
+         FROM object_instances
+        WHERE tenant_id = $1::uuid AND object_type = 'model_metric' AND deleted_at IS NULL
+          AND properties->>'category' = $2
+          AND properties->>'model' IS NOT NULL`,
+      input.tenantId, input.category,
+    );
+    return rows.map((r) => r.model).filter(Boolean);
+  }
+
   /** Coverage tier for a category+period (类⑥): 'full' | 'essence' | null (no report). */
   async coverage(input: { tenantId: string; category: string; period: string }): Promise<string | null> {
     const rows = await this.prisma.$queryRawUnsafe<Array<{ coverage: string }>>(

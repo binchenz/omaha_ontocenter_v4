@@ -38,13 +38,12 @@ describe('ResearchQaSkill (#139)', () => {
       expect(prompt).toContain('render_chart');
     });
 
-    it('lists chart type selection rules', () => {
-      expect(prompt).toContain('line');
-      expect(prompt).toContain('bar');
-      expect(prompt).toContain('stacked_bar');
-      expect(prompt).toContain('kpi');
-      expect(prompt).toContain('heatmap');
-      expect(prompt).toContain('radar');
+    it('defers the chart-type catalogue to the render_chart tool, keeping prose lean (#197)', () => {
+      // The 12-type catalogue moved to render_chart's own description so it only enters context
+      // when charting is considered. The skill keeps the pointer + usage rules, not the type list.
+      expect(prompt).toContain('render_chart');
+      expect(prompt).not.toContain('stacked_bar');
+      expect(prompt).not.toContain('grouped_bar');
     });
 
     it('includes fallback rule for large datasets', () => {

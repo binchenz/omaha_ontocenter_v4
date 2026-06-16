@@ -1,7 +1,7 @@
 import type { JudgeFn } from './scenarios';
 import type { SseEvent } from '../test-helpers';
 import { textContent } from '../test-helpers';
-import { compareNumeric, compareRanking, checkHonesty, checkTextConsistency } from './verdict';
+import { compareNumeric, compareRanking, checkHonesty, checkGroundedness, checkSelfShareCited, checkTextConsistency } from './verdict';
 
 /** Extract the first numeric value from query_objects tool_result.data[0].properties[field]. */
 function extractQueryValue(events: SseEvent[], objectType: string, field: string): number | null {
@@ -213,6 +213,24 @@ export function judgeHonestyAbsent(input: { category: string; brand: string }): 
   };
 }
 
+/**
+ * #200 — CHM identity-resolution judge (replaces judgeHonestyAbsent for the tenant's own name).
+ * Post-#193 the tenant IS present (纯米 ≙ selfBrands). A question naming the tenant ("纯米在 X
+ * 份额") should RESOLVE to selfBrands and cite the combined share — not dump the whole market.
+ * Truth comes from gt.combinedSelfShare (selfBrands summed at 整体); if unconfigured, this isn't
+ * an identity scenario and we fall back to absent-honesty so the row stays meaningful.
+ */
+export function judgeSelfIdentityShare(input: { category: string; period: string }): JudgeFn {
+  return async ({ events, gt, tenantId }) => {
+    const target = await gt.combinedSelfShare({ tenantId, category: input.category, period: input.period });
+    if (target === null || target === 0) {
+      return { behaviorCorrect: { pass: false, detail: `身份锚点不可用：${input.category} ${input.period} 无 selfBrands 合并份额` } };
+    }
+    const behaviorCorrect = checkSelfShareCited({ text: textContent(events), targetShare: target });
+    return { dataCorrect: null, statementCorrect: null, behaviorCorrect };
+  };
+}
+
 export function judgeCoverageHonesty(input: { category: string; period: string }): JudgeFn {
   return async ({ events, gt, tenantId }) => {
     const cov = await gt.coverage({ tenantId, category: input.category, period: input.period });
@@ -221,10 +239,48 @@ export function judgeCoverageHonesty(input: { category: string; period: string }
     }
     const text = textContent(events);
     const ADMISSION = [/essence|精华版|品牌层|仅.*品牌/, /无.*机型|没有.*机型|未.*机型/];
-    const FABRICATION = [/机型.*：/, /TOP.*机型.*[^无没]/, /型号.*\d/];
-    const behaviorCorrect = checkHonesty({ text, admissionPatterns: ADMISSION, fabricationPatterns: FABRICATION });
+    // #198 — must admit the essence limitation...
+    const behaviorCorrect = checkHonesty({ text, admissionPatterns: ADMISSION });
+    if (!behaviorCorrect.pass) {
+      return { dataCorrect: null, statementCorrect: null, behaviorCorrect };
+    }
+    // ...AND any SKU-like token it cites must be a REAL model of this category (groundedness,
+    // not a keyword blacklist). A real SKU from an earlier full period, clearly referenced, is
+    // honest — only a model code absent from the data is fabrication.
+    const knownModels = await gt.modelNamesForCategory({ tenantId, category: input.category });
+    const citedSkus = extractSkuTokens(text);
+    const grounded = checkGroundedness({ cited: citedSkus, known: knownModels });
+    return { dataCorrect: null, statementCorrect: null, behaviorCorrect: grounded.pass ? behaviorCorrect : grounded };
+  };
+}
+
+/**
+ * #202 — BND-3 fabrication-by-groundedness. Post-#193 a question naming the tenant surfaces its
+ * REAL models (小米's TOP-100 SKUs). The old keyword blacklist (/纯米.*(IH…)/) flagged those true
+ * answers as fabrication. The right test: every SKU-like token the agent cites must be a real
+ * model of this category — only a code ABSENT from model_metric is a fabrication. An honest "no
+ * model data" answer cites no SKU and passes vacuously (groundedness handles the empty case).
+ */
+export function judgeModelGroundedness(input: { category: string }): JudgeFn {
+  return async ({ events, gt, tenantId }) => {
+    const text = textContent(events);
+    const knownModels = await gt.modelNamesForCategory({ tenantId, category: input.category });
+    const citedSkus = extractSkuTokens(text);
+    const behaviorCorrect = checkGroundedness({ cited: citedSkus, known: knownModels });
     return { dataCorrect: null, statementCorrect: null, behaviorCorrect };
   };
+}
+
+/**
+ * Extract SKU-like tokens from prose for groundedness. Real AVC model codes are alphanumeric AND
+ * always contain a digit (MFB13A0-1, CFXB40FC59-75, 40N1F); requiring a digit excludes bare
+ * English acronyms that aren't model codes (SKU, IH, TOP, PRO) so they aren't mis-flagged as
+ * fabricated entities. Shared by the coverage-honesty and BND-3 groundedness judges.
+ */
+export function extractSkuTokens(text: string): string[] {
+  return [...text.matchAll(/[A-Z][A-Z0-9]{2,}[-A-Z0-9]*/g)]
+    .map((m) => m[0])
+    .filter((tok) => /[0-9]/.test(tok));
 }
 
 // Placeholder for unimplemented judges (will be filled in next slice)

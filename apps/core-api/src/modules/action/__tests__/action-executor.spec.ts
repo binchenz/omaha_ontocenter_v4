@@ -45,7 +45,7 @@ describe('ActionExecutor', () => {
         id: objectId,
         tenantId,
         objectType: 'market_metric',
-        properties: { status: '待跟进', brand: '小米' },
+        properties: { status: '待跟进', brand: '品牌甲' },
         relationships: {},
         deletedAt: null,
       });
@@ -112,7 +112,7 @@ describe('ActionExecutor', () => {
         id: objectId,
         tenantId,
         objectType: 'market_metric',
-        properties: { status: '待跟进', brand: '小米' },
+        properties: { status: '待跟进', brand: '品牌甲' },
         relationships: {},
         deletedAt: null,
       };
@@ -124,7 +124,7 @@ describe('ActionExecutor', () => {
 
       expect(result.ok).toBe(true);
       expect(mockApplyService.apply).toHaveBeenCalledWith(
-        [{ op: 'update', objectId, properties: { status: '已跟进', brand: '小米' } }],
+        [{ op: 'update', objectId, properties: { status: '已跟进', brand: '品牌甲' } }],
         { tenantId, userId },
       );
       expect(mockPrisma.actionRun.create).toHaveBeenCalled();
@@ -176,7 +176,7 @@ describe('ActionExecutor', () => {
         id: objectId,
         tenantId,
         objectType: 'market_metric',
-        properties: { status: '已完成', brand: '小米' },
+        properties: { status: '已完成', brand: '品牌甲' },
         relationships: {},
         deletedAt: null,
       });
@@ -202,7 +202,7 @@ describe('ActionExecutor', () => {
         id: objectId,
         tenantId,
         objectType: 'market_metric',
-        properties: { status: '待跟进', brand: '小米' },
+        properties: { status: '待跟进', brand: '品牌甲' },
         relationships: {},
         deletedAt: null,
       });
@@ -227,7 +227,7 @@ describe('ActionExecutor', () => {
       mockPrisma.objectInstance.findUnique
         .mockResolvedValueOnce({
           id: objectId, tenantId, objectType: 'market_metric',
-          properties: { brand: '小米' }, relationships: {}, deletedAt: null,
+          properties: { brand: '品牌甲' }, relationships: {}, deletedAt: null,
         })
         // objectRef validation lookup for the rep
         .mockResolvedValueOnce({
@@ -289,15 +289,15 @@ describe('ActionExecutor', () => {
       });
       mockPrisma.objectInstance.findUnique.mockResolvedValue({
         id: objectId, tenantId, objectType: 'market_metric',
-        properties: { brand: '小米' }, relationships: {}, deletedAt: null,
+        properties: { brand: '品牌甲' }, relationships: {}, deletedAt: null,
       });
       mockPrisma.actionRun.create.mockResolvedValue({ id: 'run-5' });
 
-      const result = await executor.execute(tenantId, userId, 'create_followup', objectId, { note: '跟进小米新品' });
+      const result = await executor.execute(tenantId, userId, 'create_followup', objectId, { note: '跟进品牌甲新品' });
 
       expect(result.ok).toBe(true);
       expect(mockApplyService.apply).toHaveBeenCalledWith(
-        [{ op: 'create', objectType: 'follow_up_task', properties: { title: '跟进小米新品', status: '待处理' } }],
+        [{ op: 'create', objectType: 'follow_up_task', properties: { title: '跟进品牌甲新品', status: '待处理' } }],
         { tenantId, userId },
       );
     });

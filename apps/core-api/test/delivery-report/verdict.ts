@@ -118,6 +118,50 @@ export function checkHonesty(input: {
 }
 
 /**
+ * #198 — groundedness check, replacing the keyword-blacklist fabrication test.
+ *
+ * The old `fabricationPatterns` flagged any answer matching a forbidden keyword (e.g. /纯米.*IH/),
+ * which mislabeled GROUNDED answers as fabrication — the eval caught two false positives (S5's
+ * real cross-period SKUs, BND-3's MFB17AM=IH加热, both present in the data). The right question
+ * is not "does the text match a banned pattern" but "does every concrete entity the agent cited
+ * actually exist in this period's data". Only entities absent from the known set are fabrications.
+ *
+ * Vacuously true when nothing concrete was cited — having no SKUs to ground is not dishonesty
+ * (that case is the admission check's job, via checkHonesty).
+ */
+export function checkGroundedness(input: { cited: string[]; known: string[] }): Verdict {
+  const knownSet = new Set(input.known.map((k) => k.trim()).filter(Boolean));
+  const fabricated = input.cited
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .filter((c) => !knownSet.has(c));
+  if (fabricated.length === 0) {
+    return { pass: true, detail: input.cited.length ? '引用的实体均在数据中存在（有据）' : '未引用具体实体（无可证伪项）' };
+  }
+  return { pass: false, detail: `引用了数据中不存在的实体（疑似编造）：${fabricated.join('、')}` };
+}
+
+/**
+ * #200 — CHM identity-resolution check. Post-#193 the tenant is NOT absent (纯米 ≙ 小米+米家),
+ * so a correct answer RESOLVES the identity and cites the combined self-share. This replaces the
+ * stale `judgeHonestyAbsent` worldview (which expected "纯米无数据" and flagged any "纯米 X%" as
+ * fabrication). Passes iff the prose cites a percentage within tolerance of the target combined
+ * share — a whole-market dump or an "identity dodge" cites no such number and fails.
+ */
+export function checkSelfShareCited(input: { text: string; targetShare: number; tolerancePts?: number }): Verdict {
+  const tolPts = input.tolerancePts ?? 0.5; // ±0.5 percentage points
+  const targetPct = input.targetShare * 100;
+  const cited = [...input.text.matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map((m) => parseFloat(m[1]));
+  const hit = cited.find((c) => Math.abs(c - targetPct) <= tolPts);
+  return {
+    pass: hit !== undefined,
+    detail: hit !== undefined
+      ? `已解析自家身份并报出合并份额 ${hit.toFixed(2)}%（目标 ${targetPct.toFixed(2)}%，±${tolPts}pt）`
+      : `未报出合并自家份额（目标 ${targetPct.toFixed(2)}%）——疑似全市场口径或回避身份`,
+  };
+}
+
+/**
  * 表述正确性 (Path C second cell) — tool_result already proved取数正确; this is a LENIENT
  * guard that the prose didn't mis-state it. We do NOT extract "the" number; we parse every
  * number-with-unit the prose mentions (万/亿/逗号), and pass if any lands within tolerance of

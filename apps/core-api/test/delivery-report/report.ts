@@ -1,4 +1,5 @@
 import type { BusinessCategory, ScenarioVerdict } from './scenarios';
+import { writeFileSync } from 'fs';
 
 /** One scenario's outcome over an N-run, ready to render. */
 export interface ScenarioResult {
@@ -112,4 +113,31 @@ export function renderReport(input: ReportInput): string {
   lines.push('');
 
   return lines.join('\n');
+}
+
+/**
+ * #198 — incremental report persistence. The e2e used to render only after the full scenario
+ * loop, so one hanging scenario (CHM-3 spiraled past timeout) crashed the run and lost every
+ * completed result. ReportWriter re-renders and writes the file after each scenario is added, so
+ * a later crash leaves a valid, summarized partial report on disk. `renderReport` is pure and
+ * accepts a partial results array, so a partial render is always a coherent document.
+ */
+export class ReportWriter {
+  private readonly results: ScenarioResult[] = [];
+
+  constructor(
+    private readonly outPath: string,
+    private readonly meta: Omit<ReportInput, 'results'>,
+  ) {}
+
+  /** Where the report is being written — for logging after the run. */
+  get path(): string {
+    return this.outPath;
+  }
+
+  /** Append one scenario's result and immediately re-render + persist the whole report so far. */
+  add(result: ScenarioResult): void {
+    this.results.push(result);
+    writeFileSync(this.outPath, renderReport({ ...this.meta, results: this.results }), 'utf-8');
+  }
 }

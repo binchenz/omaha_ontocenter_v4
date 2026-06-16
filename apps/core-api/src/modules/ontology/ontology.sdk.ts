@@ -152,7 +152,11 @@ export class OntologySdk {
             const d = p.description.length > MAX_DESC ? `${p.description.slice(0, MAX_DESC)}…` : p.description;
             s += `{${d}}`;
           }
-          if (p.allowedValues && p.allowedValues.length > 0) {
+          if (p.allowedValues && p.allowedValues.length === 1) {
+            // #205 — single-value dimension: the filter is always-true, so tell the model it's
+            // constant (它会反复试探性地加这个过滤，纯烧 token) rather than enumerating one option.
+            s += `=(恒为 ${p.allowedValues[0]}，无需过滤)`;
+          } else if (p.allowedValues && p.allowedValues.length > 0) {
             const shown = p.allowedValues.slice(0, 8).join('|');
             s += `=(${shown}${p.allowedValues.length > 8 ? '|…' : ''})`;
           }
@@ -204,21 +208,42 @@ export class OntologySdk {
 
     // Derive each populated type's dimensions concurrently — independent DISTINCT probes that
     // would otherwise serialize on every chat turn (getTenantProfile is intentionally uncached).
+    // The self-identity lookup (#193) is independent too, so it joins the same concurrent batch.
     const populated = schema.types.filter((t) => countByType.get(t.name));
-    const dimsByType = new Map(
-      await Promise.all(
+    const [dimsByTypeEntries, identity] = await Promise.all([
+      Promise.all(
         populated.map(async (t): Promise<[string, string]> => [
           t.name,
           await this.deriveTypeDimensions(tenantId, t, MAX_DISTINCT),
         ]),
       ),
-    );
+      this.renderSelfIdentity(tenantId),
+    ]);
+    const dimsByType = new Map(dimsByTypeEntries);
     const lines = ['本租户已导入数据：', ...populated.map((t) => {
       const count = countByType.get(t.name)!;
       const dims = dimsByType.get(t.name);
       return `- ${t.name}（${count} 行）${dims ? `：${dims}` : ''}`;
     })];
-    return lines.join('\n');
+
+    // #193 — self-identity (computed above, concurrently). The data alone never says "this tenant
+    // IS <tenantName>", and its products may live under other brand strings. When
+    // Tenant.settings.selfBrands is configured, prepend an identity line so a first-person
+    // "我们的份额" resolves to those brands instead of a silent whole-market query.
+    return identity ? `${identity}\n\n${lines.join('\n')}` : lines.join('\n');
+  }
+
+  /** Render the租户 self-identity line from Tenant.settings.selfBrands, or '' if not configured. */
+  private async renderSelfIdentity(tenantId: string): Promise<string> {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    const settings = (tenant?.settings ?? {}) as { selfBrands?: unknown };
+    const selfBrands = Array.isArray(settings.selfBrands)
+      ? settings.selfBrands.filter((b): b is string => typeof b === 'string' && b.length > 0)
+      : [];
+    if (selfBrands.length === 0) return '';
+    return `本租户即「${tenant!.name}」。当用户以第一人称（我们/我方/自家）或直接称呼「${tenant!.name}」提问时，指的就是本租户；` +
+      `其产品在数据中以这些品牌出现：${selfBrands.join('、')}——此时应把「${tenant!.name}」解析为这些品牌并合并口径，` +
+      `不要当作外部品牌去查（数据里可能根本没有「${tenant!.name}」这个品牌串）。`;
   }
 
   /**

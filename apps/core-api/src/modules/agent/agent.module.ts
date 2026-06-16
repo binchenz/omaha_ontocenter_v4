@@ -49,6 +49,10 @@ import { PlanSummarizer } from './plan-summarizer.service';
 import { EvalsService } from './evals.service';
 import { EvalsController } from './evals.controller';
 import { ToolRegistryModule } from '../tool-registry/tool-registry.module';
+import { VERTICALS } from '../vertical/vertical.tokens';
+import { Vertical, collectVerticalContributions } from '../vertical/vertical';
+import { SALES_RECORDS_VERTICAL } from '../vertical/reference/sales-records.vertical';
+import { AVC_VERTICAL } from '../vertical/avc/avc.vertical';
 import { AGENT_TOOLS, AGENT_SKILLS } from '../tool-registry/tool-registry.tokens';
 
 const AGENT_OWN_TOOLS = [
@@ -81,15 +85,30 @@ const AGENT_OWN_TOOLS = [
     SseAgentRunner,
     ...AGENT_OWN_TOOLS,
     ...ToolRegistryModule.providers(...AGENT_OWN_TOOLS),
+    // ADR-0062 — registered Verticals. Core ships the neutral reference vertical + the AVC vertical
+    // (AVC code still lives in-repo pending #209's physical move to a private package). Core depends
+    // on zero concrete verticals beyond this single wiring list — the one place verticals are named.
+    { provide: VERTICALS, useValue: [SALES_RECORDS_VERTICAL, AVC_VERTICAL] as Vertical[] },
     {
       provide: AGENT_SKILLS,
-      useFactory: (): AgentSkill[] => [new QuerySkill(), new DataIngestionSkill(), new OntologyDesignSkill(), new ResearchQaSkill(), new DataImportSkill(), new DataPipelineSkill()],
+      useFactory: (verticals: Vertical[]): AgentSkill[] => [
+        new QuerySkill(), new DataIngestionSkill(), new OntologyDesignSkill(),
+        new ResearchQaSkill(), new DataImportSkill(), new DataPipelineSkill(),
+        // ADR-0062 §4 — skills contributed by registered verticals (e.g. the reference vertical's
+        // sales_analysis skill) fan in here alongside the core skills.
+        ...collectVerticalContributions(verticals).skills,
+      ],
+      inject: [VERTICALS],
     },
     {
       provide: OrchestratorService,
-      useFactory: (llm: LlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate, planSummarizer: PlanSummarizer) =>
-        new OrchestratorService(llm, tools, skills, gate, planSummarizer),
-      inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate, PlanSummarizer],
+      useFactory: (llm: LlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate, planSummarizer: PlanSummarizer, verticals: Vertical[]) =>
+        // ADR-0062 §3 — all drill-gates come from registered verticals; the orchestrator names no
+        // AVC type itself. The AVC gate now lives in AVC_VERTICAL (was a TODO hardcode here, #206→#208).
+        new OrchestratorService(llm, tools, skills, gate, planSummarizer,
+          collectVerticalContributions(verticals).drillGates,
+        ),
+      inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate, PlanSummarizer, VERTICALS],
     },
     PlanSummarizer,
     EvalsService,

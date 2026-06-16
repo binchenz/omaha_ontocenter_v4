@@ -17,7 +17,7 @@ describe('LocalBlobStore', () => {
   });
 
   it('round-trips a stored buffer through its returned reference', async () => {
-    const content = Buffer.from('纯米调研报告内容', 'utf8');
+    const content = Buffer.from('示例调研报告内容', 'utf8');
     const ref = await store.store(content, 'report.pdf');
     const got = await store.get(ref);
     expect(got.equals(content)).toBe(true);

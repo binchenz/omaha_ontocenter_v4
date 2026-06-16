@@ -99,6 +99,20 @@ describe('AgentModule (boot smoke test)', () => {
     await moduleRef.close();
   });
 
+  // ADR-0062 §4 — the reference vertical's contributions must reach the running seams: its skill
+  // lands in AGENT_SKILLS so a community OPC's contributed skill actually drives the agent.
+  it('fans registered vertical skills into AGENT_SKILLS', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [PrismaModule, PermissionModule, AgentModule],
+    }).compile();
+
+    const { AGENT_SKILLS } = await import('../tool-registry/tool-registry.tokens');
+    const skills = moduleRef.get<any[]>(AGENT_SKILLS);
+    expect(skills.map(s => s.name)).toContain('sales_analysis');
+
+    await moduleRef.close();
+  });
+
   it('throws on bootstrap when a registered Tool is not declared by any Skill', async () => {
     const { AgentBootstrap } = await import('./agent.bootstrap');
     const orphanTool: any = {

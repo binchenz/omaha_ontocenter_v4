@@ -29,6 +29,9 @@ function makeHarness() {
     $transaction: jest.fn(async (fn: any) => fn(mockPrisma)),
     objectInstance: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
     actionDefinition: { findMany: jest.fn().mockResolvedValue([]) },
+    // Default: no self-brands configured. getTenantProfile (#193) reads this; individual tests
+    // override it to exercise the self-identity branch.
+    tenant: { findUnique: jest.fn().mockResolvedValue({ id: 'tenant-1', name: 'T', settings: {} }) },
   };
   const sdk = new OntologySdk(mockOntologyService as any, mockTypeResolver as any, mockPrisma);
   return { sdk, mockOntologyService, mockTypeResolver, mockPrisma };
@@ -128,6 +131,32 @@ describe('OntologySdk — schema menu existence is never truncated (ADR-0050)', 
     expect(summary).not.toContain('type_039(f:string');
     // Hint points the Agent at the lazy detail path.
     expect(summary).toContain('get_ontology_schema');
+  });
+});
+
+describe('OntologySdk — schema summary annotates single-value dimensions (#205)', () => {
+  it('marks a property with exactly one allowedValue as 恒为 X so the model skips the futile filter', async () => {
+    const { sdk, mockOntologyService } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue([{
+      name: 'brand_share', label: '品牌份额', description: undefined,
+      properties: [{ name: 'metric', type: 'string', label: '指标', filterable: true, allowedValues: ['share'] }],
+      derivedProperties: [],
+    }]);
+    const { summary } = await sdk.getSchemaSummary('tenant-1');
+    // single-value dim is flagged as constant, not just enumerated as one option
+    expect(summary).toMatch(/metric[^,]*恒为\s*share/);
+  });
+
+  it('still enumerates multi-value dimensions normally (no constant annotation)', async () => {
+    const { sdk, mockOntologyService } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue([{
+      name: 'order', label: '订单', description: undefined,
+      properties: [{ name: 'status', type: 'string', label: '状态', filterable: true, allowedValues: ['open', 'closed'] }],
+      derivedProperties: [],
+    }]);
+    const { summary } = await sdk.getSchemaSummary('tenant-1');
+    expect(summary).toContain('open|closed');
+    expect(summary).not.toContain('恒为');
   });
 });
 
@@ -238,6 +267,93 @@ describe('OntologySdk — getTenantProfile (data-derived, ADR-pending)', () => {
     // Only the count query ran; allowedValues came from schema, not a DISTINCT probe.
     const distinctCalls = probe.mock.calls.filter(([sql]) => /DISTINCT/i.test(sql as string));
     expect(distinctCalls).toHaveLength(0);
+  });
+
+  // #193 — tenant self-brand identity. The source data may carry no brand string matching the
+  // tenant's own name; the tenant's products can appear under other brand strings. With selfBrands
+  // configured in Tenant.settings, the profile must tell the Agent who "we" is, so a first-person
+  // "我们的份额" resolves instead of dumping the whole market.
+  it('injects a self-identity line naming the tenant and its self-brands when configured', async () => {
+    const { sdk, mockOntologyService, mockPrisma } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue([
+      {
+        name: 'brand_share', label: '品牌份额', description: undefined,
+        properties: [{ name: 'category', type: 'string', label: '品类', filterable: true }],
+        derivedProperties: [],
+      },
+    ]);
+    mockPrisma.$queryRawUnsafe = jest.fn(async (sql: string, ...args: any[]) => {
+      if (/count/i.test(sql)) return [{ object_type: 'brand_share', n: 886n }];
+      if (args.includes('category')) return [{ v: '电饭煲' }];
+      return [];
+    });
+    mockPrisma.tenant = {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'tenant-1', name: '示例科技', settings: { selfBrands: ['品牌甲', '品牌乙'] },
+      }),
+    };
+
+    const profile = await sdk.getTenantProfile('tenant-1');
+
+    expect(profile).toContain('示例科技');
+    expect(profile).toContain('品牌甲');
+    expect(profile).toContain('品牌乙');
+    // the data-derived part still renders
+    expect(profile).toContain('brand_share');
+  });
+
+  // #200 — the identity bridge must fire on the tenant's OWN NAME, not only first-person pronouns.
+  // A real analyst names the tenant ("<tenant>在电饭煲份额") as often as "我们的份额"; the eval
+  // found the latter resolved but the former bypassed injection and dumped the whole market.
+  it('tells the Agent the tenant name itself is a self-reference, not only pronouns', async () => {
+    const { sdk, mockOntologyService, mockPrisma } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue([
+      {
+        name: 'brand_share', label: '品牌份额', description: undefined,
+        properties: [{ name: 'category', type: 'string', label: '品类', filterable: true }],
+        derivedProperties: [],
+      },
+    ]);
+    mockPrisma.$queryRawUnsafe = jest.fn(async (sql: string, ...args: any[]) => {
+      if (/count/i.test(sql)) return [{ object_type: 'brand_share', n: 886n }];
+      if (args.includes('category')) return [{ v: '电饭煲' }];
+      return [];
+    });
+    mockPrisma.tenant = {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'tenant-1', name: '示例科技', settings: { selfBrands: ['品牌甲', '品牌乙'] },
+      }),
+    };
+
+    const profile = await sdk.getTenantProfile('tenant-1');
+    // The new prose must explicitly instruct: when the user NAMES the tenant (or its name shows
+    // up as a brand), treat it as self too — not just pronouns. We assert the distinguishing
+    // instruction phrase + that pronouns and the name are taught together in the trigger.
+    expect(profile).toContain('或直接称呼');           // "...第一人称（我们/我方/自家）或直接称呼「示例科技」时"
+    expect(profile).toContain('不要当作外部品牌');     // the anti-pattern this closes
+  });
+
+  it('omits the self-identity line when no selfBrands are configured (back-compat)', async () => {
+    const { sdk, mockOntologyService, mockPrisma } = makeHarness();
+    mockOntologyService.listObjectTypes.mockResolvedValue([
+      {
+        name: 'brand_share', label: '品牌份额', description: undefined,
+        properties: [{ name: 'category', type: 'string', label: '品类', filterable: true }],
+        derivedProperties: [],
+      },
+    ]);
+    mockPrisma.$queryRawUnsafe = jest.fn(async (sql: string, ...args: any[]) => {
+      if (/count/i.test(sql)) return [{ object_type: 'brand_share', n: 886n }];
+      if (args.includes('category')) return [{ v: '电饭煲' }];
+      return [];
+    });
+    mockPrisma.tenant = {
+      findUnique: jest.fn().mockResolvedValue({ id: 'tenant-1', name: 'Acme', settings: {} }),
+    };
+
+    const profile = await sdk.getTenantProfile('tenant-1');
+    expect(profile).not.toContain('Acme');
+    expect(profile).toContain('本租户已导入数据'); // unchanged data-derived header
   });
 });
 

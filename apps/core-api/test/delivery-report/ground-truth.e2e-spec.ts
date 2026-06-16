@@ -70,6 +70,28 @@ describe('ground-truth — raw-SQL truth over real 电饭煲 data', () => {
     }
   });
 
+  // #200 — combined self-brand share: the tenant's OWN share (纯米 ≙ 小米+米家, read from
+  // Tenant.settings.selfBrands), the truth a flipped CHM identity-resolution judge checks against.
+  it('combinedSelfShare sums the tenant self-brands at the 整体 band', async () => {
+    if (!tenantId) return;
+    const period = (await prisma.$queryRawUnsafe<Array<{ p: string }>>(
+      `SELECT properties->>'period' p FROM object_instances WHERE tenant_id=$1::uuid AND object_type='brand_share' AND deleted_at IS NULL AND properties->>'category'=$2 ORDER BY 1 DESC LIMIT 1`,
+      tenantId, category,
+    ))[0].p;
+    const self = await gt.combinedSelfShare({ tenantId, category, period });
+    // Live 纯米 has selfBrands=[小米,米家]; 电饭煲 latest 整体 should be a small positive share.
+    expect(self).not.toBeNull();
+    expect(self!).toBeGreaterThan(0);
+    expect(self!).toBeLessThan(1); // a share fraction, not a percentage
+  });
+
+  it('combinedSelfShare returns null when the tenant has no selfBrands configured', async () => {
+    if (!tenantId) return;
+    // A random uuid tenant has no settings.selfBrands → null (the judge then skips, not fabricates).
+    const none = await gt.combinedSelfShare({ tenantId: '00000000-0000-0000-0000-000000000000', category, period: '26.04' });
+    expect(none).toBeNull();
+  });
+
   it('brandShareTopN scopes to a specific price band (类④ 价格段攻防)', async () => {
     if (!tenantId) return;
     const row = (await prisma.$queryRawUnsafe<Array<{ b: string; p: string }>>(

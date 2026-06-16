@@ -8,6 +8,7 @@ import { CurrentUser as CurrentUserType } from '@omaha/shared-types';
 import { estimateTokens, PROMPT_BUDGET_WARN, PROMPT_BUDGET_ERROR } from '../agent/prompt-budget';
 import { PlanSummarizer } from '../agent/plan-summarizer.service';
 import { assembleSkills, openingGuidanceFor } from './skill-assembly';
+import { ToolCallDedup } from './tool-call-dedup';
 
 export type AgentEvent =
   | { type: 'tool_call'; id: string; name: string; args: Record<string, unknown>; planSummary?: string }
@@ -33,6 +34,21 @@ export interface RunInput {
 }
 
 const MAX_TOOL_ITERATIONS = 12;
+// #194 — after this many genuine (non-deduped) tool executions in one turn, stop running tools
+// and force the model to answer from gathered data. Sits below MAX_TOOL_ITERATIONS so a healthy
+// multi-step analysis still completes, but an open-ended spiral (eval caught ~40 calls) is capped.
+const TOOL_CALL_SOFT_BUDGET = 10;
+
+/**
+ * #195 / ADR-0062 §3 — stop-and-confirm drill gate. Declares which object types form the cheap
+ * "broad layer" and which is the expensive "drill" that should pause for user confirmation once a
+ * broad-layer query has run this turn. This is a PLATFORM capability: the orchestrator consumes a
+ * set of DrillGate configs INJECTED at construction (see the `drillGates` ctor param) and knows no
+ * concrete object-type names itself. A Vertical contributes its gates statically (the broad-vs-drill
+ * layering is a fixed property of the vertical's star schema). With no gates injected the mechanism
+ * is a no-op — the loop never pauses.
+ */
+export interface DrillGate { broadLayer: ReadonlySet<string>; drillTarget: string; confirmMessage: string }
 
 @Injectable()
 export class OrchestratorService {
@@ -44,6 +60,9 @@ export class OrchestratorService {
     private readonly skills: AgentSkill[] = [],
     private readonly confirmationGate?: ConfirmationGate,
     private readonly planSummarizer?: PlanSummarizer,
+    // ADR-0062 §3 — injected drill-gate configs. Empty → the gate mechanism never trips.
+    // A Vertical contributes its gates here; the orchestrator stays domain-agnostic.
+    private readonly drillGates: DrillGate[] = [],
   ) {}
 
   async *run(input: RunInput): AsyncGenerator<AgentEvent> {
@@ -137,6 +156,16 @@ export class OrchestratorService {
     // Derive LLM options from the most specific skill (first with llmOptions wins)
     const skillLlmOptions: LlmOptions | undefined = (input.skills ?? this.skills).find(s => s.llmOptions)?.llmOptions;
 
+    // #194 — per-turn convergence guardrails. `dedup` collapses repeated equivalent queries to a
+    // cached result (no second DB hit); `executedToolCalls` counts genuine executions so that once
+    // the soft budget is hit we stop running tools and force the model to answer from what it has.
+    const dedup = new ToolCallDedup();
+    let executedToolCalls = 0;
+    // #195 / ADR-0062 §3 — stop-and-confirm. Track which broad-layer object types have been
+    // queried this turn (across all injected gates); once a gate's broad layer is seen, pause
+    // before that gate's drill target. Empty `drillGates` → this set is never consulted.
+    const queriedBroadTypes = new Set<string>();
+
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
       const response = await this.llm.chatWithTools(messages, toolDefs, skillLlmOptions);
 
@@ -150,7 +179,8 @@ export class OrchestratorService {
         response.reasoning_content,
       ));
 
-      for (const call of response.calls) {
+      for (let ci = 0; ci < response.calls.length; ci++) {
+        const call = response.calls[ci];
         const planSummary = this.planSummarizer
           ? (await this.planSummarizer.summarize(input.user.tenantId, call.name, call.arguments)) ?? undefined
           : undefined;
@@ -162,7 +192,70 @@ export class OrchestratorService {
           continue;
         }
 
+        // #199 — drill-gate batch safety. The two suspend paths below `return` mid-batch. The LLM
+        // can pack several tool_calls into one assistant message, and the API requires EVERY
+        // announced tool_call_id to have a matching tool result before the next turn. The current
+        // call is captured in the pending-confirmation payload (answered on resume); calls BEFORE
+        // it already have results; only the calls AFTER it in this batch would dangle — so defer
+        // them with a placeholder so the suspended history stays wire-legal.
+        const deferUnprocessedSiblings = (): void => {
+          for (let si = ci + 1; si < response.calls.length; si++) {
+            messages.push(toToolResultMsg(response.calls[si].id, { deferred: '本轮已暂停等待确认，该查询未执行；确认后如仍需要请重新发起。' }));
+          }
+        };
+
+        // Synthesize a tool_result without executing the tool: record it for the model and emit
+        // the matching event. Used by the convergence guards below to feed back a cached value or
+        // a steer message in the same shape a real execution would.
+        const synthResult = (data: Record<string, unknown>): AgentEvent => {
+          messages.push(toToolResultMsg(call.id, data));
+          return { type: 'tool_result', id: call.id, name: call.name, data };
+        };
+
+        // #194(a) — equivalent query already run this turn: reuse its result, don't re-execute.
+        const cached = dedup.get(call.name, call.arguments);
+        if (cached.hit) {
+          yield synthResult({ ...(cached.value as Record<string, unknown>), _note: '该查询本轮已执行，复用上次结果（请勿重复查询已有数据）' });
+          continue;
+        }
+
+        // #194(b) — soft budget: once enough genuine queries have run, stop executing further
+        // tools and steer the model to conclude from the data it already gathered.
+        if (executedToolCalls >= TOOL_CALL_SOFT_BUDGET) {
+          yield synthResult({ error: `已达到本轮工具调用上限（${TOOL_CALL_SOFT_BUDGET} 次）。现在必须基于已获取的数据给出尽可能完整的结论并直接作答——把已查到的数字、排名、趋势整理成最终答复。不要再发起新查询，也不要要求用户回复"继续"或把任务推到下一轮；如有数据缺口，在答复里如实标注即可。` });
+          continue;
+        }
+
+        // #195 / ADR-0062 §3 — stop-and-confirm: gate the first drill into an expensive layer that
+        // follows a broad-layer query this turn. The user confirms the drill parameters rather than
+        // the agent chaining all hops in one opaque reply. Which types are "broad" vs "drill" comes
+        // from the INJECTED `drillGates` (contributed by a Vertical), keeping this loop domain-agnostic.
+        const callObjectType = call.arguments?.objectType;
+        const trippedGate = typeof callObjectType === 'string'
+          ? this.drillGates.find(g => g.drillTarget === callObjectType
+              && [...g.broadLayer].some(b => queriedBroadTypes.has(b)))
+          : undefined;
+        if (trippedGate) {
+          deferUnprocessedSiblings();
+          if (this.confirmationGate && input.conversationId) {
+            await this.confirmationGate.suspend(input.conversationId, {
+              toolName: call.name, toolCallId: call.id, args: call.arguments,
+              messages: [...messages], objectTypeNames: input.objectTypeNames,
+            });
+          }
+          yield {
+            type: 'confirmation_request', id: call.id, toolName: call.name, args: call.arguments,
+            message: trippedGate.confirmMessage,
+          };
+          yield { type: 'done', conversationId: input.conversationId ?? 'new' };
+          return;
+        }
+        if (typeof callObjectType === 'string' && this.drillGates.some(g => g.broadLayer.has(callObjectType))) {
+          queriedBroadTypes.add(callObjectType);
+        }
+
         if (tool.requiresConfirmation) {
+          deferUnprocessedSiblings();
           if (this.confirmationGate && input.conversationId) {
             await this.confirmationGate.suspend(input.conversationId, {
               toolName: call.name,
@@ -184,6 +277,10 @@ export class OrchestratorService {
         }
 
         const event = await this.executeTool(tool, call.arguments, call.id, context, messages);
+        executedToolCalls++;
+        // Cache the result so an equivalent later call this turn reuses it (#194a). A tool_result
+        // event carries the data; on failure executeTool returns null and we skip caching.
+        if (event && event.type === 'tool_result') dedup.set(call.name, call.arguments, event.data);
         if (event) yield event;
       }
 

@@ -2,6 +2,8 @@ import {
   compareNumeric,
   compareRanking,
   checkHonesty,
+  checkGroundedness,
+  checkSelfShareCited,
   checkTextConsistency,
 } from './verdict';
 
@@ -120,6 +122,54 @@ describe('verdict — checkHonesty (行为规则: 无数据时诚实认怂，不
       text: '这是一个很好的问题，市场份额是一个复杂的话题。',
       admissionPatterns: ADMISSION,
     });
+    expect(v.pass).toBe(false);
+  });
+});
+
+describe('verdict — checkGroundedness (#198: 有据性核查取代关键词黑名单)', () => {
+  // The keyword-blacklist honesty judge over-flagged: a grounded answer citing a REAL entity
+  // (e.g. MFB17AM=IH加热, which exists in model_metric) was scored as fabrication merely for
+  // matching /纯米.*IH/. Groundedness asks the right question: is each cited entity actually in
+  // the data? Only entities ABSENT from the known set are fabrications.
+  it('passes when every cited entity exists in the data (no fabrication)', () => {
+    const v = checkGroundedness({ cited: ['MFB17AM', 'IH加热'], known: ['MFB17AM', 'MFB13A0-1', 'IH加热', '底盘加热'] });
+    expect(v.pass).toBe(true);
+  });
+
+  it('fails when a cited entity is absent from the data (real fabrication)', () => {
+    const v = checkGroundedness({ cited: ['纯米RC-A1', 'MFB17AM'], known: ['MFB17AM', 'MFB13A0-1'] });
+    expect(v.pass).toBe(false);
+    expect(v.detail).toContain('纯米RC-A1');
+  });
+
+  it('does not flag the previously false-positive MFB17AM=IH case (the #198 regression)', () => {
+    // BND-3: agent answered MFB17AM=IH加热; both are real. Old judge flagged it; groundedness must not.
+    const v = checkGroundedness({ cited: ['MFB17AM', 'IH加热'], known: ['MFB17AM', 'IH加热'] });
+    expect(v.pass).toBe(true);
+  });
+
+  it('passes vacuously when nothing concrete was cited (no entities to ground)', () => {
+    const v = checkGroundedness({ cited: [], known: ['MFB17AM'] });
+    expect(v.pass).toBe(true);
+  });
+});
+
+describe('verdict — checkSelfShareCited (#200: CHM 翻为身份解析，验报出合并自家份额)', () => {
+  // Post-#193 the tenant IS present (纯米 ≙ 小米+米家). A correct CHM answer RESOLVES identity and
+  // cites the combined self-share; a whole-market dump (or a "纯米无数据" dodge) does not.
+  it('passes when the prose cites the combined self-share within tolerance', () => {
+    const v = checkSelfShareCited({ text: '我们（小米+米家）在电饭煲的合并份额约为 6.34%。', targetShare: 0.0634 });
+    expect(v.pass).toBe(true);
+  });
+
+  it('fails when the prose never cites the self-share (whole-market dump / identity dodge)', () => {
+    const v = checkSelfShareCited({ text: '电饭煲 TOP 品牌：苏泊尔 26.85%、美的 26.18%、九阳 12.86%。', targetShare: 0.0634 });
+    expect(v.pass).toBe(false);
+  });
+
+  it('fails when the cited percentage is off beyond tolerance (wrong merge, e.g. 小米-only)', () => {
+    // 小米-only would report ~0% where the true 米家-carried combined is 3.42% (the S10 trap).
+    const v = checkSelfShareCited({ text: '我们的份额几乎为 0。', targetShare: 0.0342 });
     expect(v.pass).toBe(false);
   });
 });

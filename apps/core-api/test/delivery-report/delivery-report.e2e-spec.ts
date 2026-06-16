@@ -21,7 +21,7 @@ import { createTestApp, postSse, runWithRetry, SseEvent, textContent } from '../
 import { probeAnchors, Anchors } from './anchors';
 import { buildScenarios, RunnableScenario, ScenarioVerdict } from './scenarios';
 import { GroundTruth } from './ground-truth';
-import { renderReport, ReportInput, ScenarioResult } from './report';
+import { ReportWriter, ScenarioResult } from './report';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const N_RUNS = 2; // balance cost vs confidence (LLM non-determinism)
@@ -95,6 +95,20 @@ describe('Delivery Report — full orchestration (e2e, hits real DeepSeek)', () 
 
     const results: ScenarioResult[] = [];
 
+    // #198 — persist incrementally so a single hanging scenario can't lose every completed
+    // result (the old all-or-nothing render crashed on CHM-3's timeout and wrote nothing).
+    const leadCategory = anchors.categories[0]?.name ?? '未知';
+    const generatedAt = new Date().toISOString().slice(0, 10);
+    const outDir = path.resolve(__dirname, '../../reports');
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    const outPath = path.join(outDir, `delivery-report-${generatedAt}.md`);
+    const writer = new ReportWriter(outPath, {
+      title: '纯米 AVC 市场智能平台 — Agent 效果验收报告',
+      generatedAt,
+      tenant: '纯米科技',
+      dataScope: `${leadCategory}${anchors.categories.length > 1 ? ` 等${anchors.categories.length}品类` : '单品类'} · ${anchors.categories[0]?.latestBrandPeriod ?? ''}`,
+    });
+
     for (const scenario of scenarios) {
       const runResults: { events: SseEvent[]; verdict: ScenarioVerdict }[] = [];
       let passes = 0;
@@ -121,7 +135,7 @@ describe('Delivery Report — full orchestration (e2e, hits real DeepSeek)', () 
       const representative = runResults.find((r) => scenarioPassed(scenario.track, r.verdict))
         ?? runResults[runResults.length - 1];
 
-      results.push({
+      const result: ScenarioResult = {
         id: scenario.id,
         category: scenario.category,
         difficulty: scenario.difficulty,
@@ -131,7 +145,9 @@ describe('Delivery Report — full orchestration (e2e, hits real DeepSeek)', () 
         passes,
         sampleAnswer: textContent(representative.events).slice(0, 300),
         verdict: representative.verdict,
-      });
+      };
+      results.push(result);
+      writer.add(result); // persist now — survives a later scenario hang
 
       // Progress log
       const mark = passes === N_RUNS ? '✅' : passes === 0 ? '❌' : '⚠️';
@@ -139,21 +155,8 @@ describe('Delivery Report — full orchestration (e2e, hits real DeepSeek)', () 
       console.log(`  ${mark} ${scenario.id} ${passes}/${N_RUNS} — ${scenario.question.slice(0, 40)}`);
     }
 
-    // ── Render and write report ─────────────────────────────────────────────
-    const leadCategory = anchors.categories[0]?.name ?? '未知';
-    const report: ReportInput = {
-      title: '纯米 AVC 市场智能平台 — Agent 效果验收报告',
-      generatedAt: new Date().toISOString().slice(0, 10),
-      tenant: '纯米科技',
-      dataScope: `${leadCategory}${anchors.categories.length > 1 ? ` 等${anchors.categories.length}品类` : '单品类'} · ${anchors.categories[0]?.latestBrandPeriod ?? ''}`,
-      results,
-    };
-
-    const md = renderReport(report);
-    const outDir = path.resolve(__dirname, '../../reports');
-    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-    const outPath = path.join(outDir, `delivery-report-${report.generatedAt}.md`);
-    fs.writeFileSync(outPath, md, 'utf-8');
+    // ── Report already persisted incrementally inside the loop (#198) ────────
+    const md = fs.readFileSync(writer.path, 'utf-8');
 
     // eslint-disable-next-line no-console
     console.log(`\n📄 Report written to: ${outPath}`);

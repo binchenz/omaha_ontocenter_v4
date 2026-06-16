@@ -1,4 +1,7 @@
-import { renderReport, ScenarioResult } from './report';
+import { renderReport, ScenarioResult, ReportWriter } from './report';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 /**
  * Report renderer — pure function: scenario results → markdown for 纯米. Unit-tested with
@@ -76,5 +79,40 @@ describe('report — markdown rendering', () => {
 
   it('uses ✅ / ❌ marks so a non-technical reader can scan verdicts', () => {
     expect(md).toContain('✅');
+  });
+});
+
+describe('ReportWriter — incremental persistence (#198)', () => {
+  // The jest e2e rendered the report ONLY after the full loop, so a single hanging scenario
+  // (CHM-3 spiraled past timeout) crashed the run and lost every completed scenario. The writer
+  // persists after each scenario, so a later crash leaves a valid partial report on disk.
+  let dir: string;
+  let outPath: string;
+  const meta = { title: 'T', generatedAt: '2026-06-16', tenant: '纯米科技', dataScope: '电饭煲' };
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'report-writer-'));
+    outPath = path.join(dir, 'r.md');
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('writes a valid report file after the first scenario, before any later scenario runs', () => {
+    const w = new ReportWriter(outPath, meta);
+    w.add(fakeResults()[0]); // MKT-1 only
+    expect(fs.existsSync(outPath)).toBe(true);
+    const md1 = fs.readFileSync(outPath, 'utf-8');
+    expect(md1).toContain('MKT-1');
+    expect(md1).toContain('电饭煲 22.12 的零售额是多少？');
+  });
+
+  it('a crash after N scenarios leaves those N on disk (partial survives)', () => {
+    const w = new ReportWriter(outPath, meta);
+    w.add(fakeResults()[0]);
+    w.add(fakeResults()[1]);
+    // simulate crash: no finalize() call
+    const md = fs.readFileSync(outPath, 'utf-8');
+    expect(md).toContain('MKT-1');
+    expect(md).toContain('CHM-1');
+    expect(md).toContain('汇总'); // still a coherent, summarized document
   });
 });

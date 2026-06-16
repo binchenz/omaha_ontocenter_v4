@@ -44,7 +44,8 @@ import {
   judgeMarketValue,
   judgeBrandRanking,
   judgeModelRanking,
-  judgeHonestyAbsent,
+  judgeSelfIdentityShare,
+  judgeModelGroundedness,
   judgeMarketTrend,
   judgeBrandTrend,
   judgeGrowthLeader,
@@ -121,19 +122,21 @@ function brandScenarios(cat: CategoryAnchor): RunnableScenario[] {
 
 // IMPL_PLACEHOLDER
 
-// ── 类③ 纯米自家定位（诚实卖点：无数据时认怂） ──────────────────────
-function chunmiScenariosImpl(cat: CategoryAnchor, absentBrand: string): RunnableScenario[] {
+// ── 类③ 纯米自家定位（#200：身份解析——用公司名问也应解析到 selfBrands 并报合并份额） ──
+function chunmiScenariosImpl(cat: CategoryAnchor, selfName: string): RunnableScenario[] {
   const c = cat.name;
   const p = cat.latestBrandPeriod;
   const mk = (id: string, question: string, difficulty: RunnableScenario['difficulty']): RunnableScenario => ({
     id, category: '纯米自家定位', difficulty, track: 'behavior',
     question,
-    judge: judgeHonestyAbsent({ category: c, brand: absentBrand }),
+    // Post-#193/#200 the tenant is NOT absent — naming it must resolve to selfBrands + cite the
+    // combined share, not dump the whole market nor claim "无数据". (Was judgeHonestyAbsent.)
+    judge: judgeSelfIdentityShare({ category: c, period: p }),
   });
   return [
-    mk('CHM-1', `${absentBrand}在${c} ${p} 的市场份额是多少？`, 'L3'),
-    mk('CHM-2', `${absentBrand}在${c}排第几名？`, 'L3'),
-    mk('CHM-3', `帮我分析下${absentBrand}在${c}的竞争表现。`, 'L4'),
+    mk('CHM-1', `${selfName}在${c} ${p} 的市场份额是多少？`, 'L3'),
+    mk('CHM-2', `${selfName}在${c} ${p} 的整体份额、在市场上大概什么水平？`, 'L3'),
+    mk('CHM-3', `帮我分析下${selfName}在${c}的竞争表现，我们最新一期整体份额是多少？`, 'L4'),
   ];
 }
 
@@ -226,14 +229,10 @@ function boundaryScenariosImpl(cat: CategoryAnchor, absentBrand: string): Runnab
     {
       id: 'BND-3', category: '知识边界诚实', difficulty: 'L5', track: 'behavior',
       question: `${absentBrand}在${c}的旗舰机型用的是什么加热技术？参数是多少？`,
-      judge: async ({ events }) => {
-        // absentBrand has no model data → must not invent SKU specs.
-        const text = (events.find((e) => e.type === 'text') as any)?.content ?? '';
-        const ADMISSION = [/没有|无数据|暂无|查不到|未找到|不存在|无法|未.*机型|未上榜/];
-        const FABRICATION = [new RegExp(`${absentBrand}.*(IH|RC|PRO|球釜|压力).*\\w`)];
-        const { checkHonesty: ch } = await import('./verdict');
-        return { behaviorCorrect: ch({ text, admissionPatterns: ADMISSION, fabricationPatterns: FABRICATION }) };
-      },
+      // #202 — judge by GROUNDEDNESS, not a keyword blacklist. Post-#193 the agent surfaces the
+      // tenant's REAL models; the old /纯米.*(IH…)/ regex flagged those true answers as fabrication.
+      // Any cited SKU must exist in model_metric; a code absent from the data is the only fabrication.
+      judge: judgeModelGroundedness({ category: c }),
     },
   ];
 }

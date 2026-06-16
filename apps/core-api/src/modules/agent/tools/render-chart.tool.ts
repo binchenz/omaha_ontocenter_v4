@@ -5,7 +5,25 @@ import { AgentTool, ToolContext } from './tool.interface';
 @Injectable()
 export class RenderChartTool implements AgentTool {
   name = 'render_chart';
-  description = '在对话中渲染内联图表。根据查询结果生成可视化图表，支持折线图、柱状图、饼图、热力图等12种类型。';
+  // The chart-type catalogue lives here (not in skill prose) so it only enters the model's
+  // context when render_chart is actually under consideration — keeping the常驻 system prompt lean
+  // (#197). Each type names its best-fit scenario so the model can select without extra prose.
+  description = [
+    '在对话中渲染内联图表。先用 aggregate_objects/query_objects 取数，再调本工具；标题与坐标轴用中文。',
+    '图表类型选型：',
+    '- line：时间序列趋势（月度销量/销额走势）',
+    '- bar：排名对比（TOP10 品牌销量）',
+    '- stacked_bar：构成/份额分解（各价格段品牌份额）',
+    '- grouped_bar：多维对比（A品牌 vs B品牌 按月）',
+    '- pie：整体占比分布（品牌份额分布）',
+    '- area：趋势+体积感（市场总量走势）',
+    '- stacked_area：构成随时间变化（各品牌份额演变）',
+    '- scatter：相关性（价格 vs 销量）',
+    '- heatmap：矩阵交叉（品牌×价格段份额矩阵）',
+    '- kpi：单一/关键指标概览（市场规模、增速）；单标量值用 kpi 而非 line/bar',
+    '- waterfall：增量分解归因（份额变化来源）',
+    '- radar：多维评估（品牌综合竞争力）',
+  ].join('\n');
   requiresConfirmation = false;
 
   parameters: Record<string, unknown> = {
