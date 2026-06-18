@@ -26,12 +26,27 @@ import { DeleteRelationshipTool } from './tools/delete-relationship.tool';
 import { AGENT_TOOLS } from '../tool-registry/tool-registry.tokens';
 import { ToolCollector } from '../tool-registry/tool-collector.service';
 import { AgentBootstrap } from './agent.bootstrap';
+import { PG_BOSS } from '../dataset/pg-boss.provider';
 
 describe('AgentModule (boot smoke test)', () => {
-  it('AGENT_TOOLS resolves to an array aggregating tools from every module', async () => {
-    const moduleRef = await Test.createTestingModule({
+  // The pgBossProvider factory does `new PgBoss(process.env.DATABASE_URL)` + `boss.start()`
+  // at module-compile time, so it throws under CI where no DATABASE_URL is set (pg-boss
+  // rejects an undefined connection string). This boot smoke test verifies DI wiring — tool
+  // collection, orphan checks, vertical skill fan-in — not that pg-boss can reach a database,
+  // so we override PG_BOSS with an inert stub (same reasoning that already mocks heavy infra
+  // deps elsewhere). Without this the suite is red on every DB-less CI run.
+  const mockBoss = { start: jest.fn(), stop: jest.fn(), on: jest.fn(), createQueue: jest.fn(), work: jest.fn(), send: jest.fn() };
+
+  const compileModule = () =>
+    Test.createTestingModule({
       imports: [PrismaModule, PermissionModule, AgentModule],
-    }).compile();
+    })
+      .overrideProvider(PG_BOSS)
+      .useValue(mockBoss)
+      .compile();
+
+  it('AGENT_TOOLS resolves to an array aggregating tools from every module', async () => {
+    const moduleRef = await compileModule();
 
     // AGENT_TOOLS must be an ARRAY (NestJS does not support Angular-style `multi: true`,
     // which silently yielded a single object — ADR-0052 fix via DiscoveryService).
@@ -59,9 +74,7 @@ describe('AgentModule (boot smoke test)', () => {
   });
 
   it('AgentBootstrap orphan check passes for every collected tool (no .init(): DB-free)', async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [PrismaModule, PermissionModule, AgentModule],
-    }).compile();
+    const moduleRef = await compileModule();
 
     // Run the orphan check against the REAL collected tools + skills without firing
     // .init() (which would block on pg-boss DB connect). This catches both the array
@@ -73,9 +86,7 @@ describe('AgentModule (boot smoke test)', () => {
   });
 
   it('boots and resolves all key providers', async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [PrismaModule, PermissionModule, AgentModule],
-    }).compile();
+    const moduleRef = await compileModule();
 
     expect(moduleRef.get(OrchestratorService)).toBeDefined();
     expect(moduleRef.get(OntologySdk)).toBeDefined();
@@ -102,9 +113,7 @@ describe('AgentModule (boot smoke test)', () => {
   // ADR-0062 §4 — the reference vertical's contributions must reach the running seams: its skill
   // lands in AGENT_SKILLS so a community OPC's contributed skill actually drives the agent.
   it('fans registered vertical skills into AGENT_SKILLS', async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [PrismaModule, PermissionModule, AgentModule],
-    }).compile();
+    const moduleRef = await compileModule();
 
     const { AGENT_SKILLS } = await import('../tool-registry/tool-registry.tokens');
     const skills = moduleRef.get<any[]>(AGENT_SKILLS);
