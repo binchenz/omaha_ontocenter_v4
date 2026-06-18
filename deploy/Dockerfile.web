@@ -26,6 +26,12 @@ COPY turbo.json ./
 # Build shared-types first, then web (turbo handles order)
 RUN pnpm turbo build --filter=@omaha/web...
 
+# Next.js `public/` is optional and this app currently ships none, so the dir may not
+# exist. Ensure it exists (empty is fine) so the runtime COPY below always has a source
+# and the build doesn't fail with "/app/apps/web/public: not found" — while still
+# copying real assets if a public/ is added later.
+RUN mkdir -p apps/web/public
+
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 FROM node:20-slim AS runtime
 
