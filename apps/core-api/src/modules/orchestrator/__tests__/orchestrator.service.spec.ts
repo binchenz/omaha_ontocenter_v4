@@ -69,6 +69,50 @@ describe('OrchestratorService', () => {
     expect(events.find(e => e.type === 'done')).toBeTruthy();
   });
 
+  // ADR-0064 §5 — fast/slow dual-path. With no router injected (the default in this
+  // suite), every request runs the slow loop unchanged (proven by all other tests).
+  describe('intent fast path (ADR-0064 §5)', () => {
+    function withRouter(routeImpl: jest.Mock) {
+      const router: any = { enabled: true, route: routeImpl };
+      return new OrchestratorService(llm, [mockTool], [mockSkill], undefined, undefined, [], router);
+    }
+
+    it('emits a deterministic tool_call/tool_result/text/done and NEVER enters the LLM loop when the fast path fires', async () => {
+      const fast = {
+        taken: true,
+        selection: { route: 'fast', metric: '零售额', dimensions: { category: '电饭煲' }, time: { month: '26.04' }, intent: 'lookup' },
+        result: { metric: '零售额', star: 'market_metric', result: { groups: [] } },
+        answer: '电饭煲 26.04 的零售额：3.90 亿元（39,012.84 万元）。（来源：AVC market_metric）',
+      };
+      const orch = withRouter(jest.fn().mockResolvedValue(fast));
+      llm.responses = [{ type: 'text', content: 'SHOULD-NOT-BE-USED' }];
+      const events = await collect(orch.run({ user, message: '电饭煲 26.04 的零售额是多少？' }));
+
+      expect(events.find(e => e.type === 'tool_call')?.name).toBe('query_metric');
+      expect(events.find(e => e.type === 'tool_result')?.name).toBe('query_metric');
+      expect(events.find(e => e.type === 'text')?.content).toContain('39,012.84 万元');
+      expect(events.find(e => e.type === 'done')).toBeTruthy();
+      // The LLM tool loop was never entered — the canned LLM response is untouched.
+      expect((llm as any).responses).toHaveLength(1);
+    });
+
+    it('falls through to the slow loop unchanged when the router declines (returns null)', async () => {
+      const orch = withRouter(jest.fn().mockResolvedValue(null));
+      llm.responses = [{ type: 'text', content: 'slow-path answer' }];
+      const events = await collect(orch.run({ user, message: '帮我分析电饭煲' }));
+      expect(events.find(e => e.type === 'text')?.content).toBe('slow-path answer');
+      expect(events.find(e => e.type === 'system_prompt')).toBeTruthy(); // slow path builds the prompt
+    });
+
+    it('never takes the fast path for a request carrying a fileId (attachments → slow)', async () => {
+      const route = jest.fn().mockResolvedValue(null);
+      const orch = withRouter(route);
+      llm.responses = [{ type: 'text', content: 'ok' }];
+      await collect(orch.run({ user, message: 'analyze this', fileId: 'f1' }));
+      expect(route).not.toHaveBeenCalled();
+    });
+  });
+
   it('executes tool call and continues loop', async () => {
     llm.responses = [
       { type: 'tool_calls', calls: [{ id: 'tc1', name: 'test_tool', arguments: { x: 1 } }] },

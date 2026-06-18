@@ -11,6 +11,8 @@ import { DataImportModule } from '../data-import/data-import.module';
 import { TransformConfigModule } from '../transform-config/transform-config.module';
 import { PipelineModule } from '../pipeline/pipeline.module';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
+import { IntentRouter } from '../orchestrator/intent-router';
+import { MetricQueryService } from '../query/metric-query.service';
 import { AgentController } from './agent.controller';
 import { FileController } from './file.controller';
 import { ConfirmationGate } from './confirmation/confirmation-gate.service';
@@ -34,6 +36,8 @@ import { IngestDocumentTool } from './tools/ingest-document.tool';
 import { SemanticSearchTool } from './tools/semantic-search.tool';
 import { ReadFilePreviewTool } from './tools/read-file-preview.tool';
 import { RenderChartTool } from './tools/render-chart.tool';
+import { ProbeCoverageTool } from './tools/probe-coverage.tool';
+import { QueryMetricTool } from './tools/query-metric.tool';
 import { LLM_CLIENT, LlmClient } from './llm/llm-client.interface';
 import { DeepSeekLlmClient } from './llm/deepseek-llm-client';
 import { ResilientLlmClient } from './llm/resilient-llm-client';
@@ -62,7 +66,7 @@ const AGENT_OWN_TOOLS = [
   ImportDataTool, TestDbConnectionTool, CreateConnectorTool,
   ListDbTablesTool, PreviewDbTableTool, CreateRelationshipTool, DeleteRelationshipTool,
   ExtractAvcReportTool, IngestDocumentTool, SemanticSearchTool, ReadFilePreviewTool,
-  RenderChartTool,
+  RenderChartTool, ProbeCoverageTool, QueryMetricTool,
 ] as const;
 
 @Module({
@@ -103,14 +107,23 @@ const AGENT_OWN_TOOLS = [
       inject: [VERTICALS],
     },
     {
+      // ADR-0064 §5 — the fast/slow intent router. Injected into the orchestrator so a
+      // simple catalogue lookup bypasses the multi-step loop. Depends on the LLM (one
+      // classification call) + MetricQueryService (deterministic execute).
+      provide: IntentRouter,
+      useFactory: (llm: LlmClient, metricQuery: MetricQueryService) => new IntentRouter(llm, metricQuery),
+      inject: [LLM_CLIENT, MetricQueryService],
+    },
+    {
       provide: OrchestratorService,
-      useFactory: (llm: LlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate, planSummarizer: PlanSummarizer, verticals: Vertical[]) =>
+      useFactory: (llm: LlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate, planSummarizer: PlanSummarizer, verticals: Vertical[], intentRouter: IntentRouter) =>
         // ADR-0062 §3 — all drill-gates come from registered verticals; the orchestrator names no
         // AVC type itself. The AVC gate now lives in AVC_VERTICAL (was a TODO hardcode here, #206→#208).
         new OrchestratorService(llm, tools, skills, gate, planSummarizer,
           collectVerticalContributions(verticals).drillGates,
+          intentRouter,
         ),
-      inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate, PlanSummarizer, VERTICALS],
+      inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate, PlanSummarizer, VERTICALS, IntentRouter],
     },
     PlanSummarizer,
     EvalsService,
