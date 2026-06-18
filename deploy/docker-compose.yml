@@ -33,6 +33,9 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       ARK_API_KEY: ${ARK_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # main.ts listens on PORT ?? 3000, but EXPOSE / healthcheck / port mapping all use
+      # 3001 — without this the API binds :3000 and the :3001 health probe never passes.
+      PORT: "3001"
     ports:
       - "3001:3001"
     healthcheck:
