@@ -59,6 +59,27 @@ export interface OntologyView {
   additivity?: Map<string, { kind: 'additive' | 'non-additive' | 'ratio'; ratioOf?: { numerator: string; denominator: string } }>;
 
   /**
+   * ADR-0061 §2: the star's sampling universe (`whole-market` / `top-sample`),
+   * lifted onto the view so the result envelope (ADR-0064 §2) can label each
+   * measure with its caliber. Absent for stars that declare none.
+   */
+  universe?: string;
+
+  /**
+   * ADR-0064 §1: the star's temporal sampling frame (which field is the series
+   * axis, its grain/density, and how to read a value). Read from the same
+   * `object_types.semantics` JSONB as `universe`. Absent → the type has no
+   * declared time axis (zero prompt weight, like `universe`). Inlined here to
+   * keep the DSL package dependency-free (mirrors the `additivity` inline).
+   */
+  timeAxis?: {
+    field: string;
+    grain: 'month' | 'quarter' | 'year' | 'snapshot';
+    format?: string;
+    density: 'dense' | 'sparse';
+  };
+
+  /**
    * Set by `projectVisible` when the view has been narrowed to a restricted
    * principal's visible fields. Tells the input gates to treat the (possibly
    * now-empty) capability sets as an EXACT whitelist — i.e. suppress the

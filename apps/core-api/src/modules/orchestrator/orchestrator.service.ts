@@ -9,6 +9,8 @@ import { estimateTokens, PROMPT_BUDGET_WARN, PROMPT_BUDGET_ERROR } from '../agen
 import { PlanSummarizer } from '../agent/plan-summarizer.service';
 import { assembleSkills, openingGuidanceFor } from './skill-assembly';
 import { ToolCallDedup } from './tool-call-dedup';
+import { IntentRouter } from './intent-router';
+import { randomUUID } from 'crypto';
 
 export type AgentEvent =
   | { type: 'tool_call'; id: string; name: string; args: Record<string, unknown>; planSummary?: string }
@@ -63,12 +65,34 @@ export class OrchestratorService {
     // ADR-0062 §3 — injected drill-gate configs. Empty → the gate mechanism never trips.
     // A Vertical contributes its gates here; the orchestrator stays domain-agnostic.
     private readonly drillGates: DrillGate[] = [],
+    // ADR-0064 §5 — optional fast/slow intent router. Undefined → no fast path: every
+    // request runs the existing multi-step loop unchanged (the slow path is untouched).
+    private readonly intentRouter?: IntentRouter,
   ) {}
 
   async *run(input: RunInput): AsyncGenerator<AgentEvent> {
     const userContent = input.fileId
       ? `${input.message}\n\n[附件 fileId: ${input.fileId}]`
       : input.message;
+
+    // ADR-0064 §5 fast path: a simple single-metric lookup is classified once,
+    // resolved against the catalogue, executed deterministically, and answered from
+    // the slice-① envelope — sub-second, WITHOUT entering the multi-step tool loop.
+    // The number is templated from `display`, so on this path it never passes through
+    // any LLM (the strongest BUG-1 guard). Files / resumes / anything not a plain
+    // lookup fall through to the slow path below. Orchestration (drill gate, four-hop)
+    // is only reachable via the slow path — the router routes mechanical retrieval only.
+    if (this.intentRouter?.enabled && !input.fileId) {
+      const fast = await this.intentRouter.route(input.user, input.message);
+      if (fast) {
+        const callId = randomUUID();
+        yield { type: 'tool_call', id: callId, name: 'query_metric', args: { metric: fast.selection.metric, dimensions: fast.selection.dimensions, time: fast.selection.time, intent: fast.selection.intent } };
+        yield { type: 'tool_result', id: callId, name: 'query_metric', data: fast.result };
+        yield { type: 'text', content: fast.answer };
+        yield { type: 'done', conversationId: input.conversationId ?? 'new' };
+        return;
+      }
+    }
 
     const assembledSkills = assembleSkills(this.skills, input.surface, input.user.permissions);
     const guidance = openingGuidanceFor(input.surface, input.user.permissions);

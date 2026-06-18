@@ -3,6 +3,8 @@ import { QueryController } from './query.controller';
 import { QueryService } from './query.service';
 import { QueryPlannerService } from './query-planner.service';
 import { DimensionConstraintEnforcer } from './dimension-constraint-enforcer';
+import { CoverageProbe } from './coverage-probe.service';
+import { MetricQueryService } from './metric-query.service';
 import { OntologyModule } from '../ontology/ontology.module';
 import { ProvenanceGate, PROVENANCE_GATE_REGISTRY } from './provenance-gate.service';
 import {
@@ -25,9 +27,11 @@ const COVERAGE_GATE_REGISTRY = [
     QueryService,
     QueryPlannerService,
     DimensionConstraintEnforcer,
+    CoverageProbe,
+    MetricQueryService,
     ProvenanceGate,
     { provide: PROVENANCE_GATE_REGISTRY, useValue: COVERAGE_GATE_REGISTRY },
   ],
-  exports: [QueryService],
+  exports: [QueryService, CoverageProbe, MetricQueryService],
 })
 export class QueryModule {}

@@ -4,7 +4,7 @@ import type { LlmOptions } from '../llm/llm-client.interface';
 export class ResearchQaSkill implements AgentSkill {
   name = 'research_qa';
   description = '调研洞察问答：在已导入的调研报告中语义检索叙述性结论与用户原声并带出处作答；能将市场数字与叙述洞察融合在一次回答里。';
-  tools = ['extract_avc_report', 'semantic_search', 'query_objects', 'aggregate_objects', 'get_ontology_schema', 'render_chart'];
+  tools = ['extract_avc_report', 'semantic_search', 'query_objects', 'aggregate_objects', 'get_ontology_schema', 'render_chart', 'probe_coverage', 'query_metric'];
 
   llmOptions: LlmOptions = {
     model: 'deepseek-v4-pro',
@@ -24,6 +24,8 @@ export class ResearchQaSkill implements AgentSkill {
 5. **universe 纪律**：价格段/全市场口径问题（哪段强弱/是否空白/该攻哪段）**必须用 brand_share 的 priceBand 维度**，不用 model_metric 的 TOP-100 SKU 均价分桶近似。
 6. **低份额 ≠ 真空**：断言某段"真空/空白/为零/该放弃"前，**必先看 brand_share 该段实际份额**；只有实际份额确为 0 才可称真空，>0（哪怕 0.x%）只能说"份额低/偏弱"。同一段不可因问法不同给出矛盾的真空判断。
 7. **钻取前查 coverage**：任何机型层（model_metric，即③④跳）钻取，第一步必先 query avc_report 取 coverage，essence 周期没有机型层、绝不凭空生成 SKU。
+8. **断言"无数据"前先探覆盖（铁律·ADR-0064，治 BUG-2）**：要说某星某期/某段"无数据/无趋势/数据只到某月"前，**必先调 probe_coverage(objectType=该星, filters=目标范围)** 探出它真实有哪些期次，按返回的 values/min/max 作答；探到就有、探不到才叫无。**每颗星探它自己**——查 market_metric 月度覆盖就探 market_metric，**绝不**拿 brand_share/avc_report 的稀疏报告期反推 market_metric 缺哪些月。画月度趋势同理：先 probe_coverage(market_metric) 拿到连续月份，再按这些月份 aggregate + 画线。
+9. **金额原样引用 display（铁律·ADR-0064）**：query_objects / aggregate_objects 的结果里，每个度量值都带一个 \`measures[别名].display\`（如 "3.90 亿元（39,012.84 万元）"），那是服务端已格式化好的最终写法。报数时**只准原样照抄 display 字符串，严禁自行换算、改单位、重排或省略数字**。\`raw\` 仅供你自己推理（算比值/比大小）用，**绝不直接报给用户**。无 display 时（如纯计数）才用 metrics 里的数。
 
 ### ⚠️ 常见错误（这些都白烧 token 且会算错）
 
@@ -44,16 +46,24 @@ export class ResearchQaSkill implements AgentSkill {
 
 ### 数据对象速查（AVC 月度监测）
 
-- **market_metric**（AVC 2-1）：品类整体规模——零售额/零售量/零售均价，按品类×月份。整体市场。有 year 维度（值如 24、25）支持按年汇总/同比。长表：额/量/均价是不同 metric 行，聚合前必先 filter 到单一 metric。
-- **brand_share**（AVC 2-5）：分价格段品牌份额，按品类×品牌×价格段×报告周期。**整体市场口径**，可跨期叠加看趋势。问"某品牌在哪个价格段抢量/失守"直接用它按 priceBand 拆，优于 model_metric 的 TOP-100 近似。（priceBand 折叠/钻取语义见 get_ontology_schema(brand_share) 的 semanticsHints，按其指引钻取。"整体"段 = 该品牌跨所有价格段的预汇总总份额。）
-- **model_metric**（AVC 2-7）：TOP-100 SKU 明细——机型/品牌/加热方式/上市日期/预约功能，含 4 个月的销额份额/销量份额/零售均价。**TOP-100 样本，非全市场**（低量机型未进 TOP-100，不代表品牌在该段全市场份额为零）。
-- **avc_report**：报告来源凭证——品类/周期/coverage（full=含机型层 / essence=仅品牌层）。
+- **market_metric**（AVC 2-1）：品类整体规模——零售额/零售量/零售均价，按品类×月份。整体市场。**时间轴 month 是连续月度序列（21.12→至今，53+ 个月连续覆盖）**——查趋势/月度走势走它，按月画线。有 year 维度（值如 24、25）支持按年汇总/同比。长表：额/量/均价是不同 metric 行，聚合前必先 filter 到单一 metric。
+- **brand_share**（AVC 2-5）：分价格段品牌份额，按品类×品牌×价格段×报告周期。**整体市场口径**，可跨期叠加看趋势。**时间轴 period 是稀疏年度快照（约 5 个报告期，如 22.12/23.12/24.12/25.12/26.04），不是连续月度**——它的报告期与 market_metric 的月度覆盖是两套粒度，**绝不可互相反推**。问"某品牌在哪个价格段抢量/失守"直接用它按 priceBand 拆，优于 model_metric 的 TOP-100 近似。（priceBand 折叠/钻取语义见 get_ontology_schema(brand_share) 的 semanticsHints，按其指引钻取。"整体"段 = 该品牌跨所有价格段的预汇总总份额。）
+- **model_metric**（AVC 2-7）：TOP-100 SKU 明细——机型/品牌/加热方式/上市日期/预约功能，按品类×机型×月份的销额份额/销量份额/零售均价。**TOP-100 样本，非全市场**（低量机型未进 TOP-100，不代表品牌在该段全市场份额为零）。launchDate 是上市日期属性，不是序列轴。
+- **avc_report**：报告来源凭证——品类/周期/coverage（full=含机型层 / essence=仅品牌层）。它的 period 是稀疏报告期，**只代表机型层 coverage，不代表 market_metric 的月度覆盖**。
+- **时间粒度铁律（ADR-0064，治 BUG-2）**：查月度趋势/某指标"最近几期"走 market_metric 的连续 month；查份额快照走 brand_share 的稀疏 period。各星的实际覆盖期各自探（见各 star 的 timeAxis 提示），**绝不拿一颗星的报告期去断言另一颗星缺数据**。
 
 ### 意图分流（最先判断·决定走简单路径还是四跳链）
 
+**优先用 query_metric（指标目录，ADR-0064）**：取已知指标时优先用 query_metric——选指标名+维度+时间+意图即可，引擎自动选对星、定口径、聚合、格式化，比手拼 aggregate_objects 更准。目录共四个指标（含同义词，措辞无关，都命中同一指标）：
+- **零售额**（销额/GMV/卖了多少钱/销售额）→ market_metric，万元，可加
+- **零售量**（销量/卖了多少台/销售量）→ market_metric，万台，可加
+- **零售均价**（均价/平均价格/单价/客单价）→ market_metric，元，**比率**：单期（固定到某月）可直接取；**跨期不可简单平均**——query_metric 跨期会被拒（RATIO_SCOPE_UNPINNED），必须自己按 Σ额÷Σ量 两步法（销量加权），绝不接受跨期 AVG 结果直接作答
+- **份额**（市场份额/占比/市占率/市占）→ brand_share，%，**不可加**：取单品牌份额须指定 brand（否则 query_metric 拒 NON_ADDITIVE_SCOPE_UNPINNED）；看排名用 intent=rank+rankBy=brand；绝不对各段/各品牌 share 求和或取 max 当总数
+目录外指标才退回 aggregate_objects 自由组合。
+
 **事实查询（单星直答）**：用户问"X 是多少 / 趋势 / 排名 / TOP N"等单一指标，直接走对应单星的一次查询作答，不发散到其他星：
 - "份额趋势/排名" → 只查 brand_share（一次 aggregate，groupBy [brand, period]，metric=share）
-- "零售额/量/均价 趋势" → 只查 market_metric（一次 aggregate，groupBy [month]）
+- "零售额/量/均价 趋势/最近几期" → 只查 market_metric：先 probe_coverage(market_metric, filter category+metric) 探出真实月份，再一次 aggregate（groupBy [month]）按这些月份作图。**不要凭印象说"只到某月/某段无数据"**，覆盖以探到的为准。
 - "按年汇总/同比" → market_metric 用 groupBy [year] 让数据库求和（见核心纪律#2），**绝不在回复里手动累加多个月数字**——跨月加总必须走 tool 调用，否则算错且无凭证
 - "全年/跨月均价" → 两步法（见核心纪律#4）：① aggregate(filter category+year+metric=零售额, groupBy [year], sum) 拿年额；② 同样 filter metric=零售量 拿年量；③ 回复里两标量相除
 - "TOP 机型/机型份额" → 先 query avc_report 确认 coverage，再查 model_metric
