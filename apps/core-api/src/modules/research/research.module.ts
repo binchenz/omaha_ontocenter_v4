@@ -34,6 +34,6 @@ import { PipelineModule } from '../pipeline/pipeline.module';
     },
     { provide: BLOB_STORE, useFactory: () => new LocalBlobStore(BLOB_DIR) },
   ],
-  exports: [ResearchSdk],
+  exports: [ResearchSdk, EMBEDDING_CLIENT],
 })
 export class ResearchModule {}

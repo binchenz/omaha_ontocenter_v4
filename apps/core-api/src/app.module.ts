@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './common/prisma.module';
 import { LoggerModule } from './common/logger.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -22,6 +23,6 @@ import { TransformConfigModule } from './modules/transform-config/transform-conf
 import { ToolRegistryModule } from './modules/tool-registry/tool-registry.module';
 
 @Module({
-  imports: [ToolRegistryModule, PrismaModule, LoggerModule, AuthModule, TenantModule, OntologyModule, ConnectorModule, MappingModule, PermissionModule, QueryModule, AgentModule, SdkModule, ApplyModule, DatasetModule, PipelineModule, HealthModule, ActionModule, SetupModule, UsersModule, PendingActionModule, TransformConfigModule],
+  imports: [ScheduleModule.forRoot(), ToolRegistryModule, PrismaModule, LoggerModule, AuthModule, TenantModule, OntologyModule, ConnectorModule, MappingModule, PermissionModule, QueryModule, AgentModule, SdkModule, ApplyModule, DatasetModule, PipelineModule, HealthModule, ActionModule, SetupModule, UsersModule, PendingActionModule, TransformConfigModule],
 })
 export class AppModule {}
