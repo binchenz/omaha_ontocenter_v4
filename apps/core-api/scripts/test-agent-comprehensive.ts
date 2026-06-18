@@ -9,6 +9,7 @@ import { OrchestratorService } from '../src/modules/orchestrator/orchestrator.se
 import { AGENT_SKILLS } from '../src/modules/tool-registry/tool-registry.tokens';
 import { VERTICALS } from '../src/modules/vertical/vertical.tokens';
 import type { Vertical } from '../src/modules/vertical/vertical';
+import { findTenantWithSelfBrands } from './test-utils';
 
 async function main() {
   console.log('=== Comprehensive Agent Test (In-Process) ===\n');
@@ -25,11 +26,7 @@ async function main() {
 
   // Test 2: #200 - Identity injection (verify selfBrands in tenant)
   console.log('[Test 2] #200 - Identity injection with tenant name');
-  const tenants = await prisma.tenant.findMany({ take: 10 });
-  const tenant = tenants.find(t => {
-    const settings = t.settings as any;
-    return Array.isArray(settings?.selfBrands) && settings.selfBrands.length > 0;
-  });
+  const tenant = await findTenantWithSelfBrands(prisma);
   if (tenant) {
     const settings = tenant.settings as any;
     const selfBrands = settings?.selfBrands || [];

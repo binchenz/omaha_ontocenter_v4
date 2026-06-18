@@ -8,104 +8,47 @@
  *   2. Then run: npx ts-node --transpile-only scripts/test-agent-live-server.ts
  */
 import { PrismaClient } from '@omaha/db';
-import { sign } from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
-const baseUrl = 'http://localhost:3001';
-
-interface TestCase {
-  id: string;
-  query: string;
-  expectation: string;
-  validate: (text: string) => { pass: boolean; reason?: string };
-}
-
-async function chat(token: string, message: string): Promise<string> {
-  const resp = await fetch(`${baseUrl}/agent/chat`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ message }),
-  });
-
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
-  }
-
-  const events: any[] = [];
-  const reader = resp.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (line.startsWith('data:')) {
-        const json = line.slice(5).trim();
-        if (json && json !== '[DONE]') {
-          try {
-            events.push(JSON.parse(json));
-          } catch (e) {
-            // Skip malformed JSON
-          }
-        }
-      }
-    }
-  }
-
-  return events
-    .filter(e => e.type === 'text')
-    .map(e => e.content)
-    .join('');
-}
+import {
+  BASE_URL,
+  chatWithAgent,
+  createToken,
+  findTenantWithSelfBrands,
+  getFirstUser,
+  printSummary,
+  type TestCase,
+} from './test-utils';
 
 async function main() {
   console.log('=== Live Server E2E Test ===\n');
 
   // Check server health
   try {
-    const health = await fetch(`${baseUrl}/health`);
+    const health = await fetch(`${BASE_URL}/health`);
     if (!health.ok) throw new Error(`Health check failed: ${health.status}`);
     console.log('✓ Server is running\n');
   } catch (err: any) {
-    console.error(`❌ Cannot connect to ${baseUrl}`);
+    console.error(`❌ Cannot connect to ${BASE_URL}`);
     console.error(`   Make sure server is running: DEEPSEEK_API_KEY=sk-xxx npm run start:dev\n`);
     process.exit(1);
   }
 
   const prisma = new PrismaClient();
 
-  // Find tenant with selfBrands
-  const tenants = await prisma.tenant.findMany({ take: 10 });
-  const tenant = tenants.find(t => {
-    const settings = t.settings as any;
-    return Array.isArray(settings?.selfBrands) && settings.selfBrands.length > 0;
-  }) || tenants[0];
-
+  const tenant = await findTenantWithSelfBrands(prisma);
   if (!tenant) {
     console.error('❌ No tenant found');
     await prisma.$disconnect();
     process.exit(1);
   }
 
-  const admin = await prisma.user.findFirst({ where: { tenantId: tenant.id } });
+  const admin = await getFirstUser(prisma, tenant.id);
   if (!admin) {
     console.error('❌ No user found');
     await prisma.$disconnect();
     process.exit(1);
   }
 
-  const token = sign(
-    { sub: admin.id, tenantId: tenant.id, email: admin.email, roleId: admin.roleId },
-    JWT_SECRET
-  );
+  const token = createToken(admin.id, tenant.id, admin.email, admin.roleId);
 
   console.log(`Tenant: ${tenant.name}`);
   console.log(`User: ${admin.email}\n`);
@@ -174,7 +117,7 @@ async function main() {
     console.log(`  Query: ${test.query}`);
 
     try {
-      const response = await chat(token, test.query);
+      const response = await chatWithAgent(token, test.query);
       const result = test.validate(response);
 
       if (result.pass) {
@@ -192,9 +135,7 @@ async function main() {
     }
   }
 
-  console.log('=== Summary ===');
-  console.log(`Passed: ${passed}/${tests.length}`);
-  console.log(`Failed: ${failed}/${tests.length}`);
+  printSummary(passed, tests.length);
 
   await prisma.$disconnect();
   process.exit(failed === 0 ? 0 : 1);

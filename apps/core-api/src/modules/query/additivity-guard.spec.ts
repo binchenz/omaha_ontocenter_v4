@@ -96,4 +96,36 @@ describe('AdditivityGuard — planMetricAdditivity', () => {
       expect(d.code).toBe('RATIO_AVG_UNWEIGHTABLE');
     });
   });
+
+  describe('disjoint entity aggregation whitelist (Phase 1 #214)', () => {
+    it('still rejects cross-brand sum when aggregationWhitelist is absent', () => {
+      // Baseline: without the whitelist flag, non-additive SUM is always rejected
+      const d = planMetricAdditivity({ kind: 'sum', field: 'value', alias: 'v' }, mapOf({ value: { kind: 'non-additive' } }), allNumeric);
+      expect(d.action).toBe('error');
+      if (d.action !== 'error') throw new Error('unreachable');
+      expect(d.code).toBe('NON_ADDITIVE_SUM');
+    });
+
+    it('allows cross-brand sum when aggregationWhitelist.disjointEntities=true (to be checked by planner)', () => {
+      // With the whitelist flag, planMetricAdditivity treats the field as passable.
+      // The actual DB disjoint check happens in QueryPlannerService before calling this.
+      const d = planMetricAdditivity(
+        { kind: 'sum', field: 'value', alias: 'v' },
+        mapOf({ value: { kind: 'non-additive', aggregationWhitelist: { disjointEntities: true } } }),
+        allNumeric,
+      );
+      expect(d).toEqual({ action: 'pass' });
+    });
+
+    it('still rejects when aggregationWhitelist.disjointEntities=false', () => {
+      const d = planMetricAdditivity(
+        { kind: 'sum', field: 'value', alias: 'v' },
+        mapOf({ value: { kind: 'non-additive', aggregationWhitelist: { disjointEntities: false } } }),
+        allNumeric,
+      );
+      expect(d.action).toBe('error');
+      if (d.action !== 'error') throw new Error('unreachable');
+      expect(d.code).toBe('NON_ADDITIVE_SUM');
+    });
+  });
 });
