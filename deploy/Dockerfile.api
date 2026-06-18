@@ -63,9 +63,11 @@ COPY --from=build /app/packages/db/package.json ./packages/db/
 COPY --from=build /app/packages/dsl/package.json ./packages/dsl/
 COPY --from=build /app/packages/shared-types/package.json ./packages/shared-types/
 
-# Copy generated Prisma client
+# Copy generated Prisma client. Under pnpm the generated client lives only in the
+# @prisma/client virtual-store dir (.pnpm/@prisma+client*/node_modules/.prisma); there is
+# no /app/node_modules/.prisma to copy (that path never exists with pnpm), so the second
+# COPY failed the build with ".prisma: not found".
 COPY --from=build /app/node_modules/.pnpm/@prisma+client*/node_modules/.prisma ./node_modules/.prisma
-COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 
 ENV NODE_ENV=production
 EXPOSE 3001
