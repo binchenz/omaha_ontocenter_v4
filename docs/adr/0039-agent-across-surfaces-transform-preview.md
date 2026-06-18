@@ -1,8 +1,14 @@
 ---
-status: accepted
+status: accepted (scoped in part by ADR-0063)
 ---
 
 # One Agent across task-surfaces; surface drives Skill assembly; Pipeline transforms are dry-run → confirm
+
+> **Scoped by ADR-0063:** the cross-domain-continuity rationale below ("import then query"
+> as one conversation) was never realised — only the `consume` surface is live, so the
+> single Agent operates as a runtime analysis Agent. The surface-driven Skill-assembly
+> *mechanism* described here stays; its multi-surface justification is acknowledged as
+> dormant.
 
 ## Context
 

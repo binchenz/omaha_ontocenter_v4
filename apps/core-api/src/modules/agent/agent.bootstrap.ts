@@ -1,6 +1,6 @@
 import { Injectable, OnApplicationBootstrap, Inject } from '@nestjs/common';
 import { AgentSkill } from './skills/skill.interface';
-import { findOrphanedTools } from './sdk/find-orphaned-tools';
+import { findOrphanedTools, findDanglingToolRefs } from './sdk/find-orphaned-tools';
 import { AGENT_SKILLS } from '../tool-registry/tool-registry.tokens';
 import { ToolCollector } from '../tool-registry/tool-collector.service';
 
@@ -26,6 +26,14 @@ export class AgentBootstrap implements OnApplicationBootstrap {
       throw new Error(
         `Agent configuration error: tool(s) registered but not declared by any skill: ${orphans.join(', ')}. ` +
         `Add the tool name(s) to a skill's tools[] array, or remove the tool registration.`,
+      );
+    }
+
+    const dangling = findDanglingToolRefs(toolNames, this.skills);
+    if (dangling.length > 0) {
+      throw new Error(
+        `Agent configuration error: skill(s) declare tool(s) not registered in AGENT_TOOLS: ${dangling.join(', ')}. ` +
+        `Register the tool (add its class to a module's providers), or remove the name from the skill's tools[] array.`,
       );
     }
   }

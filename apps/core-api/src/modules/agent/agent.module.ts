@@ -33,6 +33,7 @@ import { ExtractAvcReportTool } from './tools/extract-avc-report.tool';
 import { IngestDocumentTool } from './tools/ingest-document.tool';
 import { SemanticSearchTool } from './tools/semantic-search.tool';
 import { ReadFilePreviewTool } from './tools/read-file-preview.tool';
+import { RenderChartTool } from './tools/render-chart.tool';
 import { LLM_CLIENT, LlmClient } from './llm/llm-client.interface';
 import { DeepSeekLlmClient } from './llm/deepseek-llm-client';
 import { ResilientLlmClient } from './llm/resilient-llm-client';
@@ -61,6 +62,7 @@ const AGENT_OWN_TOOLS = [
   ImportDataTool, TestDbConnectionTool, CreateConnectorTool,
   ListDbTablesTool, PreviewDbTableTool, CreateRelationshipTool, DeleteRelationshipTool,
   ExtractAvcReportTool, IngestDocumentTool, SemanticSearchTool, ReadFilePreviewTool,
+  RenderChartTool,
 ] as const;
 
 @Module({

@@ -1,4 +1,14 @@
+---
+status: accepted (scoped in part by ADR-0063)
+---
+
 # Agent-First Architecture: Single Agent + Skill/SDK/Tool
+
+> **Scoped by ADR-0063:** the "complete *all* operations through one conversation" claim
+> below held as a vision but not in delivery. The only live conversational surface is
+> `consume`; the Agent is in practice a **runtime analysis Agent** (query/aggregate/chart),
+> and design-time work (ingestion, modeling) is done via `scripts/`, not chat. Read the
+> paragraph below as the original aspiration, ADR-0063 as the realised scope.
 
 The platform's primary user interaction model is a conversational AI agent, not REST forms. Target users (Chinese SMBs without dedicated data engineers) complete all operations — data ingestion, ontology design, querying, action execution — through natural language dialogue with a single agent. Existing REST APIs remain as a parallel access path for structured UI (ontology browsing, result tables), but the agent is the primary entry point.
 
