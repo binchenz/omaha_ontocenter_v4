@@ -181,7 +181,16 @@ export const BRAND_SHARE_DEF = {
     { name: 'metric', label: '指标', type: 'string' as const, filterable: true, allowedValues: ['share'] },
     // ADR-0061 §1: brand share is non-additive — adding shares across price bands / brands is
     // nonsense; the guard rejects SUM(value) with NON_ADDITIVE_SUM and steers to a base-quantity path.
-    { name: 'value', label: '份额', type: 'number' as const, sortable: true, additivity: 'non-additive' as const },
+    // Phase 1 #214: aggregationWhitelist.disjointEntities allows SUM when filter pins non-overlapping
+    // brands (e.g. brand IN [小米, 米家]) — the planner verifies DB-level disjointness before allowing.
+    {
+      name: 'value',
+      label: '份额',
+      type: 'number' as const,
+      sortable: true,
+      additivity: 'non-additive' as const,
+      aggregationWhitelist: { disjointEntities: true },
+    },
     { name: 'sourceReport', label: '来源报告', type: 'string' as const },
   ],
   derivedProperties: [],

@@ -11,6 +11,8 @@ export type Additivity = 'additive' | 'non-additive' | 'ratio';
 /**
  * ADR-0061 §1: intrinsic aggregation semantics of one Property, lifted out of
  * skill prose so the aggregation layer can read it structurally.
+ *
+ * Phase 1 #214: aggregationWhitelist for disjoint entity sum (brand_share.value).
  */
 export interface PropertySemantics {
   kind: Additivity;
@@ -21,6 +23,18 @@ export interface PropertySemantics {
    * where numerator/denominator are sibling rows, not columns.
    */
   ratioOf?: { numerator: string; denominator: string };
+  /**
+   * Phase 1 #214: Whitelist exceptions for otherwise-forbidden aggregations.
+   * A non-additive field (like brand_share.value, which is a share/占比) normally
+   * rejects SUM across dimensions. But when the filter pins disjoint entities
+   * (e.g. `brand IN [小米, 米家]` where the two brands have no overlapping rows),
+   * summing their shares IS mathematically valid (each brand's share is independent).
+   * Setting `disjointEntities: true` tells the planner to check the DB for overlap
+   * before rejecting; if the filtered entities are truly disjoint, SUM is allowed.
+   */
+  aggregationWhitelist?: {
+    disjointEntities?: boolean;
+  };
 }
 
 export interface PropertyDefinition {

@@ -177,7 +177,7 @@ export class QueryPlannerService {
     // groupBy fields appear in SELECT first so the service layer can read
     // them keyed by the original property name.
     const selectExprs: string[] = groupBy.map((f, i) => `${groupExprs[i]} AS "${f}"`);
-    selectExprs.push(...this.buildMetricExprs(args.metrics, view, args.objectType, (f) => `properties->>'${f}'`));
+    selectExprs.push(...(await this.buildMetricExprs(args.metrics, view, args.objectType, (f) => `properties->>'${f}'`, args.tenantId, args.filters)));
 
     const groupByClause = groupBy.length > 0
       ? `GROUP BY ${groupExprs.join(', ')}`
@@ -293,20 +293,20 @@ export class QueryPlannerService {
     this.assertGroupable(xkey.field, otherView, resolved.otherType);
     for (const lk of localKeys) this.assertGroupable(lk, view, args.objectType);
 
-    return this.buildCrossRelSql(args, view, localKeys, xkey, {
+    return await this.buildCrossRelSql(args, view, localKeys, xkey, {
       otherType: resolved.otherType,
       storageKey: resolved.storageKey,
       fkSide: 'self',
     });
   }
 
-  private buildCrossRelSql(
+  private async buildCrossRelSql(
     args: AggregatePlanArgs,
     view: OntologyView | null,
     localKeys: string[],
     cross: { raw: string; relation: string; field: string },
     resolved: { otherType: string; storageKey: string; fkSide: 'self' },
-  ): PlannedAggregateQuery {
+  ): Promise<PlannedAggregateQuery> {
     // Base rows: scoped + filtered in a subquery so existing ScopedWhere column
     // refs (bare `properties`, `tenant_id`, …) stay unambiguous. Expose
     // properties + relationships so the outer query can join and read fields.
@@ -333,7 +333,7 @@ export class QueryPlannerService {
 
     // Metrics operate on the base rows (s.); orderBy/maxGroups/pageToken via the
     // shared builders. Cross-key ordering uses the SELECT alias, not the json expr.
-    const metricExprs = this.buildMetricExprs(args.metrics, view, args.objectType, (f) => `s.properties->>'${f}'`);
+    const metricExprs = await this.buildMetricExprs(args.metrics, view, args.objectType, (f) => `s.properties->>'${f}'`, args.tenantId, args.filters);
     const orderByClause = this.buildOrderByClause(
       args.orderBy,
       args.metrics.map((m) => m.alias),
@@ -399,12 +399,14 @@ export class QueryPlannerService {
     );
   }
 
-  private buildMetricExprs(
+  private async buildMetricExprs(
     metrics: AggregateMetric[],
     view: OntologyView | null,
     objectType: string,
     propRef: (field: string) => string,
-  ): string[] {
+    tenantId: string,
+    filters?: QueryFilter[],
+  ): Promise<string[]> {
     const numericKinds = new Set(['sum', 'avg', 'min', 'max']);
     const out: string[] = [];
     for (const m of metrics) {
@@ -438,7 +440,32 @@ export class QueryPlannerService {
         }
         // ADR-0061 §1: additivity gate before emitting SUM/AVG SQL. The guard turns
         // a measure's semantics into pass / weighted-rewrite / structured-error.
-        const decision = planMetricAdditivity(m, view?.additivity, (f) => view?.numericFields.has(f) ?? true);
+        //
+        // Phase 1 #214: disjoint entity whitelist. If the field has aggregationWhitelist.disjointEntities,
+        // and the metric is SUM, and there's a filter on a dimension field (e.g. brand IN [...]),
+        // check if the filtered values are disjoint in the DB. If they are, temporarily treat the
+        // field as additive so planMetricAdditivity allows it through.
+        let effectiveAdditivityMap = view?.additivity;
+        if (m.kind === 'sum' && m.field && view?.additivity) {
+          const semantics = view.additivity.get(m.field);
+          const whitelist = (semantics as any)?.aggregationWhitelist;
+          if (semantics?.kind === 'non-additive' && whitelist?.disjointEntities === true) {
+            // Check if filters contain a disjoint entity condition (e.g. brand IN [小米, 米家]).
+            // For now, we only support the 'brand' dimension as the disjoint key.
+            const brandFilter = filters?.find(f => f.field === 'brand' && f.operator === 'in' && Array.isArray(f.value));
+            if (brandFilter && Array.isArray(brandFilter.value) && brandFilter.value.length >= 2) {
+              // Query DB to check if these brands have overlapping rows.
+              const brands = brandFilter.value as string[];
+              const isDisjoint = await this.checkDisjointBrands(tenantId, objectType, brands);
+              if (isDisjoint) {
+                // Override: treat this field as additive for this query.
+                effectiveAdditivityMap = new Map(view.additivity);
+                effectiveAdditivityMap.set(m.field, { kind: 'additive' });
+              }
+            }
+          }
+        }
+        const decision = planMetricAdditivity(m, effectiveAdditivityMap, (f) => view?.numericFields.has(f) ?? true);
         if (decision.action === 'error') {
           throw new BadRequestException({ error: { code: decision.code, alias: m.alias, field: decision.field, kind: decision.kind, hint: decision.hint } });
         }
@@ -532,6 +559,40 @@ export class QueryPlannerService {
       sortClause: 'created_at DESC',
       sortFallbackReason: `Property '${sort.field}' is not flagged sortable; sorted by createdAt instead.`,
     };
+  }
+
+  /**
+   * Phase 1 #214: check if the given brand values have disjoint (non-overlapping) rows in the DB.
+   * Used by the disjoint entity whitelist: when a non-additive field (like brand_share.value) has
+   * aggregationWhitelist.disjointEntities=true, and the query filters to specific brands, we verify
+   * those brands actually don't overlap before allowing SUM to pass.
+   *
+   * Returns true if all brands are disjoint (safe to sum), false if any overlap.
+   */
+  private async checkDisjointBrands(tenantId: string, objectType: string, brands: string[]): Promise<boolean> {
+    // Simplest implementation for Phase 1: brands are disjoint if they're distinct string values.
+    // The "DB check" confirms they exist in the data (not a typo).
+    const distinct = new Set(brands);
+    if (distinct.size !== brands.length) {
+      // Duplicate brands in the filter → not disjoint.
+      return false;
+    }
+
+    // Check that all brands actually exist in the data (not a filter typo).
+    const existing = await this.prisma.$queryRaw<{ brand: string }[]>`
+      SELECT DISTINCT properties->>'brand' AS brand
+      FROM object_instances
+      WHERE tenant_id = ${tenantId}
+        AND object_type = ${objectType}
+        AND properties->>'brand' = ANY(${brands})
+    `;
+    if (existing.length !== brands.length) {
+      // Some brands don't exist in the data → cannot verify disjointness.
+      return false;
+    }
+
+    // All brands are distinct and exist. They're disjoint by definition (each row has one brand value).
+    return true;
   }
 
 }

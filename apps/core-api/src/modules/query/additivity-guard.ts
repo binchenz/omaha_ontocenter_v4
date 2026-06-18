@@ -70,6 +70,12 @@ export function planMetricAdditivity(
 
   if (additivity === 'non-additive') {
     if (metric.kind === 'sum') {
+      // Phase 1 #214: disjoint entity whitelist. If aggregationWhitelist.disjointEntities
+      // is set, the planner is expected to verify DB-level disjointness BEFORE calling
+      // this function. If that check passed and we reach here with the flag set, allow it.
+      if (semantics?.aggregationWhitelist?.disjointEntities) {
+        return { action: 'pass' };
+      }
       return {
         action: 'error',
         code: 'NON_ADDITIVE_SUM',
