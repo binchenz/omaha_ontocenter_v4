@@ -2,8 +2,8 @@ import { AgentSkill, SkillContext } from './skill.interface';
 
 export class QuerySkill implements AgentSkill {
   name = 'query';
-  description = '查询和聚合数据：根据自然语言查询对象实例，或对它们做计数/求和/平均等聚合。';
-  tools = ['query_objects', 'aggregate_objects', 'get_ontology_schema'];
+  description = '查询和聚合数据：根据自然语言查询对象实例，或对它们做计数/求和/平均等聚合，并在结果适合可视化时生成内联图表。';
+  tools = ['query_objects', 'aggregate_objects', 'get_ontology_schema', 'render_chart'];
 
   systemPrompt(_context: SkillContext): string {
     return `## 查询能力
@@ -37,6 +37,11 @@ export class QuerySkill implements AgentSkill {
 - aggregate_objects 的 groupBy 同样不支持 json/array 字段（PROPERTY_NOT_GROUPABLE），改用 search 后由 Agent 自己整理
 - 过滤的边界要按中文字面严格区分含/不含边界值：
   - "大于/高于/超过 X" → gt（不含 X）；"小于/低于/少于 X" → lt（不含 X）
-  - "至少/不少于/不低于 X"、"X 及以上" → gte（含 X）；"至多/最多/不超过/不多于 X"、"X 及以下" → lte（含 X）`;
+  - "至少/不少于/不低于 X"、"X 及以上" → gte（含 X）；"至多/最多/不超过/不多于 X"、"X 及以下" → lte（含 X）
+
+可视化（render_chart）：
+- 结果适合图表时，先用 query_objects/aggregate_objects 取数，再调 render_chart 渲染内联图表。图表类型选型见 render_chart 工具自身说明。
+- 单个标量值（如"总数是多少"）用 kpi 类型，不用 line/bar；数据超过 500 行不画图，直接给表格。
+- series.data 传聚合后的数据点（不是原始 instances）；render_chart 后补一句文字说明关键发现。`;
   }
 }
