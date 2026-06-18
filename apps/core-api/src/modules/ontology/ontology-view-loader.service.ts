@@ -34,6 +34,31 @@ function parseAdditivity(properties: PropertyDefinition[]): OntologyView['additi
   return map.size > 0 ? map : undefined;
 }
 
+/**
+ * Parse the type-level `semantics` JSONB column (ADR-0061 §2 universe + ADR-0064
+ * §1 timeAxis) onto the view. Tolerant of nulls / partial shapes — an absent or
+ * malformed key simply yields `undefined` (zero prompt weight, like additivity).
+ */
+function parseSemantics(raw: unknown): { universe?: string; timeAxis?: OntologyView['timeAxis'] } {
+  if (!raw || typeof raw !== 'object') return {};
+  const obj = raw as Record<string, unknown>;
+  const out: { universe?: string; timeAxis?: OntologyView['timeAxis'] } = {};
+  if (typeof obj.universe === 'string') out.universe = obj.universe;
+  const ta = obj.timeAxis;
+  if (ta && typeof ta === 'object') {
+    const t = ta as Record<string, unknown>;
+    if (typeof t.field === 'string' && (t.grain === 'month' || t.grain === 'quarter' || t.grain === 'year' || t.grain === 'snapshot') && (t.density === 'dense' || t.density === 'sparse')) {
+      out.timeAxis = {
+        field: t.field,
+        grain: t.grain,
+        density: t.density,
+        ...(typeof t.format === 'string' ? { format: t.format } : {}),
+      };
+    }
+  }
+  return out;
+}
+
 @Injectable({ scope: Scope.REQUEST })
 export class OntologyViewLoader {
   private cache = new Map<string, OntologyView | null>();
@@ -91,6 +116,11 @@ export class OntologyViewLoader {
       dimensions: parseDimensions(ot.dimensions),
       additivity: parseAdditivity(properties),
     };
+
+    // ADR-0061 §2 / ADR-0064 §1: type-level semantics (universe, timeAxis).
+    const semantics = parseSemantics(ot.semantics);
+    if (semantics.universe !== undefined) view.universe = semantics.universe;
+    if (semantics.timeAxis !== undefined) view.timeAxis = semantics.timeAxis;
 
     this.cache.set(key, view);
     return view;

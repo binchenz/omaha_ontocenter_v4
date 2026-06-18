@@ -1,4 +1,5 @@
 import { PaginatedRequest } from './common';
+import type { MeasureCell } from './ontology';
 
 export type FilterOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'in';
 
@@ -46,6 +47,14 @@ export interface ObjectInstanceResult {
   externalId: string;
   label: string | null;
   properties: Record<string, unknown>;
+  /**
+   * ADR-0064 §2: self-describing envelopes for the row's numeric MEASURE fields,
+   * keyed by property name. Rides BESIDE `properties` (which stays numeric and
+   * untouched, so HTTP/web consumers are unaffected); the Agent quotes
+   * `measures[field].display` verbatim instead of re-typesetting the raw float —
+   * the structural guard against BUG-1. Absent when the row carries no measure.
+   */
+  measures?: Record<string, MeasureCell>;
   relationships: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

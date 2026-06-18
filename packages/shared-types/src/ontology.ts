@@ -100,12 +100,69 @@ export interface DimensionConstraints {
 }
 
 /**
+ * ADR-0064 §1: the star's temporal sampling frame, declared once in the ontology.
+ * Structurally isomorphic to `universe` (the sampling frame): `universe` says
+ * *whose* rows a star carries, `timeAxis` says *when*. It pins the DESIGN INTENT —
+ * which field is the series axis, its grain, how to read a value, and whether the
+ * series is meant to be continuous. The ACTUAL periods that exist (which change on
+ * every ingest) are never stored here — those are always probed live (ADR-0064 §3,
+ * the ADR-0043 §2 boundary). Baking coverage in would go stale and re-create BUG-2.
+ */
+export interface TimeAxis {
+  /** Which column is the series axis (e.g. 'month' for market_metric, 'period' for brand_share). */
+  field: string;
+  /** The intended cadence of one step on the axis. */
+  grain: 'month' | 'quarter' | 'year' | 'snapshot';
+  /** How to read a single value, pinned so the LLM never re-interprets it (e.g. 'YY.MM（26.04=2026年4月）'). */
+  format?: string;
+  /**
+   * The EXPECTED shape (design intent, NOT actual coverage): `dense` = a continuous
+   * series the Agent should draw as a line and probe for real periods; `sparse` =
+   * occasional snapshots, not a continuous trend.
+   */
+  density: 'dense' | 'sparse';
+}
+
+/**
  * ADR-0061 §2: ObjectType-level intrinsic semantics, lifted out of skill prose.
  * `universe` is the sampling frame of the star — two stars from different
  * universes must not impersonate each other (a TOP-sample roll-up ≠ official share).
  */
 export interface ObjectTypeSemantics {
   universe?: 'whole-market' | 'top-sample' | string;
+  /** ADR-0064 §1: the star's temporal sampling frame, beside `universe`. */
+  timeAxis?: TimeAxis;
+}
+
+/**
+ * ADR-0064 §2: the self-describing result envelope. `query_objects` /
+ * `aggregate_objects` stop handing the LLM bare floats; every measure value comes
+ * back wrapped so the semantics travel WITH the data (context-and-data co-located),
+ * and — crucially — so the LLM physically never holds the raw float it was
+ * mis-transcribing (BUG-1 structurally disappears).
+ *
+ * Prompt contract (one rule): a reported monetary/measure value MUST be quoted
+ * verbatim from `display`. The LLM may read `raw` for its OWN reasoning (computing
+ * a ratio, comparing magnitudes), but the figure it writes back to the user is
+ * always `display`. It must never re-derive, convert, or re-typeset a number.
+ */
+export interface MeasureCell {
+  /** Server-formatted, business-ready string — the ONLY field the prompt may quote (e.g. "3.90 亿元（39,012.84 万元）"). */
+  display: string;
+  /** The underlying numeric value, preserved for the LLM's own reasoning (never reported verbatim). */
+  raw: number;
+  /** The unit `raw` is expressed in (e.g. '万元', '万台', '元', '%'). Empty for a unitless count. */
+  unit: string;
+  /** The metric this cell measures, when known (e.g. '零售额', '份额'). Carries the alias otherwise. */
+  metric: string;
+  /** ADR-0061 §1: how this measure may be combined — so the caliber rides on the data, not only the prompt. */
+  additivity: Additivity;
+  /** ADR-0061 §2: the sampling universe of the source star, when declared (whole-market vs top-sample). */
+  universe?: string;
+  /** ADR-0064 §1: the source star's time grain, when declared. */
+  grain?: string;
+  /** The period this cell belongs to, when the row is keyed by a time field. */
+  period?: string;
 }
 
 export interface CreateObjectTypeRequest {

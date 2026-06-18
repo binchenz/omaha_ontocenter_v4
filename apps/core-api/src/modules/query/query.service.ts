@@ -17,7 +17,8 @@ import {
 import { OntologyViewLoader } from '../ontology/ontology-view-loader.service';
 import { ProvenanceGate } from './provenance-gate.service';
 import { toInstanceDto } from '../../common/to-instance-dto';
-import type { QueryFilter } from '@omaha/shared-types';
+import type { QueryFilter, MeasureCell } from '@omaha/shared-types';
+import { envelopeAggregateGroup, envelopeQueryRow, type EnvelopeViewSemantics } from './measure-envelope';
 
 interface RawInstanceRow {
   id: string;
@@ -44,6 +45,14 @@ export interface AggregateObjectsRequest {
 export interface AggregationGroup {
   key: Record<string, unknown>;
   metrics: Record<string, number>;
+  /**
+   * ADR-0064 §2: self-describing envelopes for this group's metric values, keyed
+   * by alias (same keys as `metrics`). Rides BESIDE the raw numeric `metrics`
+   * (which stays unchanged so HTTP/web/e2e consumers are unaffected); the Agent
+   * quotes `measures[alias].display` verbatim instead of re-typesetting the raw
+   * float — the structural guard against BUG-1.
+   */
+  measures?: Record<string, MeasureCell>;
 }
 
 export interface AggregationResponse {
@@ -146,6 +155,15 @@ export class QueryService {
     const includes = await this.resolveIncludes(user.tenantId, req.objectType, req.include ?? []);
     const includedByParent = await this.fetchIncludes(user, rows.map((r) => r.externalId), includes);
 
+    // ADR-0064 §2: load the view once so each row's numeric measure fields can be
+    // wrapped in a self-describing envelope beside (not replacing) `properties`.
+    const queryView = await this.viewLoader.load(user.tenantId, req.objectType);
+    const envViewSemantics = toEnvelopeSemantics(queryView);
+    // Measure fields = view-numeric fields that are not a time/dimension key.
+    const measureFields = queryView
+      ? [...queryView.numericFields].filter((f) => !isDimensionField(f))
+      : [];
+
     const data = rows.map((inst) => {
       // toInstanceDto seals the mask-before-select ordering: visibility first,
       // then the caller's select narrows what survived. select cannot unmask.
@@ -160,12 +178,22 @@ export class QueryService {
         relationships[inc.name] = includedByParent[inst.externalId]?.[inc.name] ?? [];
       }
 
+      const measures = measureFields.length > 0
+        ? envelopeQueryRow({
+            objectType: req.objectType,
+            properties: projected,
+            measureFields: measureFields.filter((f) => f in projected),
+            view: envViewSemantics,
+          })
+        : undefined;
+
       return {
         id: inst.id,
         objectType: inst.objectType,
         externalId: inst.externalId,
         label: inst.label,
         properties: projected,
+        ...(measures && { measures }),
         relationships,
         createdAt: inst.createdAt.toISOString(),
         updatedAt: inst.updatedAt.toISOString(),
@@ -270,6 +298,12 @@ export class QueryService {
     const truncated = rows.length > planned.maxGroups;
     const visibleRows = truncated ? rows.slice(0, planned.maxGroups) : rows;
 
+    // ADR-0064 §2: load the view once so each group's metrics can be wrapped in a
+    // self-describing envelope (unit/metric/additivity/universe). Best-effort —
+    // a missing view just yields plain additive cells, never an error.
+    const aggView = await this.viewLoader.load(user.tenantId, req.objectType);
+    const envViewSemantics = toEnvelopeSemantics(aggView);
+
     const groups = visibleRows.map((row) => {
       const key: Record<string, unknown> = {};
       for (const field of planned.groupByFields) {
@@ -280,7 +314,17 @@ export class QueryService {
         const v = row[metric.alias];
         m[metric.alias] = typeof v === 'bigint' ? Number(v) : (v as number);
       }
-      return { key, metrics: m };
+      const measures = envelopeAggregateGroup({
+        objectType: req.objectType,
+        metricSpecs: metrics,
+        metrics: m,
+        filters: req.filters,
+        groupKey: key,
+        view: envViewSemantics,
+      });
+      const group: AggregationGroup = { key, metrics: m };
+      if (Object.keys(measures).length > 0) group.measures = measures;
+      return group;
     });
 
     const nextPageToken = truncated
@@ -411,4 +455,25 @@ export class QueryService {
       error: { code, message: `No AVC report covers the requested scope for '${objectType}'.`, hint: 'This (品类, 周期) was never ingested — distinct from a real zero. Ingest the report or widen the period.' },
     });
   }
+}
+
+/** Fields that are dimension/time keys, never themselves a reportable measure. */
+const DIMENSION_FIELD_NAMES = new Set([
+  'month', 'period', 'year', 'quarter', 'launchDate',
+  'category', 'brand', 'priceBand', 'metric', 'model', 'heating', 'reservation', 'sourceReport',
+]);
+
+/** ADR-0064 §2: a numeric field that is actually a dimension/time key, not a measure. */
+function isDimensionField(field: string): boolean {
+  return DIMENSION_FIELD_NAMES.has(field);
+}
+
+/** Project the loaded OntologyView down to the minimal semantics the envelope reads. */
+function toEnvelopeSemantics(view: { additivity?: EnvelopeViewSemantics['additivity']; universe?: string; timeAxis?: { grain: string } } | null): EnvelopeViewSemantics | undefined {
+  if (!view) return undefined;
+  const out: EnvelopeViewSemantics = {};
+  if (view.additivity) out.additivity = view.additivity;
+  if (view.universe !== undefined) out.universe = view.universe;
+  if (view.timeAxis?.grain !== undefined) out.grain = view.timeAxis.grain;
+  return out;
 }
