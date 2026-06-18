@@ -448,7 +448,8 @@ export class QueryPlannerService {
         let effectiveAdditivityMap = view?.additivity;
         if (m.kind === 'sum' && m.field && view?.additivity) {
           const semantics = view.additivity.get(m.field);
-          if (semantics?.kind === 'non-additive' && (semantics as any).aggregationWhitelist?.disjointEntities) {
+          const whitelist = (semantics as any)?.aggregationWhitelist;
+          if (semantics?.kind === 'non-additive' && whitelist?.disjointEntities === true) {
             // Check if filters contain a disjoint entity condition (e.g. brand IN [小米, 米家]).
             // For now, we only support the 'brand' dimension as the disjoint key.
             const brandFilter = filters?.find(f => f.field === 'brand' && f.operator === 'in' && Array.isArray(f.value));
