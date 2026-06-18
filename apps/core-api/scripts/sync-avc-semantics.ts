@@ -8,6 +8,7 @@
  *   - property-level `additivity` / `ratioOf`     (#189, AdditivityGuard input)
  *   - dimensions.`collapsedDefault`               (#190, folded-dimension hints)
  *   - type-level `semantics.universe`             (#191, sampling-universe hints)
+ *   - type-level `semantics.timeAxis`             (#248/ADR-0064 §1, cadence hints)
  *
  * This one-shot merges those fields from the canonical DEFs (single source of
  * truth in market-metric-importer.service.ts) onto the live rows, by property
@@ -86,10 +87,13 @@ async function main() {
     });
 
     const tagged = mergedProps.filter((p: any) => p.additivity).map((p: any) => `${p.name}=${p.additivity}`);
+    const ta = (mergedSemantics as any)?.timeAxis;
     console.log(
       `  ✅ ${def.name}: additivity[${tagged.join(', ') || '—'}] ` +
         `collapsedDefault=${JSON.stringify((mergedDimensions as any)?.collapsedDefault ?? null)} ` +
-        `universe=${(mergedSemantics as any)?.universe ?? '—'}`,
+        `universe=${(mergedSemantics as any)?.universe ?? '—'} ` +
+        // ADR-0064 §1: the whole def.semantics object is written, so timeAxis rides along.
+        `timeAxis=${ta ? `${ta.field}/${ta.grain}/${ta.density}` : '—'}`,
     );
   }
 

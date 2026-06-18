@@ -12,22 +12,54 @@ export interface RenderableSemantics {
   collapsedDefault?: Record<string, string>;
   /** ADR-0061 §2: sampling universe of the star (e.g. 'top-sample' / 'whole-market'). #191. */
   universe?: string;
+  /** ADR-0064 §1: the star's temporal sampling frame (series axis, grain, density, format). */
+  timeAxis?: TimeAxisHint;
+}
+
+interface TimeAxisHint {
+  field: string;
+  grain: 'month' | 'quarter' | 'year' | 'snapshot';
+  format?: string;
+  density: 'dense' | 'sparse';
 }
 
 /**
  * Collect an ObjectType's renderable semantics from its storage columns
- * (`dimensions.collapsedDefault` + the type-level `semantics.universe`). Keeping
- * the "which JSONB column holds what" knowledge here — beside the renderer that
- * consumes it — means callers don't hand-stitch the input shape, and a new
- * semantics key is added in exactly one place (this fn + RenderableSemantics).
+ * (`dimensions.collapsedDefault` + the type-level `semantics.universe` /
+ * `semantics.timeAxis`). Keeping the "which JSONB column holds what" knowledge
+ * here — beside the renderer that consumes it — means callers don't hand-stitch
+ * the input shape, and a new semantics key is added in exactly one place (this
+ * fn + RenderableSemantics).
  */
 export function toRenderableSemantics(objectType: {
   dimensions?: { collapsedDefault?: Record<string, string> } | null;
-  semantics?: { universe?: string } | null;
+  semantics?: { universe?: string; timeAxis?: unknown } | null;
 }): RenderableSemantics {
   return {
     collapsedDefault: objectType.dimensions?.collapsedDefault,
     universe: objectType.semantics?.universe,
+    // Validate the raw JSONB shape here (mirrors the loader's parseSemantics): an
+    // out-of-enum grain/density yields undefined (zero weight), so a malformed row
+    // can never interpolate `undefined` into a hint line.
+    timeAxis: parseTimeAxisHint(objectType.semantics?.timeAxis),
+  };
+}
+
+const TIME_GRAINS = new Set(['month', 'quarter', 'year', 'snapshot']);
+const TIME_DENSITIES = new Set(['dense', 'sparse']);
+
+/** Validate raw JSONB into a TimeAxisHint, or undefined if the shape is not recognised. */
+function parseTimeAxisHint(raw: unknown): TimeAxisHint | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const t = raw as Record<string, unknown>;
+  if (typeof t.field !== 'string') return undefined;
+  if (typeof t.grain !== 'string' || !TIME_GRAINS.has(t.grain)) return undefined;
+  if (typeof t.density !== 'string' || !TIME_DENSITIES.has(t.density)) return undefined;
+  return {
+    field: t.field,
+    grain: t.grain as TimeAxisHint['grain'],
+    density: t.density as TimeAxisHint['density'],
+    ...(typeof t.format === 'string' ? { format: t.format } : {}),
   };
 }
 
@@ -59,7 +91,41 @@ export function renderSemanticsHints(semantics: RenderableSemantics): string[] {
   // different universes — a TOP-sample SKU roll-up is NOT the official share.
   hints.push(...renderUniverse(semantics.universe));
 
+  // Time axis (ADR-0064 §1): tell the Agent the star's cadence so it stops
+  // GUESSING grain (BUG-2 half 1). Pins the read of a value (format) and — for a
+  // dense series — instructs it to probe THIS star's real periods, never reverse-
+  // infer coverage from a sibling star's report periods.
+  hints.push(...renderTimeAxis(semantics.timeAxis));
+
   return hints;
+}
+
+/** TimeAxis → hint line(s). Absent → nothing (zero prompt weight, like universe). */
+function renderTimeAxis(timeAxis: TimeAxisHint | undefined): string[] {
+  if (!timeAxis) return [];
+  const fmt = timeAxis.format ? `，读法 ${timeAxis.format}` : '';
+  if (timeAxis.density === 'dense') {
+    return [
+      `时间轴 \`${timeAxis.field}\`（${grainLabel(timeAxis.grain)}连续序列${fmt}）：这是一条连续的${grainLabel(timeAxis.grain)}序列。` +
+        `画趋势/算环比前，先用 aggregate 探出本星实际有哪些 ${timeAxis.field}，按探到的期次作图；` +
+        `**绝不要拿别的星（如 brand_share/avc_report 的稀疏年度报告期）反推本星的覆盖或缺失**——各星覆盖独立，不可互推。`,
+    ];
+  }
+  return [
+    `时间轴 \`${timeAxis.field}\`（${grainLabel(timeAxis.grain)}稀疏快照${fmt}）：这是按报告产生的稀疏快照，不是连续序列。` +
+      `不要把它当连续趋势逐期外推，也不要用它的报告期去推断别的星的月度覆盖。`,
+  ];
+}
+
+/** Human label for a grain, used in the hint line. Total — never returns undefined. */
+function grainLabel(grain: TimeAxisHint['grain']): string {
+  switch (grain) {
+    case 'month': return '月度';
+    case 'quarter': return '季度';
+    case 'year': return '年度';
+    case 'snapshot': return '快照';
+    default: return '周期';
+  }
 }
 
 /** Universe → hint line. Unknown / absent values produce nothing (no noise). */

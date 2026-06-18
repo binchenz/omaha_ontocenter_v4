@@ -127,7 +127,13 @@ export const MARKET_METRIC_DEF = {
   // valid coarser period scope (year derived from month in lockstep, ADR-0059), so it need not be
   // rejected DIMENSION_REQUIRED:month and forced into month-exhaustion.
   dimensions: { required: ['category', 'month'], defaults: {}, requiredEquivalents: { month: ['year'] } },
-  semantics: { universe: 'whole-market' as const }, // ADR-0061 §2: 整体市场口径
+  semantics: {
+    universe: 'whole-market' as const, // ADR-0061 §2: 整体市场口径
+    // ADR-0064 §1: a continuous monthly series (21.12→present). DENSE — the Agent
+    // must draw trends as a monthly line and probe THIS star's real periods, never
+    // reverse-infer coverage from brand_share/avc_report's sparse annual snapshots (BUG-2).
+    timeAxis: { field: 'month', grain: 'month' as const, format: 'YY.MM（26.04=2026年4月）', density: 'dense' as const },
+  },
 };
 
 export const MODEL_METRIC_DEF = {
@@ -153,7 +159,13 @@ export const MODEL_METRIC_DEF = {
   derivedProperties: [],
   // model_metric has no stored `year` field, so no month↔year equivalent applies here.
   dimensions: { required: ['category', 'month'], defaults: {} },
-  semantics: { universe: 'top-sample' as const }, // ADR-0061 §2: TOP-100 样本，非全市场
+  semantics: {
+    universe: 'top-sample' as const, // ADR-0061 §2: TOP-100 样本，非全市场
+    // ADR-0064 §1: monthly series too (the TOP-100 panel runs across months). DENSE.
+    // `launchDate` stays an ordinary property — an event date, NOT the series axis;
+    // naming `month` here is what distinguishes a series axis from an event attribute.
+    timeAxis: { field: 'month', grain: 'month' as const, format: 'YY.MM（26.04=2026年4月）', density: 'dense' as const },
+  },
 };
 
 export const AVC_REPORT_DEF = {
@@ -198,5 +210,11 @@ export const BRAND_SHARE_DEF = {
   // (surfaced through the schema so the Agent knows the dimension exists and must be
   // drilled, not reverse-asserted as absent — the dimension-default-blindspot fix).
   dimensions: { required: ['category', 'period'], defaults: { priceBand: '整体' }, collapsedDefault: { priceBand: '整体' } },
-  semantics: { universe: 'whole-market' as const }, // ADR-0061 §2: 整体市场份额（官方口径）
+  semantics: {
+    universe: 'whole-market' as const, // ADR-0061 §2: 整体市场份额（官方口径）
+    // ADR-0064 §1: SPARSE annual snapshots (one `period` per report, ~5 points), NOT a
+    // continuous series. The Agent must not extrapolate it as a monthly trend, nor let
+    // its 5 sparse periods cap market_metric's 53-month coverage (the BUG-2 root cause).
+    timeAxis: { field: 'period', grain: 'snapshot' as const, format: 'YY.MM', density: 'sparse' as const },
+  },
 };

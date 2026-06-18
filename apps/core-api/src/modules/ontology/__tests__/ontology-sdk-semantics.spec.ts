@@ -64,4 +64,21 @@ describe('OntologySdk — folded-dimension semantics in getTypeDetail (ADR-0061)
     expect(joined).toMatch(/TOP|样本|非全市场/);
     expect(joined).toContain('brand_share');
   });
+
+  it('surfaces the monthly-continuous timeAxis cadence for market_metric (ADR-0064 §1)', async () => {
+    const market = {
+      name: 'market_metric', label: '市场指标', description: 'AVC 2-1',
+      properties: [{ name: 'value', type: 'number', label: '数值' }],
+      derivedProperties: [],
+      dimensions: { required: ['category', 'month'], defaults: {} },
+      semantics: { universe: 'whole-market', timeAxis: { field: 'month', grain: 'month', format: 'YY.MM（26.04=2026年4月）', density: 'dense' } },
+    };
+    const sdk = makeSdk([market]);
+    const detail = await sdk.getTypeDetail('t1', 'market_metric');
+    const joined = ((detail.types[0] as any).semanticsHints ?? []).join('\n');
+    // The Agent can read the cadence from the schema without any skill prose.
+    expect(joined).toMatch(/月度连续|连续/);
+    expect(joined).toContain('month');
+    expect(joined).toMatch(/反推|互推|别的星/); // and the cross-star reverse-inference ban
+  });
 });
