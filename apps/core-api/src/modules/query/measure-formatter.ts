@@ -43,8 +43,8 @@ export function formatMeasure(raw: number, hints: MeasureFormatHints = {}): stri
 
   if (!Number.isFinite(raw)) return String(raw);
 
-  // Percentage (share): the stored value is already in percent magnitude (6.42 → 6.42%).
-  if (unit === '%') return `${groupDigits(raw, 2)}%`;
+  // Percentage (share): stored as a decimal (0.2742 → "27.42%"), so multiply by 100.
+  if (unit === '%') return `${groupDigits(raw * 100, 2)}%`;
 
   // A 万-prefixed unit (万元/万台): roll to the 亿 form once |value| ≥ 1亿 (10000万),
   // keeping the original 万 figure in parens. This is the headline BUG-1 fix.

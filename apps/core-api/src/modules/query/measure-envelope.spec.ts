@@ -132,13 +132,13 @@ describe('envelopeQueryRow', () => {
   it('wraps a brand_share row value as a % non-additive cell with its period', () => {
     const measures = envelopeQueryRow({
       objectType: 'brand_share',
-      properties: { brand: '小米', priceBand: '整体', period: '26.04', metric: 'share', value: 9.79 },
+      properties: { brand: '小米', priceBand: '整体', period: '26.04', metric: 'share', value: 0.0979 },
       measureFields: ['value'],
       view: brandShareView,
     });
     expect(measures!.value).toEqual({
       display: '9.79%',
-      raw: 9.79,
+      raw: 0.0979,
       unit: '%',
       metric: 'share',
       additivity: 'non-additive',

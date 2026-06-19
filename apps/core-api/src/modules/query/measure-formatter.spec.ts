@@ -35,9 +35,19 @@ describe('MeasureFormatter — formatMeasure (ADR-0064)', () => {
   });
 
   describe('share as percent', () => {
-    it('formats a share value with a percent sign and two decimals', () => {
-      expect(formatMeasure(6.42, { unit: '%' })).toBe('6.42%');
-      expect(formatMeasure(0.018, { unit: '%' })).toBe('0.02%');
+    it('converts a decimal share to percent (0.2742 → "27.42%")', () => {
+      // The UAT bug: 苏泊尔 27% stored as 0.27 was displayed as "0.27%" — this proves the fix.
+      expect(formatMeasure(0.2742, { unit: '%' })).toBe('27.42%');
+      expect(formatMeasure(0.4689, { unit: '%' })).toBe('46.89%');
+    });
+
+    it('handles small shares correctly (0.018 → "1.80%")', () => {
+      expect(formatMeasure(0.018, { unit: '%' })).toBe('1.80%');
+      expect(formatMeasure(0.0005, { unit: '%' })).toBe('0.05%');
+    });
+
+    it('handles whole-number decimals (1.0 → "100.00%")', () => {
+      expect(formatMeasure(1.0, { unit: '%' })).toBe('100.00%');
     });
   });
 
@@ -61,7 +71,7 @@ describe('MeasureFormatter — formatMeasure (ADR-0064)', () => {
   describe('edge cases', () => {
     it('formats negative magnitudes sign-safely', () => {
       expect(formatMeasure(-39012.84, { unit: '万元' })).toBe('-3.90 亿元（-39,012.84 万元）');
-      expect(formatMeasure(-6.42, { unit: '%' })).toBe('-6.42%');
+      expect(formatMeasure(-0.0642, { unit: '%' })).toBe('-6.42%');
     });
 
     it('passes a non-finite value through rather than printing NaN math', () => {
@@ -112,8 +122,9 @@ describe('MeasureFormatter — toMeasureCell envelope', () => {
   });
 
   it('carries a non-additive caliber for a share metric', () => {
-    const cell = toMeasureCell(6.42, { unit: '%', metric: '份额', additivity: 'non-additive' });
+    const cell = toMeasureCell(0.2742, { unit: '%', metric: '份额', additivity: 'non-additive' });
     expect(cell.additivity).toBe('non-additive');
-    expect(cell.display).toBe('6.42%');
+    expect(cell.display).toBe('27.42%');
+    expect(cell.raw).toBe(0.2742); // raw stays decimal for LLM reasoning
   });
 });
