@@ -26,6 +26,8 @@ export class ResearchQaSkill implements AgentSkill {
 7. **钻取前查 coverage**：任何机型层（model_metric，即③④跳）钻取，第一步必先 query avc_report 取 coverage，essence 周期没有机型层、绝不凭空生成 SKU。
 8. **断言"无数据"前先探覆盖（铁律·ADR-0064，治 BUG-2）**：要说某星某期/某段"无数据/无趋势/数据只到某月"前，**必先调 probe_coverage(objectType=该星, filters=目标范围)** 探出它真实有哪些期次，按返回的 values/min/max 作答；探到就有、探不到才叫无。**每颗星探它自己**——查 market_metric 月度覆盖就探 market_metric，**绝不**拿 brand_share/avc_report 的稀疏报告期反推 market_metric 缺哪些月。画月度趋势同理：先 probe_coverage(market_metric) 拿到连续月份，再按这些月份 aggregate + 画线。
 9. **金额原样引用 display（铁律·ADR-0064）**：query_objects / aggregate_objects 的结果里，每个度量值都带一个 \`measures[别名].display\`（如 "3.90 亿元（39,012.84 万元）"），那是服务端已格式化好的最终写法。报数时**只准原样照抄 display 字符串，严禁自行换算、改单位、重排或省略数字**。\`raw\` 仅供你自己推理（算比值/比大小）用，**绝不直接报给用户**。无 display 时（如纯计数）才用 metrics 里的数。
+10. **多品牌合计走单次 brand IN 查询**：要一个集团/母品牌旗下多个品牌的**合计份额**（如把「小米」和「米家」并成一个口径、或用户以第一人称问「我们的份额」而身份提示说本租户对应多个品牌），用**一次** aggregate_objects(brand_share, filters=[brand IN [小米,米家], priceBand=整体], sum(value))——引擎对**不相交品牌**的 share 求和已放行（#214 disjointEntities 白名单，会先校验这些品牌在数据里互不重叠）。**绝不分成两次单品牌查询再自己把两个 share 相加**（那样会被加性护栏拒 NON_ADDITIVE_SUM，且白烧一轮预算）。brand IN 里必须用**数据里真实存在的品牌串**（身份提示已给出，如 小米/米家），写错或写不存在的名字会导致校验失败被拒。
+11. **缺维度也要给带口径结论，不得罗列缺口反问（治软预算 punt）**：当某维度/某段/某品类数据缺失或未导入、或已触及查询预算时，**基于已查到的数据给出带明确口径与不确定性标注的推荐结论**（如"在已覆盖的 X/Y 品类中，Z 段份额最高，建议优先；W 品类该维度数据未查询，结论待补"）。**严禁只列一张"数据缺口清单"然后反问用户"是否需要我继续深挖/是否继续"把任务推回去**——先给答案，缺口在答案里如实标注即可。（注意：这条**不**针对四跳链 ③④ 跳那个**主动**的"是否继续钻取该价格段机型？"确认——那是刻意设计的停-确认，见下方四跳范式；本条只治"因缺数据而半截 punt"。）
 
 ### ⚠️ 常见错误（这些都白烧 token 且会算错）
 
@@ -33,6 +35,8 @@ export class ResearchQaSkill implements AgentSkill {
 - ❌ 对各价格段的 share 自己 SUM/相加 → ✅ filter priceBand=整体 一次查询
 - ❌ TOP-100 抽样里某段没 SKU 就断言"该段真空" → ✅ 回看 brand_share 该段实测份额
 - ❌ 对多个月的"零售均价"行求平均 → ✅ 额合计 ÷ 量合计（销量加权）
+- ❌ 把同集团多品牌分两次查 share 再自己相加 → ✅ 一次 aggregate(brand IN [小米,米家], priceBand=整体, sum)（#214 已放行不相交品牌求和）
+- ❌ 缺某维度/某品类数据就列缺口清单反问"是否需要继续深挖" → ✅ 用已查到的数据给带口径推荐结论，缺口在答复里如实标注
 - ❌ ③④ 跳跨星参数不确认就一口气走完 → ✅ ①② 后停下来向用户确认价格段/窗口参数
 
 ### AVC 报告导入
@@ -58,7 +62,7 @@ export class ResearchQaSkill implements AgentSkill {
 - **零售额**（销额/GMV/卖了多少钱/销售额）→ market_metric，万元，可加
 - **零售量**（销量/卖了多少台/销售量）→ market_metric，万台，可加
 - **零售均价**（均价/平均价格/单价/客单价）→ market_metric，元，**比率**：单期（固定到某月）可直接取；**跨期不可简单平均**——query_metric 跨期会被拒（RATIO_SCOPE_UNPINNED），必须自己按 Σ额÷Σ量 两步法（销量加权），绝不接受跨期 AVG 结果直接作答
-- **份额**（市场份额/占比/市占率/市占）→ brand_share，%，**不可加**：取单品牌份额须指定 brand（否则 query_metric 拒 NON_ADDITIVE_SCOPE_UNPINNED）；看排名用 intent=rank+rankBy=brand；绝不对各段/各品牌 share 求和或取 max 当总数
+- **份额**（市场份额/占比/市占率/市占）→ brand_share，%，**不可加**：取单品牌份额须指定 brand（否则 query_metric 拒 NON_ADDITIVE_SCOPE_UNPINNED）；看排名用 intent=rank+rankBy=brand；绝不对各段的 share 求和或取 max 当总数。**唯一例外——同集团多品牌合并**：要几个不相交品牌的合计份额（如 小米+米家），用一次 aggregate(brand_share, filter brand IN [小米,米家] 且 priceBand=整体, sum(value))，引擎已放行不相交品牌的 share 求和（#214），绝不分两次查再自己相加。
 目录外指标才退回 aggregate_objects 自由组合。
 
 **事实查询（单星直答）**：用户问"X 是多少 / 趋势 / 排名 / TOP N"等单一指标，直接走对应单星的一次查询作答，不发散到其他星：

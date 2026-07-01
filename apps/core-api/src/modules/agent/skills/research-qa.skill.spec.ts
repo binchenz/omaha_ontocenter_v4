@@ -100,4 +100,30 @@ describe('ResearchQaSkill', () => {
     expect(prompt).toMatch(/份额低|低份额/); // the allowed wording for a >0 weak band
   });
 
+  it('teaches the guard-safe cross-brand merge: ONE brand-IN aggregate, never two summed queries (#214 disjointEntities)', () => {
+    // The identity injection tells the Agent to merge a tenant's sibling brands (小米+米家) into
+    // one caliber. The additivity guard forbids naive SUM(share), but the #214 disjointEntities
+    // whitelist DOES allow a single aggregate whose filter pins ≥2 disjoint brands via `brand IN [...]`.
+    // Without this the Agent runs 2 queries/category and manually adds → NON_ADDITIVE_SUM / punt.
+    const prompt = skill.systemPrompt({ tenantId: 't1' });
+    // names the escape hatch: a single brand IN aggregate is the way to merge sibling brands
+    expect(prompt).toMatch(/brand\s*IN/i);
+    // and forbids the two-queries-then-add anti-pattern
+    expect(prompt).toMatch(/(两次|分两次|各查一次|逐个)[^。]*(相加|求和|加总)|(相加|求和|加总)[^。]*(两次|分两次)/);
+  });
+
+  it('forbids the data-gap punt: give a caveated conclusion, do not list gaps and ask "继续深挖" (BUG-B)', () => {
+    // S6/S7 and the 2026-07-01 strategic question punted: instead of a caveated recommendation from
+    // the data gathered, the Agent listed a "数据缺口清单" and asked the user "是否需要我继续深挖".
+    // The skill must forbid that punt AND scope the rule so it does NOT collide with the sanctioned
+    // #195 mid-drill "是否继续钻取" confirmation (which is a deliberate stop, not a data-gap punt).
+    const prompt = skill.systemPrompt({ tenantId: 't1' });
+    // demands a caveated best-effort conclusion when a dimension/category is missing
+    expect(prompt).toMatch(/(缺.*维度|数据缺失|未导入|缺口)[^。]*(结论|推荐|带口径|如实标注)/);
+    // forbids the "list gaps + ask to continue" punt
+    expect(prompt).toMatch(/(缺口清单|数据缺口)[^。]*(反问|是否需要|是否继续|推回)|反问[^。]*(是否需要我继续深挖|是否继续)/);
+    // explicitly carves out the sanctioned drill-gate confirmation so the two rules don't fight
+    expect(prompt).toMatch(/是否继续钻取/);
+  });
+
 });
