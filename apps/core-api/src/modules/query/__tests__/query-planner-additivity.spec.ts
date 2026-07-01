@@ -65,8 +65,8 @@ describe('QueryPlannerService — additivity guard (ADR-0061)', () => {
       allowedFields: null,
     });
     // weighted: SUM(amount)/NULLIF(SUM(qty),0)
-    expect(res.sql).toMatch(/SUM\(\(properties->>'amount'\)::numeric\)\s*\/\s*NULLIF\(SUM\(\(properties->>'qty'\)::numeric\),\s*0\)\s+AS\s+"wprice"/);
-    expect(res.sql).not.toMatch(/AVG\(\(properties->>'avgPrice'\)/);
+    expect(res.sql).toMatch(/SUM\(\(base\.properties->>'amount'\)::numeric\)\s*\/\s*NULLIF\(SUM\(\(base\.properties->>'qty'\)::numeric\),\s*0\)\s+AS\s+"wprice"/);
+    expect(res.sql).not.toMatch(/AVG\(\(base\.properties->>'avgPrice'\)/);
   });
 
   it('rejects AVG of a ratio field without weight columns (RATIO_AVG_UNWEIGHTABLE)', async () => {
@@ -91,7 +91,7 @@ describe('QueryPlannerService — additivity guard (ADR-0061)', () => {
       metrics: [{ kind: 'sum', field: 'value', alias: 'total' }],
       allowedFields: null,
     });
-    expect(res.sql).toMatch(/SUM\(\(properties->>'value'\)::numeric\)\s+AS\s+"total"/);
+    expect(res.sql).toMatch(/SUM\(\(base\.properties->>'value'\)::numeric\)\s+AS\s+"total"/);
   });
 
   it('passes when the view carries no additivity map (non-AVC types unaffected)', async () => {
@@ -102,6 +102,6 @@ describe('QueryPlannerService — additivity guard (ADR-0061)', () => {
       metrics: [{ kind: 'sum', field: 'value', alias: 'total' }],
       allowedFields: null,
     });
-    expect(res.sql).toMatch(/SUM\(\(properties->>'value'\)::numeric\)\s+AS\s+"total"/);
+    expect(res.sql).toMatch(/SUM\(\(base\.properties->>'value'\)::numeric\)\s+AS\s+"total"/);
   });
 });
