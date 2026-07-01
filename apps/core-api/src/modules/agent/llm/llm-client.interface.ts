@@ -16,6 +16,17 @@ export interface LlmOptions {
   thinking?: { type: 'enabled' | 'disabled' };
   /** Thinking effort level when thinking is enabled. */
   reasoningEffort?: 'high' | 'max';
+  /**
+   * Per-call timeout override in ms. When set, wins over the client-level
+   * default and the thinking/non-thinking derivation (see ResilientLlmClient).
+   */
+  timeoutMs?: number;
+  /**
+   * Abort signal threaded into the underlying fetch. ResilientLlmClient composes
+   * this with its own per-attempt deadline controller, so a caller-side abort
+   * (e.g. SSE client disconnect) AND the deadline both cancel the in-flight call.
+   */
+  signal?: AbortSignal;
 }
 
 export interface ToolDefinition {

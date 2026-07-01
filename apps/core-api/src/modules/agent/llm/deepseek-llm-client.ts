@@ -80,6 +80,10 @@ export class DeepSeekLlmClient implements LlmClient {
           'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
         },
         body: JSON.stringify(body),
+        // Threaded from ResilientLlmClient's per-attempt deadline controller (and any
+        // caller signal). When the deadline fires the fetch is actually cancelled,
+        // instead of being abandoned while still billing tokens upstream (Layer A).
+        signal: options?.signal,
       });
     } catch (err) {
       // Network-level failure (fetch failed / abort): capture the request that

@@ -199,6 +199,33 @@ describe('DeepSeekLlmClient V4 migration (#135)', () => {
     });
   });
 
+  describe('abort signal (#Layer-A)', () => {
+    it('threads options.signal into the fetch call', async () => {
+      mockFetch.mockResolvedValue(mockResponse({
+        choices: [{ message: { content: 'Done' } }],
+        usage: { prompt_tokens: 10 },
+      }));
+      const controller = new AbortController();
+
+      await client.chat([{ role: 'user', content: 'Q' }], { signal: controller.signal });
+
+      const fetchOptions = mockFetch.mock.calls[0][1];
+      expect(fetchOptions.signal).toBe(controller.signal);
+    });
+
+    it('omits signal when none is provided', async () => {
+      mockFetch.mockResolvedValue(mockResponse({
+        choices: [{ message: { content: 'Done' } }],
+        usage: { prompt_tokens: 10 },
+      }));
+
+      await client.chat([{ role: 'user', content: 'Q' }]);
+
+      const fetchOptions = mockFetch.mock.calls[0][1];
+      expect(fetchOptions.signal).toBeUndefined();
+    });
+  });
+
   describe('strict tool definitions', () => {
     it('passes strict flag on tool definitions to API', async () => {
       mockFetch.mockResolvedValue(mockResponse({
