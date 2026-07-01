@@ -119,6 +119,35 @@ describe('OrchestratorService', () => {
     });
   });
 
+  // ADR-0024 amendment (2026-07-01) — the system_prompt debug event now carries tenant-identity
+  // injection (selfBrands) + full skill-orchestration discipline (internal IP), so it is gated
+  // behind EXPOSE_SYSTEM_PROMPT and defaults OFF in prod. The flag is read at construction time.
+  // The suite's jest-setup sets EXPOSE_SYSTEM_PROMPT=1 so the other tests still exercise the emit;
+  // here we prove BOTH states explicitly by toggling the env and constructing fresh instances.
+  describe('system_prompt exposure gate (ADR-0024 / EXPOSE_SYSTEM_PROMPT)', () => {
+    const prev = process.env.EXPOSE_SYSTEM_PROMPT;
+    afterEach(() => { process.env.EXPOSE_SYSTEM_PROMPT = prev; });
+
+    it('does NOT emit system_prompt when the flag is unset (prod default)', async () => {
+      delete process.env.EXPOSE_SYSTEM_PROMPT;
+      const gated = new OrchestratorService(llm, [mockTool], [mockSkill]);
+      llm.responses = [{ type: 'text', content: 'ok' }];
+      const events = await collect(gated.run({ user, message: 'hi' }));
+      expect(events.find(e => e.type === 'system_prompt')).toBeUndefined();
+      // the rest of the stream is unaffected — the model still answers
+      expect(events.find(e => e.type === 'text')?.content).toBe('ok');
+      expect(events.find(e => e.type === 'done')).toBeTruthy();
+    });
+
+    it('emits system_prompt when EXPOSE_SYSTEM_PROMPT=1 (dev/debug opt-in)', async () => {
+      process.env.EXPOSE_SYSTEM_PROMPT = '1';
+      const exposed = new OrchestratorService(llm, [mockTool], [mockSkill]);
+      llm.responses = [{ type: 'text', content: 'ok' }];
+      const events = await collect(exposed.run({ user, message: 'hi' }));
+      expect(events.find(e => e.type === 'system_prompt')).toBeTruthy();
+    });
+  });
+
   it('executes tool call and continues loop', async () => {
     llm.responses = [
       { type: 'tool_calls', calls: [{ id: 'tc1', name: 'test_tool', arguments: { x: 1 } }] },

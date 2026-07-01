@@ -56,6 +56,15 @@ export interface DrillGate { broadLayer: ReadonlySet<string>; drillTarget: strin
 export class OrchestratorService {
   private readonly logger = new Logger(OrchestratorService.name);
 
+  // ADR-0024 (amended 2026-07-01) — the assembled system prompt now carries tenant-identity
+  // injection (selfBrands) + full skill-orchestration discipline (internal IP), not just the
+  // customer's own schema. The original decision pre-registered exactly this escape hatch, so
+  // the `system_prompt` debug event is now OFF by default and opt-in via EXPOSE_SYSTEM_PROMPT
+  // (mirrors LLM_DEBUG). Read at point-of-use so specs can construct the service without a
+  // ConfigService dep; the core-api jest setup sets it to '1' so prompt-assertion specs still run.
+  private readonly exposeSystemPrompt =
+    process.env.EXPOSE_SYSTEM_PROMPT === '1' || process.env.EXPOSE_SYSTEM_PROMPT === 'true';
+
   constructor(
     private readonly llm: LlmClient,
     private readonly tools: AgentTool[],
@@ -100,8 +109,11 @@ export class OrchestratorService {
     this.checkPromptBudget(systemPrompt, input.conversationId);
 
     // Surface the assembled system prompt (incl. schema summary / semantic-layer
-    // info) to the client for debugging. See ADR-0024.
-    yield { type: 'system_prompt', content: systemPrompt };
+    // info) to the client for debugging. See ADR-0024. Gated OFF by default now that
+    // the prompt carries identity injection + orchestration IP; opt in with EXPOSE_SYSTEM_PROMPT.
+    if (this.exposeSystemPrompt) {
+      yield { type: 'system_prompt', content: systemPrompt };
+    }
 
     const messages: LlmMessage[] = [
       { role: 'system', content: systemPrompt },

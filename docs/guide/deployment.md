@@ -70,6 +70,10 @@ JWT_SECRET=<openssl rand -hex 32>
 CONNECTOR_ENCRYPTION_KEY=<openssl rand -hex 16>
 ```
 
+**调试开关（可选，默认关闭）：**
+- `LLM_DEBUG=1` — 把每轮完整 messages + tools + 原始响应落盘到 `.llm-debug/*.json`（事后逐字分析）。
+- `EXPOSE_SYSTEM_PROMPT=1` — 把拼好的 system prompt 通过 SSE 推给前端 chat「提示词」标签页（实时看喂给 LLM 的上下文）。**生产默认关闭**：该提示词含租户身份注入与内部编排纪律，不应对每个登录用户外泄（见 ADR-0024 修订）。仅联调时开启。
+
 ### 4. 初始化数据库
 
 ```bash
