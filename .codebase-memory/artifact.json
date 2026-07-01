@@ -1,0 +1,11 @@
+{
+    "schema_version": 1,
+    "commit": "e3817b74dad4ae35b0d1e453f78275d88132cd02",
+    "indexed_at": "2026-07-01T20:08:11Z",
+    "project": "Users-wangfushuaiqi-omaha_ontocenter_v4",
+    "nodes": 5255,
+    "edges": 13138,
+    "original_size": 16646144,
+    "compressed_size": 3179112,
+    "compression_level": 3
+}

@@ -146,9 +146,15 @@ describe('Ontology Harness - First Three Validation Scenarios', () => {
 
         if (extractedValue === null) {
           // Fallback to text parsing if SSE extraction fails
-          // Look for number patterns in markdown table or prose (avoid matching years)
-          const numMatch = agentResponse.match(/(?:零售额.*?[:：]\s*)?(\d{1,3}(?:,\d{3})*(?:\.\d+)?)/);
-          extractedValue = numMatch ? parseFloat(numMatch[1].replace(/,/g, '')) : null;
+          // Strategy: find "零售额" keyword, then extract the next number (handles comma-formatted numbers)
+          const salesMatch = agentResponse.match(/零售额[^0-9]*?(\d{1,3}(?:,\d{3})*(?:\.\d+)?)/);
+          if (salesMatch) {
+            extractedValue = parseFloat(salesMatch[1].replace(/,/g, ''));
+          } else {
+            // Last resort: any number with comma formatting or decimal (but skip 4-digit years)
+            const numMatch = agentResponse.match(/(?:^|[^0-9])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+)(?:[^0-9]|$)/);
+            extractedValue = numMatch ? parseFloat(numMatch[1].replace(/,/g, '')) : null;
+          }
         }
 
         // 6. Verdict
