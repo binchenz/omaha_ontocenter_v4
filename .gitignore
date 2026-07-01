@@ -15,3 +15,7 @@ scripts/test-results/
 .esdata/
 apps/core-api/reports/
 .backups/
+.scratch/
+apps/core-api/.scratch/
+.out-of-scope/
+.prisma-studio.pid
