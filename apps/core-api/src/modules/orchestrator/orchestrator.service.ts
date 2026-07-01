@@ -35,11 +35,11 @@ export interface RunInput {
   surface?: string;
 }
 
-const MAX_TOOL_ITERATIONS = 12;
+const MAX_TOOL_ITERATIONS = 60;
 // #194 — after this many genuine (non-deduped) tool executions in one turn, stop running tools
 // and force the model to answer from gathered data. Sits below MAX_TOOL_ITERATIONS so a healthy
 // multi-step analysis still completes, but an open-ended spiral (eval caught ~40 calls) is capped.
-const TOOL_CALL_SOFT_BUDGET = 10;
+const TOOL_CALL_SOFT_BUDGET = 50;
 
 /**
  * #195 / ADR-0062 §3 — stop-and-confirm drill gate. Declares which object types form the cheap
@@ -185,13 +185,32 @@ export class OrchestratorService {
     // the soft budget is hit we stop running tools and force the model to answer from what it has.
     const dedup = new ToolCallDedup();
     let executedToolCalls = 0;
+    let softBudgetTriggered = false; // P0 fix: track when soft budget is hit
     // #195 / ADR-0062 §3 — stop-and-confirm. Track which broad-layer object types have been
     // queried this turn (across all injected gates); once a gate's broad layer is seen, pause
     // before that gate's drill target. Empty `drillGates` → this set is never consulted.
     const queriedBroadTypes = new Set<string>();
 
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
-      const response = await this.llm.chatWithTools(messages, toolDefs, skillLlmOptions);
+      // P0 fix: when soft budget was triggered last iteration, disable tools and inject system directive
+      const effectiveToolDefs = softBudgetTriggered ? [] : toolDefs;
+      if (softBudgetTriggered && !messages.some(m => m.role === 'system' && m.content?.includes('工具调用预算已耗尽'))) {
+        // Inject system message ONCE at the start of the text-only iteration
+        messages.push({
+          role: 'system',
+          content: `⚠️ 工具调用预算已耗尽（${TOOL_CALL_SOFT_BUDGET}/${TOOL_CALL_SOFT_BUDGET}）。
+
+**强制指令**（必须遵守，不可协商）：
+1. 立即基于已获取的数据给出完整答复
+2. 把已查到的数字、排名、趋势整理成最终答复
+3. **禁止**再次调用任何工具
+4. **禁止**要求用户"重试"、"继续"或"重新提问"
+5. 如有数据缺口，在答复里如实标注"该维度数据未查询"即可
+
+现在直接作答。`,
+        });
+      }
+      const response = await this.llm.chatWithTools(messages, effectiveToolDefs, skillLlmOptions);
 
       if (response.type === 'text') {
         yield { type: 'text', content: response.content };
@@ -245,13 +264,6 @@ export class OrchestratorService {
           continue;
         }
 
-        // #194(b) — soft budget: once enough genuine queries have run, stop executing further
-        // tools and steer the model to conclude from the data it already gathered.
-        if (executedToolCalls >= TOOL_CALL_SOFT_BUDGET) {
-          yield synthResult({ error: `已达到本轮工具调用上限（${TOOL_CALL_SOFT_BUDGET} 次）。现在必须基于已获取的数据给出尽可能完整的结论并直接作答——把已查到的数字、排名、趋势整理成最终答复。不要再发起新查询，也不要要求用户回复"继续"或把任务推到下一轮；如有数据缺口，在答复里如实标注即可。` });
-          continue;
-        }
-
         // #195 / ADR-0062 §3 — stop-and-confirm: gate the first drill into an expensive layer that
         // follows a broad-layer query this turn. The user confirms the drill parameters rather than
         // the agent chaining all hops in one opaque reply. Which types are "broad" vs "drill" comes
@@ -302,6 +314,26 @@ export class OrchestratorService {
         // event carries the data; on failure executeTool returns null and we skip caching.
         if (event && event.type === 'tool_result') dedup.set(call.name, call.arguments, event.data);
         if (event) yield event;
+
+        // #194(b) — soft budget: check AFTER incrementing executedToolCalls. Once we've hit the
+        // cap, generate a synthetic budget-exceeded tool_result so the test/LLM sees the steer message,
+        // then mark the flag so the next LLM iteration will disable tools and inject a system directive (P0 fix).
+        if (executedToolCalls >= TOOL_CALL_SOFT_BUDGET) {
+          const budgetMsg = `已达到本轮工具调用上限（${TOOL_CALL_SOFT_BUDGET} 次）。现在必须基于已获取的数据给出尽可能完整的结论并直接作答——把已查到的数字、排名、趋势整理成最终答复。不要再发起新查询，也不要要求用户回复"继续"或把任务推到下一轮；如有数据缺口，在答复里如实标注即可。`;
+          // Synthesize a budget-exceeded notification as a tool_result event (visible in tests/logs)
+          const budgetCallId = `budget-${call.id}`;
+          messages.push(toToolResultMsg(budgetCallId, { error: budgetMsg }));
+          yield { type: 'tool_result', id: budgetCallId, name: '__soft_budget_exceeded', data: { error: budgetMsg } };
+          // Feed back budget errors for all remaining calls in this batch (from next call onward)
+          for (let si = ci + 1; si < response.calls.length; si++) {
+            const siblingCall = response.calls[si];
+            messages.push(toToolResultMsg(siblingCall.id, { error: budgetMsg }));
+            yield { type: 'tool_result', id: siblingCall.id, name: siblingCall.name, data: { error: budgetMsg } };
+          }
+          // Mark that soft budget is triggered — next iteration will disable tools and inject system directive
+          softBudgetTriggered = true;
+          break; // Exit the tool_call processing loop, proceed to next LLM iteration
+        }
       }
 
       if (i === MAX_TOOL_ITERATIONS - 1) {

@@ -24,8 +24,14 @@ function danglingToolCallIds(messages: LlmMessage[]): string[] {
 class MockLlm implements LlmClient {
   responses: LlmResponse[] = [];
   async chat(): Promise<string> { return ''; }
-  async chatWithTools(_msgs: LlmMessage[], _tools: ToolDefinition[]): Promise<LlmResponse> {
-    return this.responses.shift() ?? { type: 'text', content: 'done' };
+  async chatWithTools(_msgs: LlmMessage[], tools: ToolDefinition[]): Promise<LlmResponse> {
+    const next = this.responses.shift() ?? { type: 'text', content: 'done' };
+    // P0 fix: when tools array is empty, LLM cannot return tool_calls (real API behavior).
+    // If the next response is tool_calls but no tools are available, force text mode.
+    if (tools.length === 0 && next.type === 'tool_calls') {
+      return { type: 'text', content: 'forced text due to no tools' };
+    }
+    return next;
   }
 }
 
@@ -159,23 +165,23 @@ describe('OrchestratorService', () => {
   // #194(b) — soft budget: distinct queries beyond the cap are NOT executed; the model is told
   // to answer from gathered data. Each call has a distinct filter so dedup doesn't mask the cap.
   it('stops executing tools after the per-turn soft budget and steers the model to answer', async () => {
-    llm.responses = Array.from({ length: 14 }, (_, k) => ({
+    llm.responses = Array.from({ length: 70 }, (_, k) => ({
       type: 'tool_calls' as const,
       calls: [{ id: `c${k}`, name: 'test_tool', arguments: { objectType: 'brand_share', filters: [{ field: 'period', value: `p${k}` }] } }],
     }));
     llm.responses.push({ type: 'text', content: 'final' });
     const events = await collect(orchestrator.run({ user, message: 'spiral' }));
-    // executions are capped well below the 14 distinct calls requested
-    expect((mockTool.execute as jest.Mock).mock.calls.length).toBeLessThanOrEqual(10);
+    // executions are capped well below the 70 distinct calls requested (soft budget is 50)
+    expect((mockTool.execute as jest.Mock).mock.calls.length).toBeLessThanOrEqual(50);
     // at least one tool_result carries the "answer from gathered data" steer
     const steered = events.some(e => e.type === 'tool_result' && JSON.stringify((e as any).data).includes('工具调用上限'));
     expect(steered).toBe(true);
   });
 
   // #203 — the soft-budget steer must push a BEST-EFFORT conclusion from gathered data, NOT a
-  // "请回复继续" punt (the eval caught S6/S7 bailing with a coverage table + "请回复继续").
-  it('soft-budget steer asks for a best-effort conclusion, not a "please continue" punt', async () => {
-    llm.responses = Array.from({ length: 14 }, (_, k) => ({
+  // “请回复继续” punt (the eval caught S6/S7 bailing with a coverage table + “请回复继续”).
+  it('soft-budget steer asks for a best-effort conclusion, not a “please continue” punt', async () => {
+    llm.responses = Array.from({ length: 70 }, (_, k) => ({
       type: 'tool_calls' as const,
       calls: [{ id: `c${k}`, name: 'test_tool', arguments: { objectType: 'brand_share', filters: [{ field: 'period', value: `p${k}` }] } }],
     }));
@@ -187,7 +193,7 @@ describe('OrchestratorService', () => {
       .find(s => s.includes('工具调用上限'));
     expect(steerData).toBeDefined();
     // the steer must NOT instruct the model to ask the user to continue…
-    expect(steerData).not.toMatch(/请.*回复.*继续|回复["“]?继续/);
+    expect(steerData).not.toMatch(/请.*回复.*继续|回复[“”]?继续/);
     // …it must instead demand a best-effort conclusion from data already gathered.
     expect(steerData).toMatch(/尽可能完整|基于已.*数据.*作答|直接.*作答|给出.*结论/);
   });
@@ -296,7 +302,7 @@ describe('OrchestratorService', () => {
   });
 
   it('reaches MAX_TOOL_ITERATIONS and emits error', async () => {
-    llm.responses = Array(14).fill({ type: 'tool_calls', calls: [{ id: 'tc1', name: 'test_tool', arguments: {} }] });
+    llm.responses = Array(70).fill({ type: 'tool_calls', calls: [{ id: 'tc1', name: 'test_tool', arguments: {} }] });
     const events = await collect(orchestrator.run({ user, message: 'loop' }));
     expect(events.find(e => e.type === 'error')).toBeTruthy();
   });

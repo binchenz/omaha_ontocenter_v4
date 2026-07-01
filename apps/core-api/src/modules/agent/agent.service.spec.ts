@@ -141,7 +141,7 @@ describe('OrchestratorService', () => {
   });
 
   it('terminates with error after max tool iterations', async () => {
-    for (let i = 0; i < 13; i++) {
+    for (let i = 0; i < 70; i++) {
       llm.queueResponse({
         type: 'tool_calls',
         calls: [{ id: `call_${i}`, name: 'query_objects', arguments: { objectType: 'customer' } }],
@@ -157,7 +157,7 @@ describe('OrchestratorService', () => {
     }
 
     const toolCalls = events.filter(e => e.type === 'tool_call');
-    expect(toolCalls.length).toBeLessThanOrEqual(12);
+    expect(toolCalls.length).toBeLessThanOrEqual(60);
 
     const errorEvent = events.find(e => e.type === 'error');
     expect(errorEvent).toBeDefined();
