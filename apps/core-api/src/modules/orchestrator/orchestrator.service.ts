@@ -41,17 +41,6 @@ const MAX_TOOL_ITERATIONS = 60;
 // multi-step analysis still completes, but an open-ended spiral (eval caught ~40 calls) is capped.
 const TOOL_CALL_SOFT_BUDGET = 50;
 
-/**
- * #195 / ADR-0062 §3 — stop-and-confirm drill gate. Declares which object types form the cheap
- * "broad layer" and which is the expensive "drill" that should pause for user confirmation once a
- * broad-layer query has run this turn. This is a PLATFORM capability: the orchestrator consumes a
- * set of DrillGate configs INJECTED at construction (see the `drillGates` ctor param) and knows no
- * concrete object-type names itself. A Vertical contributes its gates statically (the broad-vs-drill
- * layering is a fixed property of the vertical's star schema). With no gates injected the mechanism
- * is a no-op — the loop never pauses.
- */
-export interface DrillGate { broadLayer: ReadonlySet<string>; drillTarget: string; confirmMessage: string }
-
 @Injectable()
 export class OrchestratorService {
   private readonly logger = new Logger(OrchestratorService.name);
@@ -71,9 +60,6 @@ export class OrchestratorService {
     private readonly skills: AgentSkill[] = [],
     private readonly confirmationGate?: ConfirmationGate,
     private readonly planSummarizer?: PlanSummarizer,
-    // ADR-0062 §3 — injected drill-gate configs. Empty → the gate mechanism never trips.
-    // A Vertical contributes its gates here; the orchestrator stays domain-agnostic.
-    private readonly drillGates: DrillGate[] = [],
     // ADR-0064 §5 — optional fast/slow intent router. Undefined → no fast path: every
     // request runs the existing multi-step loop unchanged (the slow path is untouched).
     private readonly intentRouter?: IntentRouter,
@@ -198,10 +184,6 @@ export class OrchestratorService {
     const dedup = new ToolCallDedup();
     let executedToolCalls = 0;
     let softBudgetTriggered = false; // P0 fix: track when soft budget is hit
-    // #195 / ADR-0062 §3 — stop-and-confirm. Track which broad-layer object types have been
-    // queried this turn (across all injected gates); once a gate's broad layer is seen, pause
-    // before that gate's drill target. Empty `drillGates` → this set is never consulted.
-    const queriedBroadTypes = new Set<string>();
 
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
       // P0 fix: when soft budget was triggered last iteration, disable tools and inject system directive
@@ -247,18 +229,6 @@ export class OrchestratorService {
           continue;
         }
 
-        // #199 — drill-gate batch safety. The two suspend paths below `return` mid-batch. The LLM
-        // can pack several tool_calls into one assistant message, and the API requires EVERY
-        // announced tool_call_id to have a matching tool result before the next turn. The current
-        // call is captured in the pending-confirmation payload (answered on resume); calls BEFORE
-        // it already have results; only the calls AFTER it in this batch would dangle — so defer
-        // them with a placeholder so the suspended history stays wire-legal.
-        const deferUnprocessedSiblings = (): void => {
-          for (let si = ci + 1; si < response.calls.length; si++) {
-            messages.push(toToolResultMsg(response.calls[si].id, { deferred: '本轮已暂停等待确认，该查询未执行；确认后如仍需要请重新发起。' }));
-          }
-        };
-
         // Synthesize a tool_result without executing the tool: record it for the model and emit
         // the matching event. Used by the convergence guards below to feed back a cached value or
         // a steer message in the same shape a real execution would.
@@ -276,36 +246,7 @@ export class OrchestratorService {
           continue;
         }
 
-        // #195 / ADR-0062 §3 — stop-and-confirm: gate the first drill into an expensive layer that
-        // follows a broad-layer query this turn. The user confirms the drill parameters rather than
-        // the agent chaining all hops in one opaque reply. Which types are "broad" vs "drill" comes
-        // from the INJECTED `drillGates` (contributed by a Vertical), keeping this loop domain-agnostic.
-        const callObjectType = call.arguments?.objectType;
-        const trippedGate = typeof callObjectType === 'string'
-          ? this.drillGates.find(g => g.drillTarget === callObjectType
-              && [...g.broadLayer].some(b => queriedBroadTypes.has(b)))
-          : undefined;
-        if (trippedGate) {
-          deferUnprocessedSiblings();
-          if (this.confirmationGate && input.conversationId) {
-            await this.confirmationGate.suspend(input.conversationId, {
-              toolName: call.name, toolCallId: call.id, args: call.arguments,
-              messages: [...messages], objectTypeNames: input.objectTypeNames,
-            });
-          }
-          yield {
-            type: 'confirmation_request', id: call.id, toolName: call.name, args: call.arguments,
-            message: trippedGate.confirmMessage,
-          };
-          yield { type: 'done', conversationId: input.conversationId ?? 'new' };
-          return;
-        }
-        if (typeof callObjectType === 'string' && this.drillGates.some(g => g.broadLayer.has(callObjectType))) {
-          queriedBroadTypes.add(callObjectType);
-        }
-
         if (tool.requiresConfirmation) {
-          deferUnprocessedSiblings();
           if (this.confirmationGate && input.conversationId) {
             await this.confirmationGate.suspend(input.conversationId, {
               toolName: call.name, toolCallId: call.id, args: call.arguments,

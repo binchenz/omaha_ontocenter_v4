@@ -31,11 +31,4 @@ class SalesAnalysisSkill implements AgentSkill {
 export const SALES_RECORDS_VERTICAL: Vertical = {
   name: 'sales-records',
   skills: [new SalesAnalysisSkill()],
-  drillGates: [
-    {
-      broadLayer: new Set([SALES_RECORD_TYPE]),
-      drillTarget: SALES_LINE_TYPE,
-      confirmMessage: '即将下钻到 SKU 明细层（sales_line）。请确认要钻取的产品线/区间，确认后我再继续。',
-    },
-  ],
 };
