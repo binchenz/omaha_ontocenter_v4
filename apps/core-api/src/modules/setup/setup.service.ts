@@ -41,7 +41,9 @@ export class SetupService {
 
     const [adminRole] = await Promise.all([
       this.prisma.role.create({ data: { tenantId: tenant.id, name: 'admin', permissions: ['*'] } }),
-      this.prisma.role.create({ data: { tenantId: tenant.id, name: 'operator', permissions: ['object.query'] } }),
+      // Must match packages/db/seed.ts: the read path enforces `object.read`, so an
+      // operator granted only `object.query` 403s on every data query (chunmi live bug, 2026-06-19).
+      this.prisma.role.create({ data: { tenantId: tenant.id, name: 'operator', permissions: ['object.read', 'object.query', 'action.preview'] } }),
     ]);
 
     const passwordHash = await bcrypt.hash(dto.adminPassword, 10);

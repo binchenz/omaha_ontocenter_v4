@@ -77,6 +77,12 @@ describe('SetupService', () => {
       expect(prisma.tenant.create).toHaveBeenCalledTimes(1);
       expect(prisma.role.create).toHaveBeenCalledTimes(2);
       expect(prisma.user.create).toHaveBeenCalledTimes(1);
+      // Regression: the read path enforces `object.read`, so the operator role MUST
+      // include it — granting only `object.query` 403s every data query (chunmi, 2026-06-19).
+      const operatorCreate = prisma.role.create.mock.calls
+        .map((c: any[]) => c[0].data)
+        .find((d: any) => d.name === 'operator');
+      expect(operatorCreate.permissions).toContain('object.read');
       expect(prisma.systemSetting.upsert).toHaveBeenCalledWith(
         expect.objectContaining({ where: { key: 'DEEPSEEK_API_KEY' } }),
       );
