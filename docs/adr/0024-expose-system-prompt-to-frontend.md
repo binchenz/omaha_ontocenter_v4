@@ -1,5 +1,7 @@
 # 前端暴露 system prompt 用于调试
 
+> **状态（2026-07-01 修订）**：本事件已改为**默认关闭**，通过 `EXPOSE_SYSTEM_PROMPT` 环境变量开启。原决策（"任何环境都显示"）预留的转向条件已触发，详见文末「修订」小节。
+
 Agent 把拼好的 system prompt（含 schema summary / 语义层信息）通过一个新的 `system_prompt` SSE 事件推给前端，在 chat 右侧面板的"提示词"标签页展示。这让用户能直接看到喂给 LLM 的语义层信息（字段 unit、类型 description、关系），便于调试"模型为什么这样选字段"。
 
 ## 机制
@@ -19,3 +21,14 @@ Agent 把拼好的 system prompt（含 schema summary / 语义层信息）通过
 ## 已知局限
 
 前端只显示 system prompt，不含历史 messages、tool 结果、或模型原始响应——那些仍需看 `.llm-debug`。此外，字段级 `description` 当前并未拼进 schema summary（getSchemaSummary 只输出 name/type/flags/unit + 类型级 description），所以面板里看不到字段 description；那是 schema summary 自身的局限，是另一个待决问题。
+
+## 修订（2026-07-01）：默认关闭，改由 `EXPOSE_SYSTEM_PROMPT` 门控
+
+本 ADR 原决策里预留的转向条件（"若未来…schema 本身敏感…应改为环境变量/权限门控的 dev-only 显示"）现已触发：拼好的 system prompt 如今不再只是"本租户自己的 schema"，它还带有**租户身份注入**（`Tenant.settings.selfBrands`，如纯米对应的 小米/米家 合并口径）和**全套 skill 编排纪律**（drill gate、universe 规则、收敛护栏、四跳范式）——这些是平台内部实现，不应对每个登录用户逐字流式外泄。
+
+因此 `system_prompt` SSE 事件改为**默认关闭**，通过环境变量 `EXPOSE_SYSTEM_PROMPT` 显式开启（`=1` 或 `=true`），与 `LLM_DEBUG` 同一风格、在使用点读取。生产默认不发；开发/联调需要看提示词时设 `EXPOSE_SYSTEM_PROMPT=1`。
+
+- **单一 emit 点**：`orchestrator.service.ts` `run()` 里唯一的 `yield { type: 'system_prompt' }`，用 `this.exposeSystemPrompt` 包住。`resume()` 路径本就不发该事件。
+- **前端零改动**：chat 右侧「提示词」标签页已有 null 占位态——事件不到达时显示占位文案、标签上带一个 ` ·` 圆点，属正常降级，不是 bug。
+- **测试**：多个 spec 用该事件作为断言 prompt 组装/身份注入的唯一通道；core-api 的 jest setup（`test/jest-setup.ts`）统一设 `EXPOSE_SYSTEM_PROMPT=1`，故单测仍走 emit，无需逐个改。
+- **可逆**：设回 `EXPOSE_SYSTEM_PROMPT=1` 即恢复旧行为；runner 从不持久化该事件，故关闭后历史里也没有残留。

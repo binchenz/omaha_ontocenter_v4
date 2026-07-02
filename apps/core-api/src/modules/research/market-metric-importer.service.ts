@@ -122,7 +122,17 @@ export const MARKET_METRIC_DEF = {
     { name: 'value', label: '数值', type: 'number' as const, sortable: true },
     { name: 'sourceReport', label: '来源报告', type: 'string' as const },
   ],
-  derivedProperties: [],
+  // Slice C: derived field additivity semantics
+  derivedProperties: [
+    // YoY growth is non-additive: summing growth rates across dimensions is meaningless
+    {
+      name: 'yoy_growth',
+      label: '同比增长率',
+      type: 'number' as const,
+      expression: '(value - LAG(value, 12)) / LAG(value, 12)',
+      additivity: 'non-additive' as const,
+    },
+  ],
   // #178: a `year` filter satisfies the `month` requirement — an annual rollup (groupBy[year]) is a
   // valid coarser period scope (year derived from month in lockstep, ADR-0059), so it need not be
   // rejected DIMENSION_REQUIRED:month and forced into month-exhaustion.
@@ -156,7 +166,17 @@ export const MODEL_METRIC_DEF = {
     { name: 'avgPrice', label: '零售均价', type: 'number' as const, sortable: true, additivity: 'ratio' as const },
     { name: 'sourceReport', label: '来源报告', type: 'string' as const },
   ],
-  derivedProperties: [],
+  // Slice C: derived field additivity semantics
+  derivedProperties: [
+    // Market share derived from value/volume shares is a ratio field
+    {
+      name: 'market_share_derived',
+      label: '市场份额（衍生）',
+      type: 'number' as const,
+      expression: 'valueShare * 100',
+      additivity: 'ratio' as const,
+    },
+  ],
   // model_metric has no stored `year` field, so no month↔year equivalent applies here.
   dimensions: { required: ['category', 'month'], defaults: {} },
   semantics: {

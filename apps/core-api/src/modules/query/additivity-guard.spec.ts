@@ -128,4 +128,58 @@ describe('AdditivityGuard — planMetricAdditivity', () => {
       expect(d.code).toBe('NON_ADDITIVE_SUM');
     });
   });
+
+  describe('derived field additivity validation (Slice C)', () => {
+    it('should reject sum of non-additive derived field', () => {
+      const d = planMetricAdditivity(
+        { kind: 'sum', field: 'yoy_growth', alias: 'yg' },
+        mapOf({ yoy_growth: { kind: 'non-additive' } }),
+        allNumeric,
+      );
+      expect(d.action).toBe('error');
+      if (d.action !== 'error') throw new Error('unreachable');
+      expect(d.code).toBe('NON_ADDITIVE_SUM');
+      expect(d.field).toBe('yoy_growth');
+      expect(d.hint).toMatch(/不可加|sum/i);
+    });
+
+    it('should allow avg of non-additive derived field', () => {
+      const d = planMetricAdditivity(
+        { kind: 'avg', field: 'yoy_growth', alias: 'yg' },
+        mapOf({ yoy_growth: { kind: 'non-additive' } }),
+        allNumeric,
+      );
+      expect(d).toEqual({ action: 'pass' });
+    });
+
+    it('should validate ratio derived field scope (reject sum)', () => {
+      const d = planMetricAdditivity(
+        { kind: 'sum', field: 'market_share_derived', alias: 'ms' },
+        mapOf({ market_share_derived: { kind: 'ratio' } }),
+        allNumeric,
+      );
+      expect(d.action).toBe('error');
+      if (d.action !== 'error') throw new Error('unreachable');
+      expect(d.code).toBe('RATIO_SUM');
+      expect(d.field).toBe('market_share_derived');
+    });
+
+    it('should allow min/max of ratio derived field', () => {
+      const ratioMap = mapOf({ market_share_derived: { kind: 'ratio' } });
+      expect(planMetricAdditivity({ kind: 'min', field: 'market_share_derived', alias: 'ms' }, ratioMap, allNumeric)).toEqual({ action: 'pass' });
+      expect(planMetricAdditivity({ kind: 'max', field: 'market_share_derived', alias: 'ms' }, ratioMap, allNumeric)).toEqual({ action: 'pass' });
+    });
+
+    it('should error on avg of ratio derived field without weight columns', () => {
+      const d = planMetricAdditivity(
+        { kind: 'avg', field: 'market_share_derived', alias: 'ms' },
+        mapOf({ market_share_derived: { kind: 'ratio' } }),
+        allNumeric,
+      );
+      expect(d.action).toBe('error');
+      if (d.action !== 'error') throw new Error('unreachable');
+      expect(d.code).toBe('RATIO_AVG_UNWEIGHTABLE');
+      expect(d.hint).toMatch(/加权|weight|比率|ratio/i);
+    });
+  });
 });

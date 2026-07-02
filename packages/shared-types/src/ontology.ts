@@ -69,6 +69,8 @@ export interface PropertyDefinition {
 export interface DerivedPropertyDefinition extends PropertyDefinition {
   expression: string;
   params?: Array<{ name: string; type: 'datetime' | 'decimal' | 'string' | 'int' | 'boolean' }>;
+  // Slice C: derived fields inherit additivity semantics from PropertyDefinition
+  // (already includes additivity?: Additivity and ratioOf?: {...})
 }
 
 /**

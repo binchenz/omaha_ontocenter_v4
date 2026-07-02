@@ -10,6 +10,10 @@
 
 ## 步骤
 
+> ⚠️ **构建顺序至关重要：先配置 `NEXT_PUBLIC_API_URL`，再 `pnpm build`。**
+> `NEXT_PUBLIC_*` 是 Next.js 的**构建期**变量——它在 `next build` 时被**内联进浏览器 JS bundle**，运行时再设置（`.env`、PM2 `env`）对已构建的前端**无效**。
+> 若构建时未设置，前端会固化默认值 `http://localhost:3001`，导致用户浏览器去连**自己机器**的 3001 端口而非服务器后端，表现为登录报 `Invalid credentials` / 接口全部失败（即便后端、账号、密码都正确）。
+
 ### 1. 部署代码
 
 ```bash
@@ -17,10 +21,9 @@ cd /opt
 git clone https://github.com/binchenz/omaha_ontocenter_v4.git
 cd omaha_ontocenter_v4
 pnpm install --frozen-lockfile
-pnpm build
 ```
 
-### 2. 配置环境变量
+### 2. 配置环境变量（必须在 build 之前）
 
 ```bash
 cp .env.example .env
@@ -30,8 +33,30 @@ cp .env.example .env
 
 ```bash
 DATABASE_URL=postgresql://<user>:<password>@<host>:5432/ontocenter
+# 前端浏览器访问后端的地址。构建期固化，必须是终端用户浏览器可达的地址
+# （公网域名或服务器 IP，绝不能是 localhost——除非所有用户都走 SSH 隧道）
 NEXT_PUBLIC_API_URL=https://<your-domain>/api
 ```
+
+### 3. 构建（在 NEXT_PUBLIC_API_URL 已导出的前提下）
+
+```bash
+# 确保 NEXT_PUBLIC_API_URL 已在环境中（来自 .env 或显式 export）
+export NEXT_PUBLIC_API_URL=https://<your-domain>/api
+pnpm build
+```
+
+> **Next.js standalone 静态资源**：`output: 'standalone'` 构建**不会**把 `.next/static` 和 `public/` 自动放进 standalone 目录，必须手动拷贝，否则页面丢失 CSS/JS：
+> ```bash
+> cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+> [ -d apps/web/public ] && cp -r apps/web/public apps/web/.next/standalone/apps/web/public
+> ```
+
+> **重新构建前端时**（例如改了 API 地址）：重复步骤 3（含静态资源拷贝），再 `pm2 restart omaha-web`。验证：
+> ```bash
+> # 0 个才算干净；若 >0 说明旧地址仍残留
+> grep -rl "localhost:3001" apps/web/.next/standalone/apps/web/.next/static | wc -l
+> ```
 
 **密钥（可选）：** `JWT_SECRET`、`CONNECTOR_ENCRYPTION_KEY`、`DEEPSEEK_API_KEY` 默认由 Setup 向导首次启动时生成/收集并存入数据库，无需在 `.env` 设置。
 
@@ -45,7 +70,11 @@ JWT_SECRET=<openssl rand -hex 32>
 CONNECTOR_ENCRYPTION_KEY=<openssl rand -hex 16>
 ```
 
-### 3. 初始化数据库
+**调试开关（可选，默认关闭）：**
+- `LLM_DEBUG=1` — 把每轮完整 messages + tools + 原始响应落盘到 `.llm-debug/*.json`（事后逐字分析）。
+- `EXPOSE_SYSTEM_PROMPT=1` — 把拼好的 system prompt 通过 SSE 推给前端 chat「提示词」标签页（实时看喂给 LLM 的上下文）。**生产默认关闭**：该提示词含租户身份注入与内部编排纪律，不应对每个登录用户外泄（见 ADR-0024 修订）。仅联调时开启。
+
+### 4. 初始化数据库
 
 ```bash
 pnpm db:generate
@@ -54,7 +83,7 @@ pnpm db:migrate:deploy
 
 数据库迁移完成后保持为空，由 Setup 向导首次访问时初始化（创建组织、管理员、密钥）。
 
-### 4. 启动服务（PM2）
+### 5. 启动服务（PM2）
 
 ```bash
 npm install -g pm2
@@ -71,7 +100,7 @@ pm2 save
 pm2 startup
 ```
 
-### 5. Nginx 反向代理
+### 6. Nginx 反向代理
 
 ```nginx
 server {

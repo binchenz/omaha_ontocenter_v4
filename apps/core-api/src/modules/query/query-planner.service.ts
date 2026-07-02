@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { parentScope, projectVisible } from '@omaha/dsl';
-import type { Predicate, OntologyView } from '@omaha/dsl';
+import { parentScope, projectVisible, parse, compile, buildCompileContext } from '@omaha/dsl';
+import type { Predicate, OntologyView, RelationInfo } from '@omaha/dsl';
 import type { QueryFilter } from '@omaha/shared-types';
 import { ScopedWhere } from './scoped-where';
 import { OntologyViewLoader } from '../ontology/ontology-view-loader.service';
@@ -66,6 +66,12 @@ export interface AggregatePlanArgs {
    * cross-rel key is present.
    */
   crossRelAllowedFields?: Set<string> | null;
+  /**
+   * ADR-0065 Slice B: Named parameters for parameterized derived fields.
+   * When a derived property expression contains $paramName, the value is
+   * resolved from this map and threaded into the DSL compilation context.
+   */
+  params?: Record<string, any>;
 }
 
 export interface PlannedAggregateQuery {
@@ -159,6 +165,10 @@ export class QueryPlannerService {
     // ADR-0057: Dimension constraint validation (inject defaults, enforce required)
     await this.dimensionConstraints.apply(args, view);
 
+    // ADR-0065 Slice D: Reset relation join registry for this query
+    this.relationJoins.clear();
+    this.aliasCounter = 0;
+
     const scope = parentScope({ tenantId: args.tenantId, objectType: args.objectType });
     const scoped = new ScopedWhere(scope)
       .filters(args.filters, view, args.objectType)
@@ -172,12 +182,12 @@ export class QueryPlannerService {
     const groupBy = args.groupBy ?? [];
     for (const field of groupBy) this.assertGroupable(field, view, args.objectType);
 
-    const groupExprs = groupBy.map((f) => `(properties->>'${f}')`);
+    const groupExprs = groupBy.map((f) => `(base.properties->>'${f}')`);
 
     // groupBy fields appear in SELECT first so the service layer can read
     // them keyed by the original property name.
     const selectExprs: string[] = groupBy.map((f, i) => `${groupExprs[i]} AS "${f}"`);
-    selectExprs.push(...(await this.buildMetricExprs(args.metrics, view, args.objectType, (f) => `properties->>'${f}'`, args.tenantId, args.filters)));
+    selectExprs.push(...(await this.buildMetricExprs(args.metrics, view, args.objectType, (f) => `base.properties->>'${f}'`, args.tenantId, args.filters, args.params, params)));
 
     const groupByClause = groupBy.length > 0
       ? `GROUP BY ${groupExprs.join(', ')}`
@@ -188,14 +198,18 @@ export class QueryPlannerService {
       args.orderBy,
       args.metrics.map((m) => m.alias),
       groupBy,
-      (by) => `(properties->>'${by}')`,
+      (by) => `(base.properties->>'${by}')`,
     );
     const { clamped, warnings } = this.clampMaxGroups(args.maxGroups);
     const offset = this.decodeOffset(args.pageToken);
 
+    // ADR-0065 Slice D: Collect JOIN clauses registered during metric compilation
+    const joinClauses = Array.from(this.relationJoins.values()).map(r => r.joinClause).join('\n      ');
+
     const sql = `
       SELECT ${selectExprs.join(', ')}
-      FROM object_instances
+      FROM object_instances base
+      ${joinClauses}
       WHERE ${where}
       ${groupByClause}
       ${orderByClause}
@@ -333,7 +347,7 @@ export class QueryPlannerService {
 
     // Metrics operate on the base rows (s.); orderBy/maxGroups/pageToken via the
     // shared builders. Cross-key ordering uses the SELECT alias, not the json expr.
-    const metricExprs = await this.buildMetricExprs(args.metrics, view, args.objectType, (f) => `s.properties->>'${f}'`, args.tenantId, args.filters);
+    const metricExprs = await this.buildMetricExprs(args.metrics, view, args.objectType, (f) => `s.properties->>'${f}'`, args.tenantId, args.filters, args.params, outParams);
     const orderByClause = this.buildOrderByClause(
       args.orderBy,
       args.metrics.map((m) => m.alias),
@@ -399,6 +413,126 @@ export class QueryPlannerService {
     );
   }
 
+  /**
+   * ADR-0065 Slice D: Relation join registry for cross-relation paths in derived fields.
+   * Tracks registered JOINs to avoid duplicates and generate unique aliases.
+   */
+  private relationJoins: Map<string, { alias: string; joinClause: string }> = new Map();
+  private aliasCounter = 0;
+
+  /**
+   * ADR-0065 Slice D: Compile a cross-relation path (e.g., "model.price") to a JOIN-based
+   * expression instead of a correlated subquery. Returns the SQL expression referencing
+   * the joined table's field.
+   *
+   * Registers the JOIN clause for later inclusion in the FROM clause, reusing the same
+   * JOIN if the same relation is referenced multiple times.
+   */
+  private compileRelationPath(
+    relationName: string,
+    field: string,
+    relInfo: RelationInfo,
+    tenantId: string,
+    baseAlias: string,
+  ): string {
+    // Check if this relation is already registered
+    const key = `${relationName}:${relInfo.storageKey}`;
+    let registered = this.relationJoins.get(key);
+
+    if (!registered) {
+      // Generate unique alias for this relation
+      const alias = `rel_${this.aliasCounter++}`;
+
+      // Build the JOIN clause based on FK side
+      let joinClause: string;
+      if (relInfo.fkSide === 'other') {
+        // Related type holds FK pointing back to base type
+        joinClause = `LEFT JOIN object_instances ${alias} ON ${alias}.tenant_id = ${baseAlias}.tenant_id AND ${alias}.deleted_at IS NULL AND (${alias}.relationships->>'${relInfo.storageKey}') = ${baseAlias}.external_id`;
+      } else {
+        // Base type holds FK pointing to related type
+        joinClause = `LEFT JOIN object_instances ${alias} ON ${alias}.tenant_id = ${baseAlias}.tenant_id AND ${alias}.deleted_at IS NULL AND ${alias}.external_id = (${baseAlias}.relationships->>'${relInfo.storageKey}')`;
+      }
+
+      registered = { alias, joinClause };
+      this.relationJoins.set(key, registered);
+    }
+
+    // Return the field reference using the registered alias
+    return `(${registered.alias}.properties->>'${field}')`;
+  }
+
+  /**
+   * ADR-0065 Slice D: Check if an AST contains any cross-relation path nodes.
+   */
+  private containsRelationPath(ast: import('@omaha/dsl').Ast): boolean {
+    if (ast.kind === 'path') return true;
+    if (ast.kind === 'binop') {
+      return this.containsRelationPath(ast.left) || this.containsRelationPath(ast.right);
+    }
+    if (ast.kind === 'compare') {
+      return this.containsRelationPath(ast.left) || this.containsRelationPath(ast.right);
+    }
+    if (ast.kind === 'and' || ast.kind === 'or') {
+      return this.containsRelationPath(ast.left) || this.containsRelationPath(ast.right);
+    }
+    if (ast.kind === 'not') {
+      return this.containsRelationPath(ast.expr);
+    }
+    return false;
+  }
+
+  /**
+   * ADR-0065 Slice D: Compile an AST using JOINs for cross-relation paths instead
+   * of correlated subqueries.
+   */
+  private compileWithJoins(
+    ast: import('@omaha/dsl').Ast,
+    view: OntologyView,
+    tenantId: string,
+    baseAlias: string,
+  ): string {
+    switch (ast.kind) {
+      case 'ident': {
+        const isNumeric = view.numericFields.has(ast.name);
+        return isNumeric
+          ? `(${baseAlias}.properties->>'${ast.name}')::numeric`
+          : `(${baseAlias}.properties->>'${ast.name}')`;
+      }
+      case 'path': {
+        const relInfo = view.relations[ast.relation];
+        if (!relInfo) {
+          throw new BadRequestException({
+            error: {
+              code: 'UNKNOWN_RELATION',
+              relation: ast.relation,
+              hint: `Relation '${ast.relation}' is not defined on this object type.`,
+            },
+          });
+        }
+        return this.compileRelationPath(ast.relation, ast.field, relInfo, tenantId, baseAlias);
+      }
+      case 'number':
+        return String(ast.value);
+      case 'string':
+        return `'${ast.value.replace(/'/g, "''")}'`;
+      case 'bool':
+        return ast.value ? 'TRUE' : 'FALSE';
+      case 'binop': {
+        const left = this.compileWithJoins(ast.left, view, tenantId, baseAlias);
+        const right = this.compileWithJoins(ast.right, view, tenantId, baseAlias);
+        return `(${left} ${ast.op} ${right})`;
+      }
+      default:
+        throw new BadRequestException({
+          error: {
+            code: 'UNSUPPORTED_AST_NODE',
+            kind: (ast as any).kind,
+            hint: `AST node kind '${(ast as any).kind}' is not supported in JOIN-based compilation.`,
+          },
+        });
+    }
+  }
+
   private async buildMetricExprs(
     metrics: AggregateMetric[],
     view: OntologyView | null,
@@ -406,6 +540,8 @@ export class QueryPlannerService {
     propRef: (field: string) => string,
     tenantId: string,
     filters?: QueryFilter[],
+    params?: Record<string, any>,
+    outParams?: unknown[],
   ): Promise<string[]> {
     const numericKinds = new Set(['sum', 'avg', 'min', 'max']);
     const out: string[] = [];
@@ -434,6 +570,68 @@ export class QueryPlannerService {
         continue;
       }
       if (numericKinds.has(m.kind)) {
+        // ADR-0065 Slice A: Detect and compile derived properties
+        const isDerivedProperty = view?.derivedProperties.has(m.field) ?? false;
+        const enableDerivedAggregates = process.env.ENABLE_DERIVED_AGGREGATES !== 'false';
+
+        if (enableDerivedAggregates && !isDerivedProperty && view) {
+          // When derived aggregates are enabled, check if this field SHOULD be a derived property
+          // (i.e., it's not in numericFields but could be derived). If it's neither numeric nor derived,
+          // provide a clear error.
+          const isNumericField = view.numericFields.has(m.field);
+          if (!isNumericField && (view.numericFields.size > 0 || view.visibilityRestricted)) {
+            // Field is neither numeric nor derived - throw DERIVED_PROPERTY_NOT_FOUND for better UX
+            throw new BadRequestException({
+              error: {
+                code: 'DERIVED_PROPERTY_NOT_FOUND',
+                alias: m.alias,
+                field: m.field,
+                kind: m.kind,
+                hint: `Property '${m.field}' is not a numeric field or derived property on '${objectType}'. Available numeric fields: ${Array.from(view.numericFields).join(', ') || '(none)'}.`
+              }
+            });
+          }
+        }
+
+        if (isDerivedProperty && enableDerivedAggregates) {
+          // Derived property path: compile the DSL expression to SQL
+          if (!view) {
+            throw new BadRequestException({ error: { code: 'DERIVED_PROPERTY_NOT_FOUND', alias: m.alias, field: m.field, kind: m.kind, hint: `Derived property '${m.field}' requires an ontology view but none was provided.` } });
+          }
+          const derivedDef = view.derivedProperties.get(m.field);
+          if (!derivedDef) {
+            throw new BadRequestException({ error: { code: 'DERIVED_PROPERTY_NOT_FOUND', alias: m.alias, field: m.field, kind: m.kind, hint: `Derived property '${m.field}' is not defined on '${objectType}'.` } });
+          }
+
+          // ADR-0065 Slice D: Parse the expression and detect cross-relation paths
+          const ast = parse(derivedDef.expression);
+          const hasCrossRelPath = this.containsRelationPath(ast);
+
+          let derivedExpr: string;
+          if (hasCrossRelPath) {
+            // Use JOIN-based compilation for cross-relation paths
+            derivedExpr = this.compileWithJoins(ast, view, tenantId, 'base');
+          } else {
+            // Use standard DSL compiler for simple expressions
+            // ADR-0065 Slice B: Thread params into compilation context
+            const ctx = buildCompileContext(view, params);
+            const compiled = compile(ast, ctx);
+
+            // ADR-0065 Slice B: Renumber and merge params from compiled expression
+            derivedExpr = compiled.sql;
+            if (outParams && compiled.params.length > 0) {
+              const offset = outParams.length;
+              derivedExpr = compiled.sql.replace(/\$(\d+)/g, (_m, idx) => `$${Number(idx) + offset}`);
+              outParams.push(...compiled.params);
+            }
+          }
+
+          // The compiled SQL is already a complete expression; wrap it in the aggregate function
+          out.push(`${m.kind.toUpperCase()}(${derivedExpr}) AS "${m.alias}"`);
+          continue;
+        }
+
+        // Base property path: check if it's numeric
         if (view && (view.numericFields.size > 0 || view.visibilityRestricted) && !view.numericFields.has(m.field)) {
           const numericList = Array.from(view.numericFields).join(', ') || '(none declared)';
           throw new BadRequestException({ error: { code: 'METRIC_INVALID_FIELD_TYPE', alias: m.alias, field: m.field, kind: m.kind, hint: `Metric '${m.kind}' requires a numeric property. Available numeric fields on '${objectType}': ${numericList}.` } });

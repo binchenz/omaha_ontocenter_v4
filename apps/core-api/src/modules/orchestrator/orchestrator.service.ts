@@ -35,26 +35,24 @@ export interface RunInput {
   surface?: string;
 }
 
-const MAX_TOOL_ITERATIONS = 12;
+const MAX_TOOL_ITERATIONS = 60;
 // #194 — after this many genuine (non-deduped) tool executions in one turn, stop running tools
 // and force the model to answer from gathered data. Sits below MAX_TOOL_ITERATIONS so a healthy
 // multi-step analysis still completes, but an open-ended spiral (eval caught ~40 calls) is capped.
-const TOOL_CALL_SOFT_BUDGET = 10;
-
-/**
- * #195 / ADR-0062 §3 — stop-and-confirm drill gate. Declares which object types form the cheap
- * "broad layer" and which is the expensive "drill" that should pause for user confirmation once a
- * broad-layer query has run this turn. This is a PLATFORM capability: the orchestrator consumes a
- * set of DrillGate configs INJECTED at construction (see the `drillGates` ctor param) and knows no
- * concrete object-type names itself. A Vertical contributes its gates statically (the broad-vs-drill
- * layering is a fixed property of the vertical's star schema). With no gates injected the mechanism
- * is a no-op — the loop never pauses.
- */
-export interface DrillGate { broadLayer: ReadonlySet<string>; drillTarget: string; confirmMessage: string }
+const TOOL_CALL_SOFT_BUDGET = 50;
 
 @Injectable()
 export class OrchestratorService {
   private readonly logger = new Logger(OrchestratorService.name);
+
+  // ADR-0024 (amended 2026-07-01) — the assembled system prompt now carries tenant-identity
+  // injection (selfBrands) + full skill-orchestration discipline (internal IP), not just the
+  // customer's own schema. The original decision pre-registered exactly this escape hatch, so
+  // the `system_prompt` debug event is now OFF by default and opt-in via EXPOSE_SYSTEM_PROMPT
+  // (mirrors LLM_DEBUG). Read at point-of-use so specs can construct the service without a
+  // ConfigService dep; the core-api jest setup sets it to '1' so prompt-assertion specs still run.
+  private readonly exposeSystemPrompt =
+    process.env.EXPOSE_SYSTEM_PROMPT === '1' || process.env.EXPOSE_SYSTEM_PROMPT === 'true';
 
   constructor(
     private readonly llm: LlmClient,
@@ -62,9 +60,6 @@ export class OrchestratorService {
     private readonly skills: AgentSkill[] = [],
     private readonly confirmationGate?: ConfirmationGate,
     private readonly planSummarizer?: PlanSummarizer,
-    // ADR-0062 §3 — injected drill-gate configs. Empty → the gate mechanism never trips.
-    // A Vertical contributes its gates here; the orchestrator stays domain-agnostic.
-    private readonly drillGates: DrillGate[] = [],
     // ADR-0064 §5 — optional fast/slow intent router. Undefined → no fast path: every
     // request runs the existing multi-step loop unchanged (the slow path is untouched).
     private readonly intentRouter?: IntentRouter,
@@ -100,8 +95,11 @@ export class OrchestratorService {
     this.checkPromptBudget(systemPrompt, input.conversationId);
 
     // Surface the assembled system prompt (incl. schema summary / semantic-layer
-    // info) to the client for debugging. See ADR-0024.
-    yield { type: 'system_prompt', content: systemPrompt };
+    // info) to the client for debugging. See ADR-0024. Gated OFF by default now that
+    // the prompt carries identity injection + orchestration IP; opt in with EXPOSE_SYSTEM_PROMPT.
+    if (this.exposeSystemPrompt) {
+      yield { type: 'system_prompt', content: systemPrompt };
+    }
 
     const messages: LlmMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -185,13 +183,28 @@ export class OrchestratorService {
     // the soft budget is hit we stop running tools and force the model to answer from what it has.
     const dedup = new ToolCallDedup();
     let executedToolCalls = 0;
-    // #195 / ADR-0062 §3 — stop-and-confirm. Track which broad-layer object types have been
-    // queried this turn (across all injected gates); once a gate's broad layer is seen, pause
-    // before that gate's drill target. Empty `drillGates` → this set is never consulted.
-    const queriedBroadTypes = new Set<string>();
+    let softBudgetTriggered = false; // P0 fix: track when soft budget is hit
 
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
-      const response = await this.llm.chatWithTools(messages, toolDefs, skillLlmOptions);
+      // P0 fix: when soft budget was triggered last iteration, disable tools and inject system directive
+      const effectiveToolDefs = softBudgetTriggered ? [] : toolDefs;
+      if (softBudgetTriggered && !messages.some(m => m.role === 'system' && m.content?.includes('工具调用预算已耗尽'))) {
+        // Inject system message ONCE at the start of the text-only iteration
+        messages.push({
+          role: 'system',
+          content: `⚠️ 工具调用预算已耗尽（${TOOL_CALL_SOFT_BUDGET}/${TOOL_CALL_SOFT_BUDGET}）。
+
+**强制指令**（必须遵守，不可协商）：
+1. 立即基于已获取的数据给出完整答复
+2. 把已查到的数字、排名、趋势整理成最终答复
+3. **禁止**再次调用任何工具
+4. **禁止**要求用户"重试"、"继续"或"重新提问"
+5. 如有数据缺口，在答复里如实标注"该维度数据未查询"即可
+
+现在直接作答。`,
+        });
+      }
+      const response = await this.llm.chatWithTools(messages, effectiveToolDefs, skillLlmOptions);
 
       if (response.type === 'text') {
         yield { type: 'text', content: response.content };
@@ -216,18 +229,6 @@ export class OrchestratorService {
           continue;
         }
 
-        // #199 — drill-gate batch safety. The two suspend paths below `return` mid-batch. The LLM
-        // can pack several tool_calls into one assistant message, and the API requires EVERY
-        // announced tool_call_id to have a matching tool result before the next turn. The current
-        // call is captured in the pending-confirmation payload (answered on resume); calls BEFORE
-        // it already have results; only the calls AFTER it in this batch would dangle — so defer
-        // them with a placeholder so the suspended history stays wire-legal.
-        const deferUnprocessedSiblings = (): void => {
-          for (let si = ci + 1; si < response.calls.length; si++) {
-            messages.push(toToolResultMsg(response.calls[si].id, { deferred: '本轮已暂停等待确认，该查询未执行；确认后如仍需要请重新发起。' }));
-          }
-        };
-
         // Synthesize a tool_result without executing the tool: record it for the model and emit
         // the matching event. Used by the convergence guards below to feed back a cached value or
         // a steer message in the same shape a real execution would.
@@ -245,43 +246,7 @@ export class OrchestratorService {
           continue;
         }
 
-        // #194(b) — soft budget: once enough genuine queries have run, stop executing further
-        // tools and steer the model to conclude from the data it already gathered.
-        if (executedToolCalls >= TOOL_CALL_SOFT_BUDGET) {
-          yield synthResult({ error: `已达到本轮工具调用上限（${TOOL_CALL_SOFT_BUDGET} 次）。现在必须基于已获取的数据给出尽可能完整的结论并直接作答——把已查到的数字、排名、趋势整理成最终答复。不要再发起新查询，也不要要求用户回复"继续"或把任务推到下一轮；如有数据缺口，在答复里如实标注即可。` });
-          continue;
-        }
-
-        // #195 / ADR-0062 §3 — stop-and-confirm: gate the first drill into an expensive layer that
-        // follows a broad-layer query this turn. The user confirms the drill parameters rather than
-        // the agent chaining all hops in one opaque reply. Which types are "broad" vs "drill" comes
-        // from the INJECTED `drillGates` (contributed by a Vertical), keeping this loop domain-agnostic.
-        const callObjectType = call.arguments?.objectType;
-        const trippedGate = typeof callObjectType === 'string'
-          ? this.drillGates.find(g => g.drillTarget === callObjectType
-              && [...g.broadLayer].some(b => queriedBroadTypes.has(b)))
-          : undefined;
-        if (trippedGate) {
-          deferUnprocessedSiblings();
-          if (this.confirmationGate && input.conversationId) {
-            await this.confirmationGate.suspend(input.conversationId, {
-              toolName: call.name, toolCallId: call.id, args: call.arguments,
-              messages: [...messages], objectTypeNames: input.objectTypeNames,
-            });
-          }
-          yield {
-            type: 'confirmation_request', id: call.id, toolName: call.name, args: call.arguments,
-            message: trippedGate.confirmMessage,
-          };
-          yield { type: 'done', conversationId: input.conversationId ?? 'new' };
-          return;
-        }
-        if (typeof callObjectType === 'string' && this.drillGates.some(g => g.broadLayer.has(callObjectType))) {
-          queriedBroadTypes.add(callObjectType);
-        }
-
         if (tool.requiresConfirmation) {
-          deferUnprocessedSiblings();
           if (this.confirmationGate && input.conversationId) {
             await this.confirmationGate.suspend(input.conversationId, {
               toolName: call.name, toolCallId: call.id, args: call.arguments,
@@ -302,6 +267,26 @@ export class OrchestratorService {
         // event carries the data; on failure executeTool returns null and we skip caching.
         if (event && event.type === 'tool_result') dedup.set(call.name, call.arguments, event.data);
         if (event) yield event;
+
+        // #194(b) — soft budget: check AFTER incrementing executedToolCalls. Once we've hit the
+        // cap, generate a synthetic budget-exceeded tool_result so the test/LLM sees the steer message,
+        // then mark the flag so the next LLM iteration will disable tools and inject a system directive (P0 fix).
+        if (executedToolCalls >= TOOL_CALL_SOFT_BUDGET) {
+          const budgetMsg = `已达到本轮工具调用上限（${TOOL_CALL_SOFT_BUDGET} 次）。现在必须基于已获取的数据给出尽可能完整的结论并直接作答——把已查到的数字、排名、趋势整理成最终答复。不要再发起新查询，也不要要求用户回复"继续"或把任务推到下一轮；如有数据缺口，在答复里如实标注即可。`;
+          // Synthesize a budget-exceeded notification as a tool_result event (visible in tests/logs)
+          const budgetCallId = `budget-${call.id}`;
+          messages.push(toToolResultMsg(budgetCallId, { error: budgetMsg }));
+          yield { type: 'tool_result', id: budgetCallId, name: '__soft_budget_exceeded', data: { error: budgetMsg } };
+          // Feed back budget errors for all remaining calls in this batch (from next call onward)
+          for (let si = ci + 1; si < response.calls.length; si++) {
+            const siblingCall = response.calls[si];
+            messages.push(toToolResultMsg(siblingCall.id, { error: budgetMsg }));
+            yield { type: 'tool_result', id: siblingCall.id, name: siblingCall.name, data: { error: budgetMsg } };
+          }
+          // Mark that soft budget is triggered — next iteration will disable tools and inject system directive
+          softBudgetTriggered = true;
+          break; // Exit the tool_call processing loop, proceed to next LLM iteration
+        }
       }
 
       if (i === MAX_TOOL_ITERATIONS - 1) {

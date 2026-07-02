@@ -24,13 +24,24 @@ function parseDimensions(raw: unknown): OntologyView['dimensions'] {
  * additivity map. Only tagged fields enter the map — the guard reads absence as
  * `additive`. Returns undefined when no field carries a tag (the common case),
  * so non-AVC types pay nothing.
+ *
+ * Slice C: also processes derivedProperties' additivity tags.
  */
-function parseAdditivity(properties: PropertyDefinition[]): OntologyView['additivity'] {
+function parseAdditivity(properties: PropertyDefinition[], derivedProperties: DerivedPropertyDefinition[]): OntologyView['additivity'] {
   const map: NonNullable<OntologyView['additivity']> = new Map();
+
+  // Process regular properties
   for (const p of properties) {
     if (!p.additivity) continue;
     map.set(p.name, { kind: p.additivity, ratioOf: p.ratioOf });
   }
+
+  // Process derived properties
+  for (const d of derivedProperties) {
+    if (!d.additivity) continue;
+    map.set(d.name, { kind: d.additivity, ratioOf: d.ratioOf });
+  }
+
   return map.size > 0 ? map : undefined;
 }
 
@@ -114,7 +125,7 @@ export class OntologyViewLoader {
         ]),
       ),
       dimensions: parseDimensions(ot.dimensions),
-      additivity: parseAdditivity(properties),
+      additivity: parseAdditivity(properties, derivedList),
     };
 
     // ADR-0061 §2 / ADR-0064 §1: type-level semantics (universe, timeAxis).

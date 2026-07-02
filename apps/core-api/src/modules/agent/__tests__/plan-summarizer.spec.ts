@@ -40,6 +40,37 @@ describe('PlanSummarizer', () => {
     expect(await s.summarize('t', 'create_object_type', {})).toBeNull();
   });
 
+  it('summarizes query_metric lookup with dimensions and time (ADR-0064)', async () => {
+    const out = await s.summarize('t', 'query_metric', {
+      metric: '零售额',
+      dimensions: { category: '电饭煲' },
+      time: { month: '26.04' },
+      intent: 'lookup',
+    });
+    expect(out).toBe('查询指标「零售额」，category=电饭煲、month=26.04');
+  });
+
+  it('summarizes query_metric trend intent', async () => {
+    const out = await s.summarize('t', 'query_metric', {
+      metric: '零售量',
+      dimensions: { category: '净水器' },
+      time: {},
+      intent: 'trend',
+    });
+    expect(out).toBe('趋势指标「零售量」，category=净水器');
+  });
+
+  it('summarizes query_metric rank intent', async () => {
+    const out = await s.summarize('t', 'query_metric', {
+      metric: '零售额',
+      dimensions: { category: '电饭煲' },
+      time: { year: '25' },
+      intent: 'rank',
+      rankBy: 'brand',
+    });
+    expect(out).toBe('排名指标「零售额」，category=电饭煲、year=25');
+  });
+
   it('summarizes a simple count aggregate with type label', async () => {
     const out = await s.summarize('t', 'aggregate_objects', {
       objectType: 'shot', metrics: [{ kind: 'count', alias: 'n' }],

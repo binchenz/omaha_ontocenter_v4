@@ -21,9 +21,10 @@ export class PlanSummarizer {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<string | null> {
-    if (toolName !== 'query_objects' && toolName !== 'aggregate_objects') return null;
+    if (toolName !== 'query_objects' && toolName !== 'aggregate_objects' && toolName !== 'query_metric') return null;
     try {
       const schema = await this.sdk.getSchema(tenantId);
+      if (toolName === 'query_metric') return this.summarizeMetric(args);
       return toolName === 'aggregate_objects'
         ? this.summarizeAggregate(schema, args)
         : this.summarizeQuery(schema, args);
@@ -110,6 +111,29 @@ export class PlanSummarizer {
   }
 
   // --- per-tool summaries ---
+
+  private summarizeMetric(args: Record<string, unknown>): string {
+    const metric = String(args.metric ?? '');
+    const intent = String(args.intent ?? 'lookup');
+    const intentLabel = intent === 'trend' ? '趋势' : intent === 'rank' ? '排名' : '查询';
+    const dimensions = args.dimensions as Record<string, string> | undefined;
+    const time = args.time as Record<string, string> | undefined;
+
+    const segs = [`${intentLabel}指标「${metric}」`];
+    const dimParts: string[] = [];
+    if (dimensions) {
+      for (const [k, v] of Object.entries(dimensions)) {
+        if (v) dimParts.push(`${k}=${v}`);
+      }
+    }
+    if (time) {
+      for (const [k, v] of Object.entries(time)) {
+        if (v) dimParts.push(`${k}=${v}`);
+      }
+    }
+    if (dimParts.length > 0) segs.push(dimParts.join('、'));
+    return segs.join('，');
+  }
 
   private summarizeQuery(schema: OntologySchema, args: Record<string, unknown>): string {
     const base = String(args.objectType ?? '');

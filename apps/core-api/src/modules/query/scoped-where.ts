@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { compile, parse, emit, emitScope, type ObjectInstanceScope, type Predicate, type OntologyView } from '@omaha/dsl';
+import { compile, parse, emit, emitScope, buildCompileContext, type ObjectInstanceScope, type Predicate, type OntologyView } from '@omaha/dsl';
 import type { QueryFilter, FilterOperator } from '@omaha/shared-types';
 
 const FILTER_TO_SQL: Record<FilterOperator, string> = {
@@ -144,13 +144,7 @@ export class ScopedWhere {
 
   /** Compile an AST node via the DSL compiler, merge params, apply operator. */
   private compileAstAndApply(ast: import('@omaha/dsl').Ast, view: OntologyView, f: QueryFilter, params?: Record<string, unknown>): string {
-    const fragment = compile(ast, {
-      numericFields: view.numericFields,
-      booleanFields: view.booleanFields,
-      stringFields: view.stringFields,
-      relations: view.relations,
-      params: params ?? {},
-    });
+    const fragment = compile(ast, buildCompileContext(view, params));
     const lhs = `(${this.mergeFragment(fragment)})`;
     return this.applyOperator(lhs, f, lhs);
   }

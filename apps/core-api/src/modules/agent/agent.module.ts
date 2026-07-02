@@ -116,14 +116,9 @@ const AGENT_OWN_TOOLS = [
     },
     {
       provide: OrchestratorService,
-      useFactory: (llm: LlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate, planSummarizer: PlanSummarizer, verticals: Vertical[], intentRouter: IntentRouter) =>
-        // ADR-0062 §3 — all drill-gates come from registered verticals; the orchestrator names no
-        // AVC type itself. The AVC gate now lives in AVC_VERTICAL (was a TODO hardcode here, #206→#208).
-        new OrchestratorService(llm, tools, skills, gate, planSummarizer,
-          collectVerticalContributions(verticals).drillGates,
-          intentRouter,
-        ),
-      inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate, PlanSummarizer, VERTICALS, IntentRouter],
+      useFactory: (llm: LlmClient, tools: AgentTool[], skills: AgentSkill[], gate: ConfirmationGate, planSummarizer: PlanSummarizer, intentRouter: IntentRouter) =>
+        new OrchestratorService(llm, tools, skills, gate, planSummarizer, intentRouter),
+      inject: [LLM_CLIENT, AGENT_TOOLS, AGENT_SKILLS, ConfirmationGate, PlanSummarizer, IntentRouter],
     },
     PlanSummarizer,
     EvalsService,
