@@ -35,11 +35,13 @@ export interface RunInput {
   surface?: string;
 }
 
-const MAX_TOOL_ITERATIONS = 60;
+const MAX_TOOL_ITERATIONS = 100;
 // #194 — after this many genuine (non-deduped) tool executions in one turn, stop running tools
 // and force the model to answer from gathered data. Sits below MAX_TOOL_ITERATIONS so a healthy
 // multi-step analysis still completes, but an open-ended spiral (eval caught ~40 calls) is capped.
-const TOOL_CALL_SOFT_BUDGET = 50;
+// Raised to 80 on 2026-07-02 to accommodate complex competitive analysis queries that require
+// validating multiple data sources (brand_share + market_metric + model_metric).
+const TOOL_CALL_SOFT_BUDGET = 80;
 
 @Injectable()
 export class OrchestratorService {
