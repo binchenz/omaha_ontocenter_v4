@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { parentScope, projectVisible, parse, compile, buildCompileContext } from '@omaha/dsl';
+import { parentScope, projectVisible, parse, compile, buildCompileContext, renumberParams } from '@omaha/dsl';
 import type { Predicate, OntologyView, RelationInfo } from '@omaha/dsl';
 import type { QueryFilter } from '@omaha/shared-types';
 import { ScopedWhere } from './scoped-where';
@@ -93,7 +93,10 @@ export class QueryPlannerService {
     private readonly viewManager: ViewManagerService,
     private readonly prisma: PrismaService,
     private readonly dimensionConstraints: DimensionConstraintEnforcer,
-  ) {}
+  ) {
+    // ADR-0065 Slice A: Cache feature flag at construction to avoid repeated env reads
+    this.enableDerivedAggregates = process.env.ENABLE_DERIVED_AGGREGATES !== 'false';
+  }
 
   async plan(args: PlanArgs): Promise<PlannedQuery> {
     const rawView = await this.viewLoader.load(args.tenantId, args.objectType);
@@ -421,6 +424,12 @@ export class QueryPlannerService {
   private aliasCounter = 0;
 
   /**
+   * ADR-0065 Slice A: Cache the feature flag value at construction time to avoid
+   * reading process.env on every metric iteration.
+   */
+  private readonly enableDerivedAggregates: boolean;
+
+  /**
    * ADR-0065 Slice D: Compile a cross-relation path (e.g., "model.price") to a JOIN-based
    * expression instead of a correlated subquery. Returns the SQL expression referencing
    * the joined table's field.
@@ -572,28 +581,8 @@ export class QueryPlannerService {
       if (numericKinds.has(m.kind)) {
         // ADR-0065 Slice A: Detect and compile derived properties
         const isDerivedProperty = view?.derivedProperties.has(m.field) ?? false;
-        const enableDerivedAggregates = process.env.ENABLE_DERIVED_AGGREGATES !== 'false';
 
-        if (enableDerivedAggregates && !isDerivedProperty && view) {
-          // When derived aggregates are enabled, check if this field SHOULD be a derived property
-          // (i.e., it's not in numericFields but could be derived). If it's neither numeric nor derived,
-          // provide a clear error.
-          const isNumericField = view.numericFields.has(m.field);
-          if (!isNumericField && (view.numericFields.size > 0 || view.visibilityRestricted)) {
-            // Field is neither numeric nor derived - throw DERIVED_PROPERTY_NOT_FOUND for better UX
-            throw new BadRequestException({
-              error: {
-                code: 'DERIVED_PROPERTY_NOT_FOUND',
-                alias: m.alias,
-                field: m.field,
-                kind: m.kind,
-                hint: `Property '${m.field}' is not a numeric field or derived property on '${objectType}'. Available numeric fields: ${Array.from(view.numericFields).join(', ') || '(none)'}.`
-              }
-            });
-          }
-        }
-
-        if (isDerivedProperty && enableDerivedAggregates) {
+        if (isDerivedProperty && this.enableDerivedAggregates) {
           // Derived property path: compile the DSL expression to SQL
           if (!view) {
             throw new BadRequestException({ error: { code: 'DERIVED_PROPERTY_NOT_FOUND', alias: m.alias, field: m.field, kind: m.kind, hint: `Derived property '${m.field}' requires an ontology view but none was provided.` } });
@@ -603,7 +592,7 @@ export class QueryPlannerService {
             throw new BadRequestException({ error: { code: 'DERIVED_PROPERTY_NOT_FOUND', alias: m.alias, field: m.field, kind: m.kind, hint: `Derived property '${m.field}' is not defined on '${objectType}'.` } });
           }
 
-          // ADR-0065 Slice D: Parse the expression and detect cross-relation paths
+          // ADR-0065 Slice D: Parse once and detect cross-relation paths
           const ast = parse(derivedDef.expression);
           const hasCrossRelPath = this.containsRelationPath(ast);
 
@@ -613,7 +602,7 @@ export class QueryPlannerService {
             derivedExpr = this.compileWithJoins(ast, view, tenantId, 'base');
           } else {
             // Use standard DSL compiler for simple expressions
-            // ADR-0065 Slice B: Thread params into compilation context
+            // ADR-0065 Slice B: Thread params into compilation context (pass by reference, not copy)
             const ctx = buildCompileContext(view, params);
             const compiled = compile(ast, ctx);
 
@@ -621,7 +610,7 @@ export class QueryPlannerService {
             derivedExpr = compiled.sql;
             if (outParams && compiled.params.length > 0) {
               const offset = outParams.length;
-              derivedExpr = compiled.sql.replace(/\$(\d+)/g, (_m, idx) => `$${Number(idx) + offset}`);
+              derivedExpr = renumberParams(compiled.sql, offset);
               outParams.push(...compiled.params);
             }
           }

@@ -3,6 +3,7 @@ export type { Ast, CompareOp } from './parser';
 export { compile } from './compiler';
 export type { CompileContext, CompiledFragment } from './compiler';
 export { buildCompileContext } from './context-builder';
+export { renumberParams } from './param-renumber';
 export { analyze } from './analyzer';
 export type { AnalyzerContext, AnalyzeResult } from './analyzer';
 export type { ObjectInstanceScope, ParentScope, ChildScope, EmittedScope } from './scope';

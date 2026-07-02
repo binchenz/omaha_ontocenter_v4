@@ -117,6 +117,9 @@ describe('buildCompileContext', () => {
     const params = { foo: 'bar' };
     const ctx = buildCompileContext(view, params);
     expect(ctx.params).toEqual({ foo: 'bar' });
-    expect(ctx.params).not.toBe(params); // defensive copy
+    // Efficiency: pass by reference instead of shallow copy — the DSL compiler
+    // only reads from ctx.params, never writes to it. This test changed from
+    // .not.toBe to .toBe to document that optimization.
+    expect(ctx.params).toBe(params);
   });
 });

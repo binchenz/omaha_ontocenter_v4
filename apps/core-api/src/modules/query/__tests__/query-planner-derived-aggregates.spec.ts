@@ -106,6 +106,9 @@ describe('QueryPlannerService — derived aggregates (ADR-0065 Slice A)', () => 
       });
       const planner = makePlanner(view);
 
+      // When a field is neither a base numeric field nor a derived property,
+      // the error falls through to the standard "not numeric" check. This is
+      // simpler than trying to guess whether the user meant it to be derived.
       await expect(
         planner.planAggregate({
           tenantId: 't1',
@@ -117,9 +120,9 @@ describe('QueryPlannerService — derived aggregates (ADR-0065 Slice A)', () => 
       ).rejects.toMatchObject({
         response: {
           error: {
-            code: 'DERIVED_PROPERTY_NOT_FOUND',
+            code: 'METRIC_INVALID_FIELD_TYPE',
             field: 'yoy_growth',
-            hint: expect.stringContaining('yoy_growth'),
+            hint: expect.stringContaining('numeric property'),
           },
         },
       });

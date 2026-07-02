@@ -36,6 +36,8 @@ export function buildCompileContext(
     booleanFields: view.booleanFields,
     stringFields: view.stringFields,
     relations: view.relations,
-    params: params ? { ...params } : {},
+    // Pass params by reference — the DSL compiler doesn't mutate it, so the shallow copy
+    // just wastes allocations when called per-metric in buildMetricExprs hot path
+    params: params ?? {},
   };
 }

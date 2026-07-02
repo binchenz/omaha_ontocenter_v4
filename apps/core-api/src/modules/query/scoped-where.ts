@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { compile, parse, emit, emitScope, buildCompileContext, type ObjectInstanceScope, type Predicate, type OntologyView } from '@omaha/dsl';
+import { compile, parse, emit, emitScope, buildCompileContext, renumberParams, type ObjectInstanceScope, type Predicate, type OntologyView } from '@omaha/dsl';
 import type { QueryFilter, FilterOperator } from '@omaha/shared-types';
 
 const FILTER_TO_SQL: Record<FilterOperator, string> = {
@@ -171,7 +171,7 @@ export class ScopedWhere {
   /** Renumber a context-free `$1`-based fragment to the current offset. */
   private mergeFragment(fragment: { sql: string; params: unknown[] }): string {
     const offset = this.params.length;
-    const remapped = fragment.sql.replace(/\$(\d+)/g, (_m, idx) => `$${Number(idx) + offset}`);
+    const remapped = renumberParams(fragment.sql, offset);
     this.params.push(...fragment.params);
     return remapped;
   }
